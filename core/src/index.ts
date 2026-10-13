@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import cors from "cors";
 import express, { type Request, type Response } from "express";
 import { logFfmpegAvailability } from "./lib/ffmpeg-check.ts";
+import { adminRoutes } from "./admin/index.ts";
 import { apiLimiter, getTrustProxyHops } from "./lib/rate-limit.ts";
 import authRouter from "./routes/auth-route.ts";
 import billingRouter from "./routes/billing-route.ts";
@@ -141,6 +142,7 @@ app.use("/api/participant", participantRouter);
 app.use("/api/output", finalOutputRouter);
 app.use("/api/usage", usageRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/admin/v1", adminRoutes);
 
 const httpServer = createServer(app);
 
