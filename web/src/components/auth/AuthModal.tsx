@@ -11,8 +11,10 @@ import {
   MdOutlineVisibility,
   MdOutlineVisibilityOff,
 } from "react-icons/md";
+import { LuLoaderCircle } from "react-icons/lu";
 
 import { useAuth } from "@/hooks/useAuth";
+import { toast } from "@/lib/toast";
 
 export type AuthMode = "signin" | "signup";
 
@@ -143,8 +145,14 @@ const AuthModal = ({
         ? await signInWithEmail(email.trim(), password)
         : await startEmailSignup(email.trim(), password);
 
+    // On success the hook routes to the dashboard once the profile is loaded;
+    // keep the loader up until then instead of flashing the form back.
+    if (result.ok && result.status === "signed_in") return;
+
     if (result.ok && result.status === "verify_code") {
       setCodeSent(true);
+    } else if (!result.ok) {
+      toast.error(result.message);
     }
 
     setIsSubmitting(false);
@@ -155,7 +163,9 @@ const AuthModal = ({
     if (isVerifying || code.trim().length < 6) return;
 
     setIsVerifying(true);
-    await verifyEmailCode(code.trim());
+    const result = await verifyEmailCode(code.trim());
+    if (result.ok && result.status === "signed_in") return;
+    if (!result.ok) toast.error(result.message);
     setIsVerifying(false);
   };
 
@@ -380,7 +390,14 @@ const AuthModal = ({
                       disabled={isVerifying || code.trim().length < 6}
                       className="mt-1 flex h-10 w-full items-center justify-center rounded-md bg-[#131313] px-4 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#131313]/90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {isVerifying ? "Verifying..." : "Verify & Continue"}
+                      {isVerifying ? (
+                        <>
+                          <LuLoaderCircle className="mr-2 size-4 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        "Verify & Continue"
+                      )}
                     </button>
                     <div className="flex items-center justify-between text-xs">
                       <button
@@ -548,13 +565,18 @@ const AuthModal = ({
                           disabled={isSubmitting || !email.trim() || !password}
                           className="mt-1 flex h-10 w-full items-center justify-center rounded-md bg-[#131313] px-4 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#131313]/90 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {isSubmitting
-                            ? isSignup
-                              ? "Creating account..."
-                              : "Signing in..."
-                            : isSignup
-                              ? "Sign up"
-                              : "Sign in"}
+                          {isSubmitting ? (
+                            <>
+                              <LuLoaderCircle className="mr-2 size-4 animate-spin" />
+                              {isSignup
+                                ? "Creating account..."
+                                : "Signing in..."}
+                            </>
+                          ) : isSignup ? (
+                            "Sign up"
+                          ) : (
+                            "Sign in"
+                          )}
                         </button>
                       </form>
                     </div>

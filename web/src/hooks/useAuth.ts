@@ -8,6 +8,9 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
+import { GET_ME_QUERY_KEY, type MeUser } from "@/hooks/useUserQuery";
+import api from "@/lib/axiosInstance";
+
 type EmailAuthResult =
   | { ok: true; status: "signed_in" }
   | { ok: true; status: "verify_email"; message: string }
@@ -86,7 +89,7 @@ export function useAuth() {
   // snapshot) until the session is actually active before routing.
   const waitForActiveSession = async (
     timeoutMs = 4000,
-    intervalMs = 50
+    intervalMs = 50,
   ): Promise<boolean> => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -101,7 +104,25 @@ export function useAuth() {
 
     await setActive({ session: sessionId });
     await waitForActiveSession();
-    await queryClient.invalidateQueries({ queryKey: ["get-me"] });
+
+    // Load the profile with the new session's token before routing. The shared
+    // token getter still holds the signed-out snapshot at this point, so a
+    // refetch from ProtectedRoute would 401, cache null and bounce to "/".
+    try {
+      const token = await clerk.session?.getToken();
+      await queryClient.fetchQuery({
+        queryKey: [...GET_ME_QUERY_KEY, true],
+        queryFn: async () => {
+          const { data } = await api.get("/auth/me", {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          });
+          return (data.data as MeUser) || null;
+        },
+      });
+    } catch {
+      // ProtectedRoute retries the profile fetch on its own.
+    }
+
     navigate("/dashboard/home", { replace: true });
     return true;
   };
@@ -115,7 +136,7 @@ export function useAuth() {
 
   const startEmailSignup = async (
     email: string,
-    password: string
+    password: string,
   ): Promise<EmailAuthResult> => {
     if (!signUp) {
       return { ok: false, message: "Auth not ready yet." };
@@ -185,7 +206,7 @@ export function useAuth() {
   // toast - used by the sign-in tab where signup must stay a separate action.
   const signInWithEmail = async (
     email: string,
-    password: string
+    password: string,
   ): Promise<EmailAuthResult> => {
     if (!isLoaded || !signIn || !setActive) {
       return { ok: false, message: "Auth not ready yet." };
@@ -236,7 +257,7 @@ export function useAuth() {
 
   const loginWithEmailPassword = async (
     email: string,
-    password: string
+    password: string,
   ): Promise<EmailAuthResult> => {
     if (!isLoaded || !isSignUpLoaded || !signIn || !signUp || !setActive) {
       return { ok: false, message: "Auth not ready yet." };
@@ -261,7 +282,7 @@ export function useAuth() {
 
       if (signInAttempt.status === "needs_first_factor") {
         const emailFactor = signInAttempt.supportedFirstFactors?.find(
-          (factor) => factor.strategy === "email_link"
+          (factor) => factor.strategy === "email_link",
         );
 
         if (emailFactor && "emailAddressId" in emailFactor) {
@@ -320,7 +341,7 @@ export function useAuth() {
 
   const resendEmailVerification = async (
     email: string,
-    password: string
+    password: string,
   ): Promise<EmailAuthResult> => {
     if (!isSignUpLoaded || !signUp) {
       return { ok: false, message: "Auth not ready yet." };
@@ -367,7 +388,9 @@ export function useAuth() {
 
   // Forgot-password flow: email a 6-digit code, then confirm it together with
   // the new password. Mirrors the signup verify-code flow above.
-  const sendPasswordResetCode = async (email: string): Promise<EmailAuthResult> => {
+  const sendPasswordResetCode = async (
+    email: string,
+  ): Promise<EmailAuthResult> => {
     if (!isLoaded || !signIn) {
       return { ok: false, message: "Auth not ready yet." };
     }
@@ -401,7 +424,7 @@ export function useAuth() {
 
   const resetPassword = async (
     code: string,
-    password: string
+    password: string,
   ): Promise<EmailAuthResult> => {
     if (!isLoaded || !signIn || !setActive) {
       return { ok: false, message: "Auth not ready yet." };
