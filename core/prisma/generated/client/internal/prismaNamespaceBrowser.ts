@@ -88,7 +88,6 @@ export const UserScalarFieldEnum = {
   email: 'email',
   avatar: 'avatar',
   avatarKey: 'avatarKey',
-  brandColor: 'brandColor',
   plan: 'plan',
   profileCustomized: 'profileCustomized',
   cloudBackupEnabled: 'cloudBackupEnabled',

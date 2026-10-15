@@ -45,7 +45,6 @@ export type UserMinAggregateOutputType = {
   email: string | null
   avatar: string | null
   avatarKey: string | null
-  brandColor: string | null
   plan: $Enums.PlanType | null
   profileCustomized: boolean | null
   cloudBackupEnabled: boolean | null
@@ -73,7 +72,6 @@ export type UserMaxAggregateOutputType = {
   email: string | null
   avatar: string | null
   avatarKey: string | null
-  brandColor: string | null
   plan: $Enums.PlanType | null
   profileCustomized: boolean | null
   cloudBackupEnabled: boolean | null
@@ -101,7 +99,6 @@ export type UserCountAggregateOutputType = {
   email: number
   avatar: number
   avatarKey: number
-  brandColor: number
   plan: number
   profileCustomized: number
   cloudBackupEnabled: number
@@ -143,7 +140,6 @@ export type UserMinAggregateInputType = {
   email?: true
   avatar?: true
   avatarKey?: true
-  brandColor?: true
   plan?: true
   profileCustomized?: true
   cloudBackupEnabled?: true
@@ -171,7 +167,6 @@ export type UserMaxAggregateInputType = {
   email?: true
   avatar?: true
   avatarKey?: true
-  brandColor?: true
   plan?: true
   profileCustomized?: true
   cloudBackupEnabled?: true
@@ -199,7 +194,6 @@ export type UserCountAggregateInputType = {
   email?: true
   avatar?: true
   avatarKey?: true
-  brandColor?: true
   plan?: true
   profileCustomized?: true
   cloudBackupEnabled?: true
@@ -314,7 +308,6 @@ export type UserGroupByOutputType = {
   email: string
   avatar: string | null
   avatarKey: string | null
-  brandColor: string | null
   plan: $Enums.PlanType
   profileCustomized: boolean
   cloudBackupEnabled: boolean
@@ -365,7 +358,6 @@ export type UserWhereInput = {
   email?: Prisma.StringFilter<"User"> | string
   avatar?: Prisma.StringNullableFilter<"User"> | string | null
   avatarKey?: Prisma.StringNullableFilter<"User"> | string | null
-  brandColor?: Prisma.StringNullableFilter<"User"> | string | null
   plan?: Prisma.EnumPlanTypeFilter<"User"> | $Enums.PlanType
   profileCustomized?: Prisma.BoolFilter<"User"> | boolean
   cloudBackupEnabled?: Prisma.BoolFilter<"User"> | boolean
@@ -399,7 +391,6 @@ export type UserOrderByWithRelationInput = {
   email?: Prisma.SortOrder
   avatar?: Prisma.SortOrderInput | Prisma.SortOrder
   avatarKey?: Prisma.SortOrderInput | Prisma.SortOrder
-  brandColor?: Prisma.SortOrderInput | Prisma.SortOrder
   plan?: Prisma.SortOrder
   profileCustomized?: Prisma.SortOrder
   cloudBackupEnabled?: Prisma.SortOrder
@@ -438,7 +429,6 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   name?: Prisma.StringFilter<"User"> | string
   avatar?: Prisma.StringNullableFilter<"User"> | string | null
   avatarKey?: Prisma.StringNullableFilter<"User"> | string | null
-  brandColor?: Prisma.StringNullableFilter<"User"> | string | null
   plan?: Prisma.EnumPlanTypeFilter<"User"> | $Enums.PlanType
   profileCustomized?: Prisma.BoolFilter<"User"> | boolean
   cloudBackupEnabled?: Prisma.BoolFilter<"User"> | boolean
@@ -470,7 +460,6 @@ export type UserOrderByWithAggregationInput = {
   email?: Prisma.SortOrder
   avatar?: Prisma.SortOrderInput | Prisma.SortOrder
   avatarKey?: Prisma.SortOrderInput | Prisma.SortOrder
-  brandColor?: Prisma.SortOrderInput | Prisma.SortOrder
   plan?: Prisma.SortOrder
   profileCustomized?: Prisma.SortOrder
   cloudBackupEnabled?: Prisma.SortOrder
@@ -506,7 +495,6 @@ export type UserScalarWhereWithAggregatesInput = {
   email?: Prisma.StringWithAggregatesFilter<"User"> | string
   avatar?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
   avatarKey?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
-  brandColor?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
   plan?: Prisma.EnumPlanTypeWithAggregatesFilter<"User"> | $Enums.PlanType
   profileCustomized?: Prisma.BoolWithAggregatesFilter<"User"> | boolean
   cloudBackupEnabled?: Prisma.BoolWithAggregatesFilter<"User"> | boolean
@@ -534,7 +522,6 @@ export type UserCreateInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -568,7 +555,6 @@ export type UserUncheckedCreateInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -602,7 +588,6 @@ export type UserUpdateInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -636,7 +621,6 @@ export type UserUncheckedUpdateInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -670,7 +654,6 @@ export type UserCreateManyInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -698,7 +681,6 @@ export type UserUpdateManyMutationInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -726,7 +708,6 @@ export type UserUncheckedUpdateManyInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -754,7 +735,6 @@ export type UserCountOrderByAggregateInput = {
   email?: Prisma.SortOrder
   avatar?: Prisma.SortOrder
   avatarKey?: Prisma.SortOrder
-  brandColor?: Prisma.SortOrder
   plan?: Prisma.SortOrder
   profileCustomized?: Prisma.SortOrder
   cloudBackupEnabled?: Prisma.SortOrder
@@ -788,7 +768,6 @@ export type UserMaxOrderByAggregateInput = {
   email?: Prisma.SortOrder
   avatar?: Prisma.SortOrder
   avatarKey?: Prisma.SortOrder
-  brandColor?: Prisma.SortOrder
   plan?: Prisma.SortOrder
   profileCustomized?: Prisma.SortOrder
   cloudBackupEnabled?: Prisma.SortOrder
@@ -816,7 +795,6 @@ export type UserMinOrderByAggregateInput = {
   email?: Prisma.SortOrder
   avatar?: Prisma.SortOrder
   avatarKey?: Prisma.SortOrder
-  brandColor?: Prisma.SortOrder
   plan?: Prisma.SortOrder
   profileCustomized?: Prisma.SortOrder
   cloudBackupEnabled?: Prisma.SortOrder
@@ -982,7 +960,6 @@ export type UserCreateWithoutUsagePeriodsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1015,7 +992,6 @@ export type UserUncheckedCreateWithoutUsagePeriodsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1064,7 +1040,6 @@ export type UserUpdateWithoutUsagePeriodsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1097,7 +1072,6 @@ export type UserUncheckedUpdateWithoutUsagePeriodsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1130,7 +1104,6 @@ export type UserCreateWithoutSelfHostConfigInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1163,7 +1136,6 @@ export type UserUncheckedCreateWithoutSelfHostConfigInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1212,7 +1184,6 @@ export type UserUpdateWithoutSelfHostConfigInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1245,7 +1216,6 @@ export type UserUncheckedUpdateWithoutSelfHostConfigInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1278,7 +1248,6 @@ export type UserCreateWithoutHostedSpacesInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1311,7 +1280,6 @@ export type UserUncheckedCreateWithoutHostedSpacesInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1360,7 +1328,6 @@ export type UserUpdateWithoutHostedSpacesInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1393,7 +1360,6 @@ export type UserUncheckedUpdateWithoutHostedSpacesInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1426,7 +1392,6 @@ export type UserCreateWithoutSpaceParticipantsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1459,7 +1424,6 @@ export type UserUncheckedCreateWithoutSpaceParticipantsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1508,7 +1472,6 @@ export type UserUpdateWithoutSpaceParticipantsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1541,7 +1504,6 @@ export type UserUncheckedUpdateWithoutSpaceParticipantsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1574,7 +1536,6 @@ export type UserCreateWithoutRecordingSessionsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1607,7 +1568,6 @@ export type UserUncheckedCreateWithoutRecordingSessionsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1656,7 +1616,6 @@ export type UserUpdateWithoutRecordingSessionsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1689,7 +1648,6 @@ export type UserUncheckedUpdateWithoutRecordingSessionsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1722,7 +1680,6 @@ export type UserCreateWithoutRecordingCommentsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1755,7 +1712,6 @@ export type UserUncheckedCreateWithoutRecordingCommentsInput = {
   email: string
   avatar?: string | null
   avatarKey?: string | null
-  brandColor?: string | null
   plan?: $Enums.PlanType
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1804,7 +1760,6 @@ export type UserUpdateWithoutRecordingCommentsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1837,7 +1792,6 @@ export type UserUncheckedUpdateWithoutRecordingCommentsInput = {
   email?: Prisma.StringFieldUpdateOperationsInput | string
   avatar?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   avatarKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  brandColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   plan?: Prisma.EnumPlanTypeFieldUpdateOperationsInput | $Enums.PlanType
   profileCustomized?: Prisma.BoolFieldUpdateOperationsInput | boolean
   cloudBackupEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -1937,7 +1891,6 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   email?: boolean
   avatar?: boolean
   avatarKey?: boolean
-  brandColor?: boolean
   plan?: boolean
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -1972,7 +1925,6 @@ export type UserSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   email?: boolean
   avatar?: boolean
   avatarKey?: boolean
-  brandColor?: boolean
   plan?: boolean
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -2000,7 +1952,6 @@ export type UserSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   email?: boolean
   avatar?: boolean
   avatarKey?: boolean
-  brandColor?: boolean
   plan?: boolean
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -2028,7 +1979,6 @@ export type UserSelectScalar = {
   email?: boolean
   avatar?: boolean
   avatarKey?: boolean
-  brandColor?: boolean
   plan?: boolean
   profileCustomized?: boolean
   cloudBackupEnabled?: boolean
@@ -2049,7 +1999,7 @@ export type UserSelectScalar = {
   cancelAtPeriodEnd?: boolean
 }
 
-export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "clerkId" | "name" | "email" | "avatar" | "avatarKey" | "brandColor" | "plan" | "profileCustomized" | "cloudBackupEnabled" | "targetFps" | "videoResolution" | "audioSampleRate" | "noiseSuppression" | "autoGainControl" | "echoCancellation" | "recordingMode" | "createdAt" | "updatedAt" | "polarCustomerId" | "polarSubscriptionId" | "subscriptionStatus" | "currentPeriodStart" | "currentPeriodEnd" | "cancelAtPeriodEnd", ExtArgs["result"]["user"]>
+export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "clerkId" | "name" | "email" | "avatar" | "avatarKey" | "plan" | "profileCustomized" | "cloudBackupEnabled" | "targetFps" | "videoResolution" | "audioSampleRate" | "noiseSuppression" | "autoGainControl" | "echoCancellation" | "recordingMode" | "createdAt" | "updatedAt" | "polarCustomerId" | "polarSubscriptionId" | "subscriptionStatus" | "currentPeriodStart" | "currentPeriodEnd" | "cancelAtPeriodEnd", ExtArgs["result"]["user"]>
 export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   hostedSpaces?: boolean | Prisma.User$hostedSpacesArgs<ExtArgs>
   spaceParticipants?: boolean | Prisma.User$spaceParticipantsArgs<ExtArgs>
@@ -2079,7 +2029,6 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     email: string
     avatar: string | null
     avatarKey: string | null
-    brandColor: string | null
     plan: $Enums.PlanType
     profileCustomized: boolean
     cloudBackupEnabled: boolean
@@ -2533,7 +2482,6 @@ export interface UserFieldRefs {
   readonly email: Prisma.FieldRef<"User", 'String'>
   readonly avatar: Prisma.FieldRef<"User", 'String'>
   readonly avatarKey: Prisma.FieldRef<"User", 'String'>
-  readonly brandColor: Prisma.FieldRef<"User", 'String'>
   readonly plan: Prisma.FieldRef<"User", 'PlanType'>
   readonly profileCustomized: Prisma.FieldRef<"User", 'Boolean'>
   readonly cloudBackupEnabled: Prisma.FieldRef<"User", 'Boolean'>
