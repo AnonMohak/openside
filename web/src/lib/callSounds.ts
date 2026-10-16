@@ -138,7 +138,32 @@ const getAudioContext = () => {
   return audioContext;
 };
 
+const SOUNDS_STORAGE_KEY = "openside:callSounds";
+
+const readSoundsEnabled = () => {
+  try {
+    return localStorage.getItem(SOUNDS_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+};
+
+let soundsEnabled = readSoundsEnabled();
+
+export const areCallSoundsEnabled = () => soundsEnabled;
+
+/** The in-call settings toggle; remembered per browser. */
+export const setCallSoundsEnabled = (enabled: boolean) => {
+  soundsEnabled = enabled;
+  try {
+    localStorage.setItem(SOUNDS_STORAGE_KEY, enabled ? "on" : "off");
+  } catch {
+    // Still applies for this session.
+  }
+};
+
 export const playCallSound = (sound: CallSound) => {
+  if (!soundsEnabled) return;
   try {
     const context = getAudioContext();
     if (!context) return;

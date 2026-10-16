@@ -12,8 +12,12 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useTheme } from "next-themes";
-import { ConnectionState, Track, type Participant } from "livekit-client";
+import {
+  ConnectionState,
+  LocalVideoTrack,
+  Track,
+  type Participant,
+} from "livekit-client";
 import {
   BsFillTelephoneFill,
   BsInfoLg,
@@ -25,10 +29,9 @@ import {
   FiCheckSquare,
   FiExternalLink,
   FiUploadCloud,
-  FiMoon,
+  FiSettings,
   FiSmile,
   FiSquare,
-  FiSun,
   FiVideo,
   FiVideoOff,
 } from "react-icons/fi";
@@ -64,6 +67,14 @@ import { useLiveKitReactions } from "../reactions/LiveKitReactionsProvider";
 import { useRecordingContext } from "../recording/RecordingProvider";
 import { useStartingMedia } from "./StartingMediaContext";
 import { useCameraPreview } from "./CameraPreview";
+import { useIsAudioOnlyCall } from "./AudioOnlyMode";
+import CallSettingsDialog, { type SettingsTab } from "./CallSettingsDialog";
+import { shouldPreviewCamera } from "@/lib/cameraPreviewPreference";
+import {
+  applyCameraBackground,
+  loadCustomImage,
+  loadSavedBackground,
+} from "@/lib/cameraBackgrounds";
 
 // Screen-share capture options. NOTE: LiveKit's setScreenShareEnabled /
 // createScreenTracks do NOT merge the room's screenShareCaptureDefaults - they
@@ -174,6 +185,8 @@ interface LiveKitControlsProps {
   onEndForAll: () => void;
   onLeave: () => void;
   toggleSidebar: (sidebarType: SidebarType) => void;
+  usingHeadphones: boolean;
+  onHeadphonesChange: (usingHeadphones: boolean) => void;
 }
 
 const getParticipantAvatar = (participant: Participant): string => {
@@ -363,12 +376,16 @@ const LiveKitControls = ({
   activeSidebar,
   deafened,
   isHost,
+  roomCode,
   setDeafened,
   onEndForAll,
   onLeave,
   toggleSidebar,
+  usingHeadphones,
+  onHeadphonesChange,
 }: LiveKitControlsProps) => {
   const [pendingExitAction, setPendingExitAction] = useState<ExitAction>(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [outputVolume, setOutputVolume] = useState(100);
   const [micLevel, setMicLevel] = useState(0);
@@ -386,7 +403,6 @@ const LiveKitControls = ({
   const [hasOpenedMediaMenu, setHasOpenedMediaMenu] = useState(false);
   const previousMicEnabledBeforeDeafenRef = useRef<boolean | null>(null);
   const previousOutputVolumeBeforeDeafenRef = useRef(outputVolume);
-  const { resolvedTheme, setTheme } = useTheme();
   const { sendReaction } = useLiveKitReactions();
   const recording = useRecordingContext();
   const { openCameraPreview, toggleCameraPreview, setCameraAnchor } =
@@ -403,6 +419,9 @@ const LiveKitControls = ({
   const connectionState = useConnectionState();
   const isStartingMedia =
     startingMedia !== null || connectionState !== ConnectionState.Connected;
+  // Host set the call to audio-only: cameras and screen share stay off.
+  const isAudioOnly = useIsAudioOnlyCall();
+  const isScreenShareLocked = isStartingMedia || isAudioOnly;
   const showMicOn = startingMedia ? startingMedia.audioOn : isMicrophoneEnabled;
   const showCameraOn = startingMedia ? startingMedia.videoOn : isCameraEnabled;
   const participantRole = localParticipant.attributes.role;
@@ -524,11 +543,33 @@ const LiveKitControls = ({
     }
   };
 
+  // Straight on, for people who turned the preview off in settings - still
+  // with their saved background.
+  const turnOnCameraDirectly = async () => {
+    markLocalMediaAction();
+    try {
+      const publication = await localParticipant.setCameraEnabled(true);
+      playCallSound("cameraOn");
+      const track = publication?.track;
+      if (track instanceof LocalVideoTrack) {
+        await applyCameraBackground(
+          track,
+          loadSavedBackground(),
+          loadCustomImage(),
+        );
+      }
+    } catch {
+      // Access blocked or the device is missing/in use - leave video off.
+    }
+  };
+
   const toggleCamera = async () => {
-    // Turning on goes through the preview, which publishes on confirm and
-    // explains access/device failures itself.
+    // Turning on goes through the preview (unless turned off in settings),
+    // which publishes on confirm and explains access/device failures itself.
     if (!isCameraEnabled) {
-      toggleCameraPreview();
+      if (isAudioOnly) return;
+      if (shouldPreviewCamera()) toggleCameraPreview();
+      else await turnOnCameraDirectly();
       return;
     }
     markLocalMediaAction();
@@ -821,10 +862,6 @@ const LiveKitControls = ({
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
-
-  const toggleTheme = () => {
-    setTheme(resolvedTheme === "dark" ? "light" : "dark");
-  };
 
   const toggleFullscreen = async () => {
     try {
@@ -1212,21 +1249,21 @@ const LiveKitControls = ({
           collisionPadding={8}
           side="top"
           sideOffset={8}
-          className="min-w-[160px] rounded-xl border-call-border bg-call-background p-1"
+          className="min-w-[200px] rounded-xl border-call-border bg-call-background p-1"
         >
-          <DropdownMenuItem
-            onSelect={toggleTheme}
-            className="cursor-pointer rounded-lg px-2.5 py-1.5 text-sm focus:bg-primary-hover"
-          >
-            {resolvedTheme === "dark" ? <FiSun /> : <FiMoon />}
-            Switch theme
-          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={toggleFullscreen}
             className="cursor-pointer rounded-lg px-2.5 py-1.5 text-sm focus:bg-primary-hover"
           >
             {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
             {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => setSettingsTab("general")}
+            className="cursor-pointer rounded-lg px-2.5 py-1.5 text-sm focus:bg-primary-hover"
+          >
+            <FiSettings />
+            Settings
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1429,6 +1466,13 @@ const LiveKitControls = ({
         )}
         Deafen
       </DropdownMenuCheckboxItem>
+      <DropdownMenuItem
+        onSelect={() => setSettingsTab("audio")}
+        className="cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover"
+      >
+        <FiSettings className="size-4" />
+        Audio settings
+      </DropdownMenuItem>
     </DropdownMenuContent>
   );
 
@@ -1468,6 +1512,13 @@ const LiveKitControls = ({
         <ScanFace className="size-4" />
         Camera preview
       </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={() => setSettingsTab("video")}
+        className="cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover"
+      >
+        <FiSettings className="size-4" />
+        Video settings
+      </DropdownMenuItem>
     </DropdownMenuContent>
   );
 
@@ -1480,6 +1531,7 @@ const LiveKitControls = ({
     active,
     menuId,
     disabled = false,
+    disabledReason,
     anchorRef,
   }: {
     icon: ReactNode;
@@ -1490,9 +1542,10 @@ const LiveKitControls = ({
     active: boolean;
     menuId: "mic" | "cam";
     disabled?: boolean;
+    disabledReason?: string;
     anchorRef?: (element: HTMLElement | null) => void;
   }) => (
-    <div className="flex flex-col gap-1 items-center">
+    <div className="flex flex-col gap-1 items-center" title={disabledReason}>
       <div
         ref={anchorRef}
         className={cn(
@@ -1570,10 +1623,10 @@ const LiveKitControls = ({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              disabled={isStartingMedia}
+              disabled={isScreenShareLocked}
               className={cn(
                 "flex items-center justify-center rounded-xl border border-blue-400/10 bg-blue-400/20 p-3 text-lg font-medium text-blue-400 cursor-pointer transition-all duration-200 hover:bg-blue-400/40",
-                isStartingMedia && DISABLED_CONTROL_CLASS,
+                isScreenShareLocked && DISABLED_CONTROL_CLASS,
               )}
               aria-label="Screen share options"
             >
@@ -1606,7 +1659,7 @@ const LiveKitControls = ({
         <p
           className={cn(
             "text-[0.675rem] text-foreground/50 max-md:hidden",
-            isStartingMedia && DISABLED_LABEL_CLASS,
+            isScreenShareLocked && DISABLED_LABEL_CLASS,
           )}
         >
           Share
@@ -1617,7 +1670,7 @@ const LiveKitControls = ({
         icon={<LuScreenShare />}
         label="Share"
         onClick={toggleScreenShare}
-        disabled={isStartingMedia}
+        disabled={isScreenShareLocked}
       />
     );
 
@@ -1630,11 +1683,11 @@ const LiveKitControls = ({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            disabled={isStartingMedia}
+            disabled={isScreenShareLocked}
             className={cn(
               "flex min-h-11 w-11 items-center justify-center rounded-xl border border-call-border text-lg font-medium cursor-pointer transition-all duration-200 max-md:min-h-10 max-md:w-10",
               isReactionMenuOpen ? "bg-muted" : "bg-primary hover:bg-muted",
-              isStartingMedia && DISABLED_CONTROL_CLASS,
+              isScreenShareLocked && DISABLED_CONTROL_CLASS,
             )}
             aria-label="Reactions"
           >
@@ -1717,7 +1770,7 @@ const LiveKitControls = ({
       <p
         className={cn(
           "text-[0.675rem] text-foreground/50 max-md:hidden",
-          isStartingMedia && DISABLED_LABEL_CLASS,
+          isScreenShareLocked && DISABLED_LABEL_CLASS,
         )}
       >
         React
@@ -1746,7 +1799,10 @@ const LiveKitControls = ({
         activeLabel: "Camera options",
         active: showCameraOn,
         menuId: "cam",
-        disabled: isStartingMedia,
+        disabled: isStartingMedia || isAudioOnly,
+        disabledReason: isAudioOnly
+          ? "The host made this call audio-only"
+          : undefined,
         anchorRef: setCameraAnchor,
       })}
       {/* Screen share is effectively unsupported in phone browsers, and the
@@ -1805,6 +1861,23 @@ const LiveKitControls = ({
         </div>
         {renderSidebarControls()}
       </div>
+      {settingsTab && (
+        <CallSettingsDialog
+          initialTab={settingsTab}
+          roomCode={roomCode}
+          isHost={isHost}
+          usingHeadphones={usingHeadphones}
+          onHeadphonesChange={onHeadphonesChange}
+          outputVolume={outputVolume}
+          onOutputVolumeChange={handleOutputVolumeChange}
+          onTurnOnCamera={() => {
+            setSettingsTab(null);
+            if (shouldPreviewCamera()) openCameraPreview();
+            else void turnOnCameraDirectly();
+          }}
+          onClose={() => setSettingsTab(null)}
+        />
+      )}
       {pendingExitCopy && (
         <CallWarningDialog
           title={pendingExitCopy.title}

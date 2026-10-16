@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/axiosInstance";
+import { SETTINGS_MUTATION_KEY } from "@/hooks/useProfile";
 import type {
   JoinSpacePayload,
   JoinSpaceResponse,
@@ -27,6 +28,31 @@ export const useJoinSpace = (spaceId: string) => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["space", spaceId] });
+      queryClient.invalidateQueries({ queryKey: ["participants", spaceId] });
+    },
+  });
+};
+
+// ============================================================================
+// Rename yourself mid-call
+// ============================================================================
+
+export const useRenameSelf = (spaceId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationKey: SETTINGS_MUTATION_KEY,
+    mutationFn: async (payload: {
+      displayName: string;
+      participantSessionId: string;
+    }) => {
+      const { data } = await api.patch<{ data: { displayName: string } }>(
+        `/participant/${spaceId}/name`,
+        payload
+      );
+      return data.data;
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["participants", spaceId] });
     },
   });

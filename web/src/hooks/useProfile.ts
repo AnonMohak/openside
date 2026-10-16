@@ -90,12 +90,17 @@ export interface RecordingSettingsUpdate {
   recordingMode?: "VIDEO_AND_AUDIO" | "AUDIO_ONLY";
 }
 
+/** Tags mutations made from settings screens, so they can show a shared
+ *  "Saving… / Saved" status (useIsMutating with this key). */
+export const SETTINGS_MUTATION_KEY = ["settings"] as const;
+
 /** Update the user-level recording preferences (cloud backup, frame rate).
  *  Optimistic. */
 export const useUpdateRecordingSettings = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: SETTINGS_MUTATION_KEY,
     mutationFn: async (update: RecordingSettingsUpdate) => {
       const { data } = await api.patch<{ data: MeUser }>(
         "/settings/recording",

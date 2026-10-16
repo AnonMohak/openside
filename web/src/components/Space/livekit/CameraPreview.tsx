@@ -13,9 +13,7 @@ import {
 import { Track, type LocalVideoTrack } from "livekit-client";
 import {
   Aperture,
-  Ban,
   ChevronDown,
-  ImagePlus,
   Loader2,
   VideoOff,
   Wallpaper,
@@ -35,7 +33,6 @@ import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { playCallSound } from "@/lib/callSounds";
 import { useLowLight } from "@/hooks/useLowLight";
 import {
-  BACKGROUND_PRESETS,
   applyCameraBackground,
   backgroundKey,
   getPresetImageUrl,
@@ -47,6 +44,8 @@ import {
   type CameraBackground,
 } from "@/lib/cameraBackgrounds";
 import LowLightBadge from "../ui/LowLightBadge";
+import BackgroundOptionsGrid from "./BackgroundOptions";
+import { useIsAudioOnlyCall } from "./AudioOnlyMode";
 
 // Turning the camera on in a call goes through a preview first, so nobody is
 // put on screen before they've checked framing, lighting and which camera is
@@ -120,6 +119,9 @@ export const CameraPreviewProvider = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [anchor, setCameraAnchor] = useState<HTMLElement | null>(null);
+  // Audio-only calls keep cameras off, so the preview never shows.
+  const isAudioOnly = useIsAudioOnlyCall();
+  if (isAudioOnly && isOpen) setIsOpen(false);
   const toggleCameraPreview = useCallback(() => setIsOpen((open) => !open), []);
   const openCameraPreview = useCallback(() => setIsOpen(true), []);
   const value = useMemo(
@@ -130,7 +132,7 @@ export const CameraPreviewProvider = ({
   return (
     <CameraPreviewContext.Provider value={value}>
       {children}
-      {isOpen && (
+      {isOpen && !isAudioOnly && (
         <CameraPreviewDialog anchor={anchor} onClose={() => setIsOpen(false)} />
       )}
     </CameraPreviewContext.Provider>
@@ -504,46 +506,6 @@ const CameraPreviewDialog = ({
     }
   };
 
-  const renderBackgroundOption = (
-    option: CameraBackground,
-    label: string,
-    icon: ReactNode,
-    imageUrl?: string,
-  ) => {
-    const key = backgroundKey(option);
-    const isSelected = backgroundKey(background) === key;
-    return (
-      <button
-        key={key}
-        type="button"
-        title={label}
-        aria-label={label}
-        aria-pressed={isSelected}
-        disabled={isConfirming}
-        onClick={() => {
-          if (!isSelected) selectBackground(option);
-        }}
-        className={cn(
-          "relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-md border bg-primary text-foreground/70 transition-all hover:text-foreground disabled:opacity-50",
-          isSelected
-            ? "border-brand ring-1 ring-brand"
-            : "border-call-border hover:border-foreground/30",
-        )}
-      >
-        {imageUrl ? (
-          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-        ) : (
-          icon
-        )}
-        {pendingBackgroundKey === key && (
-          <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
-            <Loader2 className="size-3.5 animate-spin" />
-          </span>
-        )}
-      </button>
-    );
-  };
-
   const backgroundThumbUrl =
     background.kind === "preset"
       ? getPresetImageUrl(background.id)
@@ -749,43 +711,14 @@ const CameraPreviewDialog = ({
                   collisionPadding={8}
                   className="z-[110] w-[248px] rounded-xl border-call-border bg-call-background p-1.5"
                 >
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {renderBackgroundOption(
-                      { kind: "none" },
-                      "No background",
-                      <Ban className="size-4" />,
-                    )}
-                    {renderBackgroundOption(
-                      { kind: "blur" },
-                      "Blur background",
-                      <span className="text-[0.65rem] font-medium">Blur</span>,
-                    )}
-                    {BACKGROUND_PRESETS.map((preset) =>
-                      renderBackgroundOption(
-                        { kind: "preset", id: preset.id },
-                        preset.label,
-                        null,
-                        getPresetImageUrl(preset.id),
-                      ),
-                    )}
-                    {customImageUrl &&
-                      renderBackgroundOption(
-                        { kind: "custom" },
-                        "Your image",
-                        null,
-                        customImageUrl,
-                      )}
-                    <button
-                      type="button"
-                      title="Upload a background"
-                      aria-label="Upload a background"
-                      disabled={isConfirming}
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex aspect-[16/10] items-center justify-center rounded-md border border-dashed border-call-border bg-primary text-foreground/60 transition-colors hover:bg-primary-hover hover:text-foreground disabled:opacity-50"
-                    >
-                      <ImagePlus className="size-4" />
-                    </button>
-                  </div>
+                  <BackgroundOptionsGrid
+                    value={background}
+                    customImageUrl={customImageUrl}
+                    pendingKey={pendingBackgroundKey}
+                    disabled={isConfirming}
+                    onSelect={selectBackground}
+                    onUploadClick={() => fileInputRef.current?.click()}
+                  />
                 </DropdownMenuContent>
               </DropdownMenu>
             )}

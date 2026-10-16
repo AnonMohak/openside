@@ -39,6 +39,7 @@ import InfoSidebar from "./sidebars/InfoSidebar";
 import UsersSidebar from "./sidebars/UsersSidebar";
 import RecordingProvider from "./recording/RecordingProvider";
 import { CameraPreviewProvider } from "./livekit/CameraPreview";
+import { AudioOnlyController } from "./livekit/AudioOnlyMode";
 
 type SidebarType = "info" | "users" | "chat" | null;
 
@@ -88,6 +89,28 @@ interface LiveKitSpaceScreenProps {
   toggleSidebar: (sidebarType: SidebarType) => void;
   onExit: (reason: CallExitReason) => void;
 }
+
+// Point the live camera (and future captures) at a new frame rate without
+// rebuilding the Room. With a background processor on, mediaStreamTrack is the
+// processed canvas track, which can't be retuned - finalization's CFR step
+// still normalizes the output to the session rate.
+const retuneCameraFrameRate = (room: Room, frameRate: number) => {
+  const defaults = room.options.videoCaptureDefaults;
+  if (defaults?.resolution) {
+    defaults.resolution = { ...defaults.resolution, frameRate };
+  }
+  const cameraTrack = room.localParticipant.getTrackPublication(
+    Track.Source.Camera,
+  )?.track;
+  if (!cameraTrack || cameraTrack.getProcessor()) return;
+  const mediaTrack = cameraTrack.mediaStreamTrack;
+  void mediaTrack
+    .applyConstraints({
+      ...mediaTrack.getConstraints(),
+      frameRate: { ideal: frameRate },
+    })
+    .catch(() => undefined);
+};
 
 const LiveKitSpaceScreen = ({
   activeSidebar,
@@ -172,8 +195,22 @@ const LiveKitSpaceScreen = ({
     [roomCode],
   );
 
+  // Fixed for the whole call once known: roomOptions rebuilds the Room when it
+  // changes, so editing the frame rate in the in-call settings must not flow
+  // in here (it applies from the next call).
+  const [joinTargetFps, setJoinTargetFps] = useState<number | undefined>();
+  if (joinTargetFps === undefined && user) {
+    setJoinTargetFps(user.targetFps ?? DEFAULT_FPS);
+  }
+  const callTargetFps = joinTargetFps ?? user?.targetFps;
+
   const audioDeviceId = preJoinSettings?.audioDeviceId;
   const echoCancellation = preJoinSettings?.echoCancellation ?? true;
+  // Changed from in-call settings. Kept out of roomOptions on purpose - those
+  // rebuild the Room; the settings dialog restarts the live mic instead.
+  const [headphonesOverride, setHeadphonesOverride] = useState<
+    boolean | null
+  >(null);
   const videoDeviceId = preJoinSettings?.videoDeviceId;
   const audioOutputDeviceId = preJoinSettings?.audioOutputDeviceId;
   const wantsAudio = preJoinSettings?.audioEnabled ?? true;
@@ -220,7 +257,7 @@ const LiveKitSpaceScreen = ({
         // with the user's preference (the server's CFR step is the guarantee).
         resolution: {
           ...VideoPresets.h2160.resolution,
-          frameRate: clampFps(user?.targetFps ?? DEFAULT_FPS),
+          frameRate: clampFps(callTargetFps ?? DEFAULT_FPS),
         },
       },
       // Cap screen capture at 1080p30 (encoding a native 4K/Retina surface is
@@ -238,10 +275,20 @@ const LiveKitSpaceScreen = ({
         screenShareEncoding: ScreenSharePresets.h1080fps30.encoding,
       },
     }),
-    [audioDeviceId, echoCancellation, videoDeviceId, user?.targetFps],
+    [audioDeviceId, echoCancellation, videoDeviceId, callTargetFps],
   );
 
   const room = useMemo(() => new Room(roomOptions), [roomOptions]);
+
+  // The frame rate is fixed in roomOptions for the call (see joinTargetFps),
+  // but the host can change it in the in-call settings and the next recording
+  // snapshots the new value - so retune the live camera to it. Only the host's
+  // preference drives a session's rate.
+  const liveTargetFps = isHost ? user?.targetFps : undefined;
+  useEffect(() => {
+    if (liveTargetFps === undefined || liveTargetFps === joinTargetFps) return;
+    retuneCameraFrameRate(room, clampFps(liveTargetFps));
+  }, [room, liveTargetFps, joinTargetFps]);
 
   const showConnectionToast = useCallback((message: string) => {
     if (connectionToastRef.current === message) return;
@@ -328,7 +375,7 @@ const LiveKitSpaceScreen = ({
             width: { ideal: width },
             height: { ideal: height },
             aspectRatio: { ideal: aspectRatio },
-            frameRate: { ideal: clampFps(user?.targetFps ?? DEFAULT_FPS) },
+            frameRate: { ideal: clampFps(callTargetFps ?? DEFAULT_FPS) },
             resizeMode: "crop-and-scale",
           } as MediaTrackConstraints);
           // userProvidedTrack=false: LiveKit owns it, so camera-off still stops
@@ -369,7 +416,7 @@ const LiveKitSpaceScreen = ({
       wantsAudio ? publishAudio() : null,
     ]);
     setStartingMedia(null);
-  }, [room, previewTracks, wantsAudio, wantsVideo, user?.targetFps]);
+  }, [room, previewTracks, wantsAudio, wantsVideo, callTargetFps]);
 
   // Drop a stale spotlight when that participant leaves - otherwise they'd be
   // silently re-spotlighted full-screen if they rejoined later. Their camera and
@@ -700,7 +747,11 @@ const LiveKitSpaceScreen = ({
         roomCode={roomCode}
         isHost={isHost}
         finalizeOnLeaveRef={recordingFinalizeRef}
-        recordingEchoCancellation={preJoinSettings?.echoCancellation === true}
+        recordingEchoCancellation={
+          headphonesOverride === null
+            ? preJoinSettings?.echoCancellation === true
+            : !headphonesOverride
+        }
       >
         <LiveKitChatProvider>
           <LiveKitReactionsProvider>
@@ -718,6 +769,11 @@ const LiveKitSpaceScreen = ({
                 />
               </div>
               <LiveKitReactionsOverlay />
+              <AudioOnlyController
+                hostRecordingMode={
+                  isHost ? (user?.recordingMode ?? "VIDEO_AND_AUDIO") : undefined
+                }
+              />
               {activeSidebar && (
                 // On phones the fixed-width docked sidebar would leave no room
                 // for the stage, so it becomes a full overlay covering it.
@@ -750,6 +806,8 @@ const LiveKitSpaceScreen = ({
                 onEndForAll={handleEndForAll}
                 onLeave={handleLeave}
                 toggleSidebar={toggleSidebar}
+                usingHeadphones={headphonesOverride ?? !echoCancellation}
+                onHeadphonesChange={setHeadphonesOverride}
               />
             </div>
           </CameraPreviewProvider>

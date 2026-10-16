@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import api from "@/lib/axiosInstance";
+import { SETTINGS_MUTATION_KEY } from "@/hooks/useProfile";
 import type {
   CreateSpacePayload,
   UpdateSpacePayload,
@@ -82,6 +83,7 @@ export const useUpdateSpace = (spaceId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: SETTINGS_MUTATION_KEY,
     mutationFn: async (payload: UpdateSpacePayload) => {
       const { data } = await api.patch<SpaceResponse>(
         `/space/${spaceId}`,
