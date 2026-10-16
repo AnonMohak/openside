@@ -11,7 +11,15 @@ import {
   type ReactNode,
 } from "react";
 import { Track, type LocalVideoTrack } from "livekit-client";
-import { ChevronDown, Loader2, VideoOff } from "lucide-react";
+import {
+  Aperture,
+  Ban,
+  ChevronDown,
+  ImagePlus,
+  Loader2,
+  VideoOff,
+  Wallpaper,
+} from "lucide-react";
 import { FiCheckSquare, FiSquare } from "react-icons/fi";
 import {
   DropdownMenu,
@@ -26,6 +34,18 @@ import { cleanDeviceLabel, sortMediaDevices } from "@/lib/mediaDevices";
 import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { playCallSound } from "@/lib/callSounds";
 import { useLowLight } from "@/hooks/useLowLight";
+import {
+  BACKGROUND_PRESETS,
+  applyCameraBackground,
+  backgroundKey,
+  getPresetImageUrl,
+  isCameraBackgroundSupported,
+  loadCustomImage,
+  loadSavedBackground,
+  prepareCustomImage,
+  saveBackground,
+  type CameraBackground,
+} from "@/lib/cameraBackgrounds";
 import LowLightBadge from "../ui/LowLightBadge";
 
 // Turning the camera on in a call goes through a preview first, so nobody is
@@ -72,6 +92,8 @@ const ANCHOR_GAP = 8;
 const VIEWPORT_GUTTER = 8;
 
 interface CameraPreviewContextValue {
+  /** For the camera button: clicking it again closes the panel. */
+  toggleCameraPreview: () => void;
   openCameraPreview: () => void;
   /** Callback ref for the camera control the panel pops up above. */
   setCameraAnchor: (element: HTMLElement | null) => void;
@@ -84,19 +106,25 @@ const CameraPreviewContext = createContext<CameraPreviewContextValue | null>(
 export const useCameraPreview = () => {
   const context = useContext(CameraPreviewContext);
   if (!context) {
-    throw new Error("useCameraPreview must be used inside CameraPreviewProvider");
+    throw new Error(
+      "useCameraPreview must be used inside CameraPreviewProvider",
+    );
   }
   return context;
 };
 
-export const CameraPreviewProvider = ({ children }: { children: ReactNode }) => {
+export const CameraPreviewProvider = ({
+  children,
+}: {
+  children: ReactNode;
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [anchor, setCameraAnchor] = useState<HTMLElement | null>(null);
-  // Toggles, so clicking the camera control again closes the panel.
-  const openCameraPreview = useCallback(() => setIsOpen((open) => !open), []);
+  const toggleCameraPreview = useCallback(() => setIsOpen((open) => !open), []);
+  const openCameraPreview = useCallback(() => setIsOpen(true), []);
   const value = useMemo(
-    () => ({ openCameraPreview, setCameraAnchor }),
-    [openCameraPreview],
+    () => ({ toggleCameraPreview, openCameraPreview, setCameraAnchor }),
+    [toggleCameraPreview, openCameraPreview],
   );
 
   return (
@@ -141,13 +169,89 @@ const CameraPreviewDialog = ({
   });
   const [resolution, setResolution] = useState<number | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const isLowLight = useLowLight(track?.mediaStreamTrack);
+  // Already on (opened from "Camera preview"): confirming applies the changes
+  // to the live camera instead of turning it on.
+  const [isCameraLive] = useState(() => room.localParticipant.isCameraEnabled);
+  const [isCameraMenuOpen, setIsCameraMenuOpen] = useState(false);
+  const [isBackgroundMenuOpen, setIsBackgroundMenuOpen] = useState(false);
+  const isPickerOpen = isCameraMenuOpen || isBackgroundMenuOpen;
+  // The raw camera, captured before any background processor - lighting is
+  // judged on the real room, not the virtual one.
+  const [rawCameraTrack, setRawCameraTrack] = useState<MediaStreamTrack | null>(
+    null,
+  );
+  const isLowLight = useLowLight(rawCameraTrack);
+
+  const [isBackgroundSupported, setIsBackgroundSupported] = useState(false);
+  const [background, setBackground] =
+    useState<CameraBackground>(loadSavedBackground);
+  const [customImageUrl, setCustomImageUrl] = useState(loadCustomImage);
+  const [pendingBackgroundKey, setPendingBackgroundKey] = useState<
+    string | null
+  >(null);
+  const backgroundRef = useRef(background);
+  const customImageUrlRef = useRef(customImageUrl);
+  const applyIdRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void isCameraBackgroundSupported().then((supported) => {
+      if (!cancelled) setIsBackgroundSupported(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const applyBackgroundToPreview = useCallback(
+    async (target: LocalVideoTrack, next: CameraBackground) => {
+      const applyId = ++applyIdRef.current;
+      setPendingBackgroundKey(
+        next.kind === "none" ? null : backgroundKey(next),
+      );
+      try {
+        await applyCameraBackground(target, next, customImageUrlRef.current);
+      } catch (backgroundError) {
+        console.error("Unable to apply camera background:", backgroundError);
+        if (applyId === applyIdRef.current) {
+          backgroundRef.current = { kind: "none" };
+          setBackground({ kind: "none" });
+          void target.stopProcessor().catch(() => undefined);
+        }
+      } finally {
+        if (applyId === applyIdRef.current) setPendingBackgroundKey(null);
+      }
+    },
+    [],
+  );
+
+  const selectBackground = (next: CameraBackground) => {
+    backgroundRef.current = next;
+    setBackground(next);
+    saveBackground(next);
+    if (trackRef.current) {
+      void applyBackgroundToPreview(trackRef.current, next);
+    }
+  };
+
+  const handleCustomImage = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const url = await prepareCustomImage(file);
+      customImageUrlRef.current = url;
+      setCustomImageUrl(url);
+      selectBackground({ kind: "custom" });
+    } catch (imageError) {
+      console.error("Unable to use that image as a background:", imageError);
+    }
+  };
 
   const releaseTrack = useCallback(() => {
     if (!handedOffRef.current) trackRef.current?.stop();
     trackRef.current = null;
     setTrack(null);
+    setRawCameraTrack(null);
   }, []);
 
   const refreshDevices = useCallback(async () => {
@@ -208,6 +312,10 @@ const CameraPreviewDialog = ({
 
         trackRef.current = nextTrack;
         setTrack(nextTrack);
+        setRawCameraTrack(nextTrack.mediaStreamTrack);
+        if (backgroundRef.current.kind !== "none") {
+          void applyBackgroundToPreview(nextTrack, backgroundRef.current);
+        }
         const settings = nextTrack.mediaStreamTrack.getSettings();
         setDeviceId(settings.deviceId ?? requestedDeviceId);
         setResolution(settings.height ?? null);
@@ -219,7 +327,7 @@ const CameraPreviewDialog = ({
         if (acquireId === acquireIdRef.current) setIsStarting(false);
       }
     },
-    [refreshDevices, releaseTrack, room],
+    [applyBackgroundToPreview, refreshDevices, releaseTrack, room],
   );
 
   // Start on open; release the camera on close unless it was handed to LiveKit.
@@ -243,12 +351,14 @@ const CameraPreviewDialog = ({
       );
   }, [refreshDevices]);
 
+  // attach() (not a raw srcObject) so LiveKit swaps in the processed stream
+  // when a background is applied or removed.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !track) return;
-    video.srcObject = new MediaStream([track.mediaStreamTrack]);
+    track.attach(video);
     return () => {
-      video.srcObject = null;
+      track.detach(video);
     };
   }, [track]);
 
@@ -263,13 +373,13 @@ const CameraPreviewDialog = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Esc in the open camera picker only closes the picker.
+      // Esc in an open camera/background menu only closes that menu.
       if (event.key === "Escape" && !isPickerOpen) handleCancel();
     };
     // Click-away closes it, except on the camera control itself (that click
     // toggles it) and inside the camera picker, which renders in a portal.
     const handlePointerDown = (event: PointerEvent) => {
-      // A click away from the open camera picker only closes the picker.
+      // A click away from an open menu only closes that menu.
       if (isPickerOpen) return;
       const target = event.target as Element | null;
       if (
@@ -336,6 +446,21 @@ const CameraPreviewDialog = ({
     const existing = localParticipant.getTrackPublication(Track.Source.Camera);
 
     try {
+      if (isCameraLive && existing?.track) {
+        // Opened from "Camera preview" with the camera already on: apply the
+        // chosen camera and background to the live track. The preview's own
+        // capture is released when the panel closes.
+        if (deviceId) {
+          await room.switchActiveDevice("videoinput", deviceId, true);
+        }
+        await applyCameraBackground(
+          existing.track as LocalVideoTrack,
+          backgroundRef.current,
+          customImageUrlRef.current,
+        );
+        onClose();
+        return;
+      }
       if (existing?.track) {
         // The camera was on earlier and is now a muted publication. Keep it
         // (recording follows that publication) - point it at the chosen
@@ -351,6 +476,17 @@ const CameraPreviewDialog = ({
           previewTrack.stop();
           await localParticipant.setCameraEnabled(true);
         }
+        // That publication has its own processor (or none) - bring it in
+        // line with what the preview showed.
+        try {
+          await applyCameraBackground(
+            existing.track as LocalVideoTrack,
+            backgroundRef.current,
+            customImageUrlRef.current,
+          );
+        } catch (backgroundError) {
+          console.error("Unable to apply camera background:", backgroundError);
+        }
       } else {
         handedOffRef.current = true;
         await localParticipant.publishTrack(previewTrack);
@@ -361,12 +497,59 @@ const CameraPreviewDialog = ({
       if (handedOffRef.current) {
         handedOffRef.current = false;
       }
-      console.error("Unable to turn on camera:", confirmError);
+      console.error("Unable to apply camera settings:", confirmError);
       setIsConfirming(false);
       setError(toPreviewError(confirmError));
       releaseTrack();
     }
   };
+
+  const renderBackgroundOption = (
+    option: CameraBackground,
+    label: string,
+    icon: ReactNode,
+    imageUrl?: string,
+  ) => {
+    const key = backgroundKey(option);
+    const isSelected = backgroundKey(background) === key;
+    return (
+      <button
+        key={key}
+        type="button"
+        title={label}
+        aria-label={label}
+        aria-pressed={isSelected}
+        disabled={isConfirming}
+        onClick={() => {
+          if (!isSelected) selectBackground(option);
+        }}
+        className={cn(
+          "relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-md border bg-primary text-foreground/70 transition-all hover:text-foreground disabled:opacity-50",
+          isSelected
+            ? "border-brand ring-1 ring-brand"
+            : "border-call-border hover:border-foreground/30",
+        )}
+      >
+        {imageUrl ? (
+          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          icon
+        )}
+        {pendingBackgroundKey === key && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
+            <Loader2 className="size-3.5 animate-spin" />
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const backgroundThumbUrl =
+    background.kind === "preset"
+      ? getPresetImageUrl(background.id)
+      : background.kind === "custom"
+        ? customImageUrl
+        : null;
 
   const activeDevice = devices.find((device) => device.deviceId === deviceId);
   const activeLabel = activeDevice?.label
@@ -447,74 +630,176 @@ const CameraPreviewDialog = ({
         </div>
 
         <div className="mt-2 flex flex-col gap-2">
-          <DropdownMenu
-            // Non-modal: a modal menu disables pointer events on <body>, so a
-            // click on the card would land on <html> and read as click-away.
-            modal={false}
-            open={isPickerOpen}
-            onOpenChange={setIsPickerOpen}
-          >
-            <DropdownMenuTrigger asChild disabled={isConfirming}>
-              <button
-                type="button"
-                className={cn(
-                  "flex w-full min-w-0 items-center gap-2.5 rounded-lg border border-call-border bg-primary px-3 py-2.5 text-left transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60",
-                  isPickerOpen && "bg-primary-hover",
-                )}
-              >
-                <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-                  {activeLabel}
-                </span>
-                <ChevronDown
-                  className={cn(
-                    "size-4 shrink-0 text-foreground/50 transition-transform duration-150",
-                    isPickerOpen && "rotate-180",
-                  )}
-                />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              side="top"
-              sideOffset={6}
-              collisionPadding={8}
-              className="z-[110] w-(--radix-dropdown-menu-trigger-width) rounded-xl border-call-border bg-call-background p-1.5"
+          <div className="flex items-stretch gap-2">
+            <DropdownMenu
+              // Non-modal: a modal menu disables pointer events on <body>, so a
+              // click on the card would land on <html> and read as click-away.
+              modal={false}
+              open={isCameraMenuOpen}
+              onOpenChange={setIsCameraMenuOpen}
             >
-              {devices.length === 0 ? (
-                <DropdownMenuItem
-                  disabled
-                  className="cursor-default rounded-lg px-3 py-2 text-foreground/50"
+              <DropdownMenuTrigger asChild disabled={isConfirming}>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-call-border bg-primary px-3 py-2.5 text-left transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60",
+                    isCameraMenuOpen && "bg-primary-hover",
+                  )}
                 >
-                  No cameras found
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuRadioGroup
-                  value={deviceId}
-                  onValueChange={(nextId) => {
-                    if (nextId !== deviceId) void acquire(nextId);
-                  }}
-                >
-                  {devices.map((device, index) => (
-                    <DropdownMenuRadioItem
-                      key={device.deviceId}
-                      value={device.deviceId}
-                      className="cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover [&>span:first-child]:hidden"
-                    >
-                      {device.deviceId === deviceId ? (
-                        <FiCheckSquare className="size-4" />
+                  <span className="min-w-0 flex-1 truncate text-xs text-foreground">
+                    {activeLabel}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "size-4 shrink-0 text-foreground/50 transition-transform duration-150",
+                      isCameraMenuOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                side="top"
+                sideOffset={6}
+                collisionPadding={8}
+                className="z-[110] w-(--radix-dropdown-menu-trigger-width) rounded-xl border-call-border bg-call-background p-1.5"
+              >
+                {devices.length === 0 ? (
+                  <DropdownMenuItem
+                    disabled
+                    className="cursor-default rounded-lg px-3 py-2 text-foreground/50"
+                  >
+                    No cameras found
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuRadioGroup
+                    value={deviceId}
+                    onValueChange={(nextId) => {
+                      if (nextId !== deviceId) void acquire(nextId);
+                    }}
+                  >
+                    {devices.map((device, index) => (
+                      <DropdownMenuRadioItem
+                        key={device.deviceId}
+                        value={device.deviceId}
+                        className="cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover [&>span:first-child]:hidden"
+                      >
+                        {device.deviceId === deviceId ? (
+                          <FiCheckSquare className="size-4" />
+                        ) : (
+                          <FiSquare className="size-4" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">
+                          {cleanDeviceLabel(device.label) ||
+                            `Camera ${index + 1}`}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {isBackgroundSupported && (
+              <DropdownMenu
+                modal={false}
+                open={isBackgroundMenuOpen}
+                onOpenChange={setIsBackgroundMenuOpen}
+              >
+                <DropdownMenuTrigger asChild disabled={isConfirming}>
+                  <button
+                    type="button"
+                    title="Background"
+                    aria-label="Background"
+                    className={cn(
+                      "flex shrink-0 items-center gap-1.5 rounded-lg border border-call-border bg-primary px-2 transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60",
+                      isBackgroundMenuOpen && "bg-primary-hover",
+                    )}
+                  >
+                    <span className="relative flex h-5 w-8 items-center justify-center overflow-hidden rounded-[4px] text-foreground/70">
+                      {backgroundThumbUrl ? (
+                        <img
+                          src={backgroundThumbUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      ) : background.kind === "blur" ? (
+                        <Aperture className="size-4" />
                       ) : (
-                        <FiSquare className="size-4" />
+                        <Wallpaper className="size-4" />
                       )}
-                      <span className="min-w-0 flex-1 truncate">
-                        {cleanDeviceLabel(device.label) ||
-                          `Camera ${index + 1}`}
-                      </span>
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                      {pendingBackgroundKey && (
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
+                          <Loader2 className="size-3 animate-spin" />
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "size-4 shrink-0 text-foreground/50 transition-transform duration-150",
+                        isBackgroundMenuOpen && "rotate-180",
+                      )}
+                    />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  side="top"
+                  sideOffset={6}
+                  collisionPadding={8}
+                  className="z-[110] w-[248px] rounded-xl border-call-border bg-call-background p-1.5"
+                >
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {renderBackgroundOption(
+                      { kind: "none" },
+                      "No background",
+                      <Ban className="size-4" />,
+                    )}
+                    {renderBackgroundOption(
+                      { kind: "blur" },
+                      "Blur background",
+                      <span className="text-[0.65rem] font-medium">Blur</span>,
+                    )}
+                    {BACKGROUND_PRESETS.map((preset) =>
+                      renderBackgroundOption(
+                        { kind: "preset", id: preset.id },
+                        preset.label,
+                        null,
+                        getPresetImageUrl(preset.id),
+                      ),
+                    )}
+                    {customImageUrl &&
+                      renderBackgroundOption(
+                        { kind: "custom" },
+                        "Your image",
+                        null,
+                        customImageUrl,
+                      )}
+                    <button
+                      type="button"
+                      title="Upload a background"
+                      aria-label="Upload a background"
+                      disabled={isConfirming}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex aspect-[16/10] items-center justify-center rounded-md border border-dashed border-call-border bg-primary text-foreground/60 transition-colors hover:bg-primary-hover hover:text-foreground disabled:opacity-50"
+                    >
+                      <ImagePlus className="size-4" />
+                    </button>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              void handleCustomImage(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
 
           <div className="flex items-center gap-2">
             <button
@@ -533,7 +818,13 @@ const CameraPreviewDialog = ({
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isConfirming && <Loader2 className="size-4 animate-spin" />}
-              {isConfirming ? "Turning on…" : "Turn on camera"}
+              {isCameraLive
+                ? isConfirming
+                  ? "Applying…"
+                  : "Apply"
+                : isConfirming
+                  ? "Turning on…"
+                  : "Turn on camera"}
             </button>
           </div>
         </div>

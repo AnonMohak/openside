@@ -34,7 +34,7 @@ import {
 } from "react-icons/fi";
 import { FaCircleCheck } from "react-icons/fa6";
 import { IoChatbubbleOutline, IoHandRightOutline } from "react-icons/io5";
-import { Maximize, Minimize, SmilePlus, X } from "lucide-react";
+import { Maximize, Minimize, ScanFace, SmilePlus, X } from "lucide-react";
 import { LuScreenShare, LuScreenShareOff, LuUsers } from "react-icons/lu";
 import { MdCallEnd, MdLogout } from "react-icons/md";
 import { RiMicLine, RiMicOffLine } from "react-icons/ri";
@@ -389,7 +389,8 @@ const LiveKitControls = ({
   const { resolvedTheme, setTheme } = useTheme();
   const { sendReaction } = useLiveKitReactions();
   const recording = useRecordingContext();
-  const { openCameraPreview, setCameraAnchor } = useCameraPreview();
+  const { openCameraPreview, toggleCameraPreview, setCameraAnchor } =
+    useCameraPreview();
   const {
     isCameraEnabled,
     isMicrophoneEnabled,
@@ -527,7 +528,7 @@ const LiveKitControls = ({
     // Turning on goes through the preview, which publishes on confirm and
     // explains access/device failures itself.
     if (!isCameraEnabled) {
-      openCameraPreview();
+      toggleCameraPreview();
       return;
     }
     markLocalMediaAction();
@@ -1459,6 +1460,14 @@ const LiveKitControls = ({
           </DropdownMenuRadioGroup>
         </DropdownMenuSubContent>
       </DropdownMenuSub>
+      <DropdownMenuSeparator className="mx-2 my-1.5 bg-call-border" />
+      <DropdownMenuItem
+        onSelect={openCameraPreview}
+        className="cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover"
+      >
+        <ScanFace className="size-4" />
+        Camera preview
+      </DropdownMenuItem>
     </DropdownMenuContent>
   );
 
