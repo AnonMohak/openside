@@ -38,6 +38,7 @@ import ChatSidebar from "./sidebars/ChatSidebar";
 import InfoSidebar from "./sidebars/InfoSidebar";
 import UsersSidebar from "./sidebars/UsersSidebar";
 import RecordingProvider from "./recording/RecordingProvider";
+import { CameraPreviewProvider } from "./livekit/CameraPreview";
 
 type SidebarType = "info" | "users" | "chat" | null;
 
@@ -703,6 +704,7 @@ const LiveKitSpaceScreen = ({
       >
         <LiveKitChatProvider>
           <LiveKitReactionsProvider>
+          <CameraPreviewProvider>
             <div className="relative flex min-h-0 flex-1">
               <div className="min-w-0 flex-1">
                 <LiveKitVideoStage
@@ -750,6 +752,7 @@ const LiveKitSpaceScreen = ({
                 toggleSidebar={toggleSidebar}
               />
             </div>
+          </CameraPreviewProvider>
           </LiveKitReactionsProvider>
         </LiveKitChatProvider>
       </RecordingProvider>

@@ -63,6 +63,7 @@ import { useLiveKitChat } from "../chat/LiveKitChatProvider";
 import { useLiveKitReactions } from "../reactions/LiveKitReactionsProvider";
 import { useRecordingContext } from "../recording/RecordingProvider";
 import { useStartingMedia } from "./StartingMediaContext";
+import { useCameraPreview } from "./CameraPreview";
 
 // Screen-share capture options. NOTE: LiveKit's setScreenShareEnabled /
 // createScreenTracks do NOT merge the room's screenShareCaptureDefaults - they
@@ -388,6 +389,7 @@ const LiveKitControls = ({
   const { resolvedTheme, setTheme } = useTheme();
   const { sendReaction } = useLiveKitReactions();
   const recording = useRecordingContext();
+  const { openCameraPreview, setCameraAnchor } = useCameraPreview();
   const {
     isCameraEnabled,
     isMicrophoneEnabled,
@@ -522,17 +524,18 @@ const LiveKitControls = ({
   };
 
   const toggleCamera = async () => {
+    // Turning on goes through the preview, which publishes on confirm and
+    // explains access/device failures itself.
+    if (!isCameraEnabled) {
+      openCameraPreview();
+      return;
+    }
     markLocalMediaAction();
     try {
-      const nextEnabled = !isCameraEnabled;
-      await localParticipant.setCameraEnabled(nextEnabled);
-      playCallSound(nextEnabled ? "cameraOn" : "cameraOff");
+      await localParticipant.setCameraEnabled(false);
+      playCallSound("cameraOff");
     } catch {
-      // Turning the camera on can fail when access is blocked or the device is
-      // missing/in use. Don't surface a full error screen - leave video off and
-      // tell the user why. This fires on every attempt, so retrying re-toasts
-      // until it's fixed.
-      // The control state remains unchanged when media access fails.
+      // The control state remains unchanged if the camera can't be stopped.
     }
   };
 
@@ -1468,6 +1471,7 @@ const LiveKitControls = ({
     active,
     menuId,
     disabled = false,
+    anchorRef,
   }: {
     icon: ReactNode;
     label: string;
@@ -1477,9 +1481,11 @@ const LiveKitControls = ({
     active: boolean;
     menuId: "mic" | "cam";
     disabled?: boolean;
+    anchorRef?: (element: HTMLElement | null) => void;
   }) => (
     <div className="flex flex-col gap-1 items-center">
       <div
+        ref={anchorRef}
         className={cn(
           "flex items-stretch gap-0.5",
           disabled && "cursor-not-allowed",
@@ -1732,6 +1738,7 @@ const LiveKitControls = ({
         active: showCameraOn,
         menuId: "cam",
         disabled: isStartingMedia,
+        anchorRef: setCameraAnchor,
       })}
       {/* Screen share is effectively unsupported in phone browsers, and the
           theme/fullscreen options are non-essential - both give up their slot

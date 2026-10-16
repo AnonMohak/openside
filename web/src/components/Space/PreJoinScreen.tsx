@@ -19,6 +19,8 @@ import {
   sortMediaDevices,
 } from "@/lib/mediaDevices";
 import UserMedia from "./UserMedia";
+import LowLightBadge from "./ui/LowLightBadge";
+import { useLowLight } from "@/hooks/useLowLight";
 import UserAvatar from "./ui/UserAvatar";
 import AppLoader from "@/components/shared/AppLoader";
 import { useGetMe } from "@/hooks/useUserQuery";
@@ -52,6 +54,9 @@ const PreJoinScreen = ({
   const joinSpace = useJoinSpace(spaceData?.id || "");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [videoEnabled, setVideoEnabled] = useState(true);
+  const isLowLight = useLowLight(
+    videoEnabled ? stream?.getVideoTracks()[0] : undefined,
+  );
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [name, setName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -709,6 +714,9 @@ const PreJoinScreen = ({
                   />
                 )}
               </div>
+              {isLowLight && !isLoading && (
+                <LowLightBadge className="absolute right-2 top-2 z-20" />
+              )}
               <div className="absolute bottom-2 left-1/2 z-20 -translate-x-1/2 flex items-center gap-2">
                 <button
                   onClick={() => {

@@ -9,6 +9,7 @@ import {
 import { Track, type Participant as LiveKitParticipant } from "livekit-client";
 import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { playCallSound } from "@/lib/callSounds";
+import { useCameraPreview } from "../livekit/CameraPreview";
 import {
   sendMediaRequest,
   type MediaRequestSource,
@@ -148,6 +149,7 @@ const ParticipantRow = ({
   const kickParticipant = useKickParticipant(spaceId || "", participantId);
   const updateRole = useUpdateParticipantRole(spaceId || "", participantId);
   const { localParticipant } = useLocalParticipant();
+  const { openCameraPreview } = useCameraPreview();
   const room = useRoomContext();
   const isMicMuted = useIsMuted({
     participant,
@@ -184,10 +186,14 @@ const ParticipantRow = ({
     }
   };
   const setLocalCamera = async () => {
+    if (isCameraMuted) {
+      openCameraPreview();
+      return;
+    }
     markLocalMediaAction();
     try {
-      await localParticipant.setCameraEnabled(isCameraMuted);
-      playCallSound(isCameraMuted ? "cameraOn" : "cameraOff");
+      await localParticipant.setCameraEnabled(false);
+      playCallSound("cameraOff");
     } catch (error) {
       console.error("Unable to toggle camera:", error);
     }
