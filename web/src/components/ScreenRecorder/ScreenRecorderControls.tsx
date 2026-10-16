@@ -30,7 +30,6 @@ import { FiUploadCloud } from "react-icons/fi";
 import { cn } from "@/lib/utils";
 import { sortMediaDevices } from "@/lib/mediaDevices";
 import { markLocalMediaAction } from "@/lib/localMediaIntent";
-import playClickSound from "@/utils/ClickSound";
 import ControlButton from "../Space/controls/ControlButton";
 import {
   useScreenRecordingContext,
@@ -364,7 +363,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
           type="button"
           disabled={disabled}
           onClick={() => {
-            playClickSound();
             onClick();
           }}
           className={cn(
@@ -391,7 +389,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
             <button
               type="button"
               disabled={disabled}
-              onClick={playClickSound}
               className={cn(
                 "flex min-h-11 w-6 items-center justify-center rounded-r-xl border text-base font-medium transition-all duration-200",
                 disabled
@@ -429,7 +426,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
             <button
               type="button"
               disabled={isActive}
-              onClick={playClickSound}
               className={cn(
                 "flex items-center justify-center border border-call-border p-3 rounded-xl text-lg font-medium transition-all duration-200",
                 isActive
@@ -476,7 +472,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            onClick={playClickSound}
             className={cn(
               "flex items-center justify-center border border-call-border p-3 rounded-xl text-lg font-medium cursor-pointer transition-all duration-200 hover:bg-muted",
               isOptionsMenuOpen ? "bg-muted" : "bg-primary",
@@ -553,7 +548,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
           type="button"
           disabled={isStartDisabled}
           onClick={() => {
-            playClickSound();
             if (!isRecording && !isLayoutReady) {
               return;
             }

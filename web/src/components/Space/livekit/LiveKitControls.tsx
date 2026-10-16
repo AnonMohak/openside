@@ -56,7 +56,7 @@ import { cn } from "@/lib/utils";
 import { useGetRecordingSessionsBySpace } from "@/hooks/useRecording";
 import { canSelectAudioOutput, sortMediaDevices } from "@/lib/mediaDevices";
 import { markLocalMediaAction } from "@/lib/localMediaIntent";
-import playClickSound from "@/utils/ClickSound";
+import { playCallSound } from "@/lib/callSounds";
 import ControlButton from "../controls/ControlButton";
 import CallWarningDialog from "../ui/CallWarningDialog";
 import { useLiveKitChat } from "../chat/LiveKitChatProvider";
@@ -521,11 +521,14 @@ const LiveKitControls = ({
     markLocalMediaAction();
     try {
       if (deafened) {
+        // Undeafening plays its own sound; no separate unmute blip.
         await handleDeafenToggle(false);
         await localParticipant.setMicrophoneEnabled(true);
         return;
       }
-      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+      const nextEnabled = !isMicrophoneEnabled;
+      await localParticipant.setMicrophoneEnabled(nextEnabled);
+      playCallSound(nextEnabled ? "micOn" : "micOff");
     } catch {
       // Mirror toggleCamera: unmuting fails when access is blocked or the
       // device is missing - without this the button silently does nothing
@@ -537,7 +540,9 @@ const LiveKitControls = ({
   const toggleCamera = async () => {
     markLocalMediaAction();
     try {
-      await localParticipant.setCameraEnabled(!isCameraEnabled);
+      const nextEnabled = !isCameraEnabled;
+      await localParticipant.setCameraEnabled(nextEnabled);
+      playCallSound(nextEnabled ? "cameraOn" : "cameraOff");
     } catch {
       // Turning the camera on can fail when access is blocked or the device is
       // missing/in use. Don't surface a full error screen - leave video off and
@@ -1057,8 +1062,8 @@ const LiveKitControls = ({
   const handleDeafenToggle = async (checked: boolean) => {
     const shouldDeafen = checked === true;
 
-    playClickSound();
     markLocalMediaAction();
+    playCallSound(shouldDeafen ? "deafen" : "undeafen");
     setDeafened(shouldDeafen);
 
     if (shouldDeafen) {
@@ -1360,7 +1365,6 @@ const LiveKitControls = ({
           type="button"
           onClick={() => {
             if (isDisabled) return;
-            playClickSound();
             recording.toggleRecording();
           }}
           disabled={isDisabled}
@@ -1502,7 +1506,6 @@ const LiveKitControls = ({
           <button
             type="button"
             disabled={isStartingMedia}
-            onClick={playClickSound}
             className={cn(
               "flex items-center justify-center border border-call-border p-3 rounded-xl text-lg font-medium cursor-pointer transition-all duration-200 hover:bg-muted",
               isOptionsMenuOpen ? "bg-muted" : "bg-primary",
@@ -1555,7 +1558,6 @@ const LiveKitControls = ({
             <button
               type="button"
               disabled={isStartingMedia}
-              onClick={playClickSound}
               className={cn(
                 "flex items-center justify-center border border-red-500 bg-red-500 p-2.5 md:p-3 rounded-xl text-lg font-medium text-white cursor-pointer transition-all duration-200 hover:border-red-600 hover:bg-red-600",
                 isStartingMedia && DISABLED_CONTROL_CLASS,
@@ -1801,7 +1803,6 @@ const LiveKitControls = ({
           type="button"
           disabled={disabled}
           onClick={() => {
-            playClickSound();
             onClick();
           }}
           className={cn(
@@ -1829,7 +1830,6 @@ const LiveKitControls = ({
             <button
               type="button"
               disabled={disabled}
-              onClick={playClickSound}
               className={cn(
                 "flex min-h-11 w-6 items-center justify-center rounded-r-xl border text-base font-medium cursor-pointer transition-all duration-200 max-md:hidden",
                 disabled
@@ -1914,7 +1914,6 @@ const LiveKitControls = ({
       <ControlButton
         icon={<LuScreenShare />}
         label="Share"
-        sound={false}
         onClick={toggleScreenShare}
         disabled={isStartingMedia}
       />
@@ -1935,7 +1934,6 @@ const LiveKitControls = ({
               isReactionMenuOpen ? "bg-muted" : "bg-primary hover:bg-muted",
               isStartingMedia && DISABLED_CONTROL_CLASS,
             )}
-            onClick={playClickSound}
             aria-label="Reactions"
           >
             <FiSmile />
@@ -1998,7 +1996,6 @@ const LiveKitControls = ({
             <button
               type="button"
               onClick={() => {
-                playClickSound();
                 void toggleHandRaise();
               }}
               className={cn(
@@ -2065,7 +2062,6 @@ const LiveKitControls = ({
       <ControlButton
         icon={<BsInfoLg />}
         label="Info"
-        sound={false}
         onClick={() => toggleSidebar("info")}
         variant={activeSidebar === "info" ? "active" : "default"}
         disabled={isStartingMedia}
@@ -2073,7 +2069,6 @@ const LiveKitControls = ({
       <ControlButton
         icon={<LuUsers />}
         label="People"
-        sound={false}
         onClick={() => toggleSidebar("users")}
         variant={activeSidebar === "users" ? "active" : "default"}
         disabled={isStartingMedia}
@@ -2082,7 +2077,6 @@ const LiveKitControls = ({
         <ControlButton
           icon={<IoChatbubbleOutline />}
           label="Chat"
-          sound={false}
           onClick={() => toggleSidebar("chat")}
           variant={activeSidebar === "chat" ? "active" : "default"}
           disabled={isStartingMedia}

@@ -8,6 +8,7 @@ import {
 } from "@livekit/components-react";
 import { Track, type Participant as LiveKitParticipant } from "livekit-client";
 import { markLocalMediaAction } from "@/lib/localMediaIntent";
+import { playCallSound } from "@/lib/callSounds";
 import {
   sendMediaRequest,
   type MediaRequestSource,
@@ -176,6 +177,7 @@ const ParticipantRow = ({
     markLocalMediaAction();
     try {
       await localParticipant.setMicrophoneEnabled(isMicMuted);
+      playCallSound(isMicMuted ? "micOn" : "micOff");
     } catch (error) {
       console.error("Unable to toggle microphone:", error);
     }
@@ -184,6 +186,7 @@ const ParticipantRow = ({
     markLocalMediaAction();
     try {
       await localParticipant.setCameraEnabled(isCameraMuted);
+      playCallSound(isCameraMuted ? "cameraOn" : "cameraOff");
     } catch (error) {
       console.error("Unable to toggle camera:", error);
     }

@@ -12,7 +12,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
-import playClickSound from "@/utils/ClickSound";
 import {
   applyAudioOutput,
   canSelectAudioOutput,
@@ -714,7 +713,6 @@ const PreJoinScreen = ({
                 <button
                   onClick={() => {
                     handleAudioToggle();
-                    playClickSound();
                   }}
                   className={`flex items-center justify-center p-3 rounded-xl text-xl font-medium cursor-pointer transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                     audioEnabled
@@ -729,7 +727,6 @@ const PreJoinScreen = ({
                 <button
                   onClick={() => {
                     handleVideoToggle();
-                    playClickSound();
                   }}
                   className={`flex items-center justify-center p-3 rounded-xl text-xl font-medium cursor-pointer transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoEnabled

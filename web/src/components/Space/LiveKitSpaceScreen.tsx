@@ -10,6 +10,7 @@ import {
   ScreenSharePresets,
   Track,
   VideoPresets,
+  type LocalTrackPublication,
   type RemoteParticipant,
   type RemoteTrackPublication,
   type RoomOptions,
@@ -20,6 +21,7 @@ import { useGetMe } from "@/hooks/useUserQuery";
 import type { PreJoinSettings } from "@/types/preJoinTypes";
 import { getOrCreateSessionId } from "@/utils/ParticipantSessionId";
 import { stopAllLocalMedia } from "@/lib/mediaTracker";
+import { playCallSound } from "@/lib/callSounds";
 import { DEFAULT_FPS, clampFps } from "@/lib/recordingConstants";
 import type { CallExitReason } from "./CallExitScreen";
 import AppLoader from "@/components/shared/AppLoader";
@@ -99,6 +101,12 @@ const LiveKitSpaceScreen = ({
     useGetSpaceByJoinCode(roomCode);
   const endSpace = useEndSpace();
   const [connectionReady, setConnectionReady] = useState(false);
+  // Flips on the first connect. Until then only the local tile exists, so a
+  // full-screen loader hides the half-built call (everyone else shows up only
+  // once LiveKit connects).
+  const [hasConnected, setHasConnected] = useState(false);
+  // Set on connect so shares that already existed when we joined don't "ting".
+  const isConnectedRef = useRef(false);
   // `${identity}::${source}` of the spotlighted (pinned) tile, or null for the
   // grid. Shared by the video stage (click-to-spotlight) and the users sidebar
   // (Pin), so pinning a user and clicking their card are the same action.
@@ -381,6 +389,26 @@ const LiveKitSpaceScreen = ({
     };
   }, [room]);
 
+  // A single "ting" for everyone whenever anyone (including us) starts sharing
+  // their screen.
+  useEffect(() => {
+    const handlePublished = (
+      publication: RemoteTrackPublication | LocalTrackPublication,
+    ) => {
+      if (!isConnectedRef.current) return;
+      if (publication.source === Track.Source.ScreenShare) {
+        playCallSound("screenShare");
+      }
+    };
+
+    room.on(RoomEvent.TrackPublished, handlePublished);
+    room.on(RoomEvent.LocalTrackPublished, handlePublished);
+    return () => {
+      room.off(RoomEvent.TrackPublished, handlePublished);
+      room.off(RoomEvent.LocalTrackPublished, handlePublished);
+    };
+  }, [room]);
+
   // Deafen = actually stop receiving audio, not just volume 0 - otherwise a
   // deafened user keeps downloading every participant's audio. The volume-0
   // pass in LiveKitControls stays as a belt-and-suspenders for elements that
@@ -470,6 +498,7 @@ const LiveKitSpaceScreen = ({
     // No explicit leave API call is needed (and it would miss tab-close/crash).
     releaseLocalMedia();
     room.disconnect(true);
+    playCallSound("left");
     onExit("left");
   };
 
@@ -492,6 +521,7 @@ const LiveKitSpaceScreen = ({
           await finalizeRecordingBeforeExit();
           releaseLocalMedia();
           room.disconnect(true);
+          playCallSound("left");
           onExit("ended");
         },
         onError: (error) => {
@@ -548,6 +578,10 @@ const LiveKitSpaceScreen = ({
       video={false}
       connectOptions={connectOptions}
       onConnected={() => {
+        // Only this user hears it, so they know they're in the room.
+        playCallSound("joined");
+        isConnectedRef.current = true;
+        setHasConnected(true);
         void startLocalMedia();
 
         // Carry the speaker chosen on pre-join into the call; LiveKit applies
@@ -580,6 +614,7 @@ const LiveKitSpaceScreen = ({
           // Free the camera & mic right now rather than waiting for the unmount
           // cleanup, so the tab indicator drops the moment the exit appears.
           releaseLocalMedia();
+          playCallSound("left");
 
           if (reason === DisconnectReason.DUPLICATE_IDENTITY) {
             onExit("duplicate");
@@ -644,12 +679,13 @@ const LiveKitSpaceScreen = ({
       }}
       className="relative flex h-full flex-col gap-2 bg-background"
     >
-      {/* The user/space queries decide role-specific UI (host's End-for-all
-          menu, invite panel, ...). Mask the call UI until both settle so the
-          buttons don't render in the wrong variant and then flip. The room
-          keeps connecting underneath, so this adds no join delay. */}
-      {(isLoadingUser || isLoadingSpace) && (
-        <AppLoader overlay message="Setting up your space..." />
+      {/* Mask the whole call until LiveKit connects and the user/space queries
+          settle (they decide role-specific UI like the host's End-for-all
+          menu), so nothing renders half-joined or in the wrong variant. */}
+      {(!hasConnected || isLoadingUser || isLoadingSpace) && (
+        <div className="fixed inset-0 z-50">
+          <AppLoader message="Joining the space..." />
+        </div>
       )}
       {endSpace.isPending && (
         <AppLoader overlay message="Ending the session for everyone..." />
