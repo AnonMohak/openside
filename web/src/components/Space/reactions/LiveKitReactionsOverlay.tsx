@@ -86,8 +86,10 @@ const LiveKitReactionsOverlay = () => {
         >
           <div className="flex min-w-[72px] flex-col items-center gap-1.5 px-2.5 py-2">
             <span className="text-5xl leading-none">{reaction.emoji}</span>
-            <span className="max-w-[120px] truncate rounded-full bg-blue-500/55 px-2.5 py-0.5 text-[0.68rem] font-medium text-white">
-              {reaction.isLocal ? "You" : reaction.senderName}
+            <span className="max-w-[160px] truncate rounded-full bg-blue-500/55 px-2.5 py-0.5 text-[0.68rem] font-medium text-white">
+              {reaction.isLocal
+                ? `${reaction.senderName} (You)`
+                : reaction.senderName}
             </span>
           </div>
         </div>

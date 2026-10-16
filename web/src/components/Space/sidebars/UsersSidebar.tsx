@@ -169,9 +169,10 @@ const ParticipantRow = ({
   // Only the actual host assigns/removes co-hosts.
   const canManageRole = isHost && !participant.isLocal && !targetIsHost;
   const avatar = getParticipantAvatar(participant);
+  const participantName = participant.name || "Guest";
   const displayName = participant.isLocal
-    ? "You"
-    : participant.name || "Guest";
+    ? `${participantName} (You)`
+    : participantName;
   const isHandRaised = participant.attributes.handRaised === "true";
   const setLocalMicrophone = async () => {
     markLocalMediaAction();
@@ -233,7 +234,7 @@ const ParticipantRow = ({
             draggable={false}
           />
         ) : (
-          displayName.charAt(0).toUpperCase()
+          participantName.charAt(0).toUpperCase()
         )}
       </div>
 

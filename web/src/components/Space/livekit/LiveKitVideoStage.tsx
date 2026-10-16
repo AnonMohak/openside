@@ -3,6 +3,7 @@ import {
   RoomAudioRenderer,
   VideoTrack,
   isTrackReference,
+  useConnectionQualityIndicator,
   useConnectionState,
   useIsMuted,
   useLocalParticipant,
@@ -31,8 +32,8 @@ import { toast } from "@/lib/toast";
 import { useStartingMedia } from "./StartingMediaContext";
 
 const getRoleLabel = (attributes?: Record<string, string>) => {
-  if (attributes?.role === "HOST") return "(Host)";
-  if (attributes?.role === "CO_HOST") return "(Co-host)";
+  if (attributes?.role === "HOST") return "Host";
+  if (attributes?.role === "CO_HOST") return "Co-host";
   return null;
 };
 
@@ -680,18 +681,35 @@ const ParticipantFrame = ({
     source: Track.Source.Camera,
   });
   const liveKitIsSpeaking = useIsSpeaking(participant);
+  // LiveKit reports every participant's connection quality. Flag remote
+  // people on a poor connection; our own is shown by the stage badge.
+  const { quality: connectionQuality } = useConnectionQualityIndicator({
+    participant,
+  });
+  const showPoorConnection =
+    !participant.isLocal &&
+    !isScreenShare &&
+    connectionQuality === ConnectionQuality.Poor;
   const localMicIsSpeaking = useLocalMicSpeaking(participant, isMicMuted);
   // The speaking ring / mic state belong to the person, not their screen tile.
   const isSpeaking =
     !isScreenShare &&
     (participant.isLocal ? localMicIsSpeaking : liveKitIsSpeaking);
   const roleLabel = getRoleLabel(participant.attributes);
-  const displayName = participant.isLocal ? "You" : participant.name || "Guest";
+  const participantName =
+    participant.name ||
+    (participant.isLocal ? localUser?.name : undefined) ||
+    "Guest";
+  const displayName = participant.isLocal
+    ? `${participantName} (You)`
+    : participantName;
   const displayLabel = isScreenShare
-    ? `${displayName}'s screen`
-    : roleLabel
-      ? `${displayName} ${roleLabel}`
-      : displayName;
+    ? participant.isLocal
+      ? "Your screen"
+      : `${participantName}'s screen`
+    : displayName;
+  // Host / co-host get their own pill to the right of the name.
+  const showRolePill = !isScreenShare && !!roleLabel;
   // LiveKit only populates participant attributes/metadata after the connection
   // negotiates, so the local frame has no avatar for a moment after joining or
   // reloading. Fall back to the pre-join avatar (available synchronously at
@@ -770,9 +788,19 @@ const ParticipantFrame = ({
         ) : startingVideoTrack ? (
           <StartingLocalVideo track={startingVideoTrack} />
         ) : (
-          <UserAvatar name={displayName} avatar={avatar} />
+          <UserAvatar name={participantName} avatar={avatar} />
         )}
       </ParticipantTile>
+      {showPoorConnection && (
+        <div
+          className={`pointer-events-none absolute z-20 flex items-center justify-center rounded-full bg-background/55 text-foreground ${
+            compact ? "right-1.5 top-1.5 size-5" : "right-2 top-2 size-7"
+          }`}
+          title="Unstable connection"
+        >
+          <LuWifiHigh size={compact ? 12 : 16} />
+        </div>
+      )}
       {isSpeaking && (
         <div className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-3 ring-inset ring-brand dark:ring-2 dark:ring-brand/80" />
       )}
@@ -798,7 +826,7 @@ const ParticipantFrame = ({
         </div>
       )}
       <div
-        className={`pointer-events-none absolute z-20 flex items-center gap-2 ${
+        className={`pointer-events-none absolute z-20 flex items-center gap-1 ${
           compact ? "left-1.5 bottom-1.5" : "left-2 bottom-2"
         }`}
       >
@@ -820,6 +848,15 @@ const ParticipantFrame = ({
           )}
           {displayLabel}
         </span>
+        {showRolePill && (
+          <span
+            className={`shrink-0 rounded-full bg-background/55 font-medium text-foreground ${
+              compact ? "px-2 py-0.5 text-[11px]" : "px-3 py-1 text-sm"
+            }`}
+          >
+            {roleLabel}
+          </span>
+        )}
       </div>
     </div>
   );
