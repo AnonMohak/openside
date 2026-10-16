@@ -1333,7 +1333,7 @@ const LiveKitControls = ({
     const insideLabel = isRecording
       ? "Stop"
       : stopRequestFailed
-        ? "Retry stop"
+        ? "Retry"
       : isCountdown
         ? "Starting"
         : state === "starting"
@@ -1365,7 +1365,9 @@ const LiveKitControls = ({
           }}
           disabled={isDisabled}
           className={cn(
-            "flex min-h-11 items-center justify-center gap-2 border px-3.5 rounded-xl text-sm font-medium transition-all duration-200 max-md:min-h-10 max-md:px-2.5",
+            // Fixed width (sized for the longest label, "Starting") so state
+            // changes don't resize the button and shift the control bar.
+            "flex min-h-11 items-center justify-center gap-2 border px-3.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all duration-200 md:w-[108px] max-md:min-h-10 max-md:px-2.5",
             isRecording
               ? "border-red-600 bg-red-600 text-white hover:bg-red-700 hover:border-red-700"
               : "border-red-500 bg-red-500 text-white hover:bg-red-600 hover:border-red-600",
