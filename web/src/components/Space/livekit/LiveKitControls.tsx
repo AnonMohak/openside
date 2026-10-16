@@ -72,6 +72,12 @@ import { useStartingMedia } from "./StartingMediaContext";
 // (1080p30). Chromium-only, and still gated by the picker's "Share audio" box.
 const SCREEN_CAPTURE_OPTIONS = { audio: true } as const;
 
+// Locked controls (e.g. while the call connects): hollow, dashed and greyed
+// out with no hover, so they clearly read as unavailable rather than "off".
+const DISABLED_CONTROL_CLASS =
+  "cursor-not-allowed border-dashed border-foreground/20 bg-transparent text-foreground/30 hover:bg-transparent";
+const DISABLED_LABEL_CLASS = "text-foreground/30";
+
 const formatRecordingDuration = (ms: number) => {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
@@ -403,10 +409,12 @@ const LiveKitControls = ({
     isScreenShareEnabled,
     localParticipant,
   } = useLocalParticipant();
-  // While the pre-join camera/mic are still being published, show the chosen
-  // state and lock the media controls so clicks can't race the publish.
+  // Until LiveKit is connected and the pre-join camera/mic are published, show
+  // the chosen state and lock the media controls so clicks can't race them.
   const startingMedia = useStartingMedia();
-  const isStartingMedia = startingMedia !== null;
+  const connectionState = useConnectionState();
+  const isStartingMedia =
+    startingMedia !== null || connectionState !== ConnectionState.Connected;
   const showMicOn = startingMedia ? startingMedia.audioOn : isMicrophoneEnabled;
   const showCameraOn = startingMedia ? startingMedia.videoOn : isCameraEnabled;
   const participantRole = localParticipant.attributes.role;
@@ -464,7 +472,6 @@ const LiveKitControls = ({
   // controls just flip off with zero explanation. But when the space is ending
   // the room disconnects and every track flips off at once - that's not a
   // "turned off" event worth toasting, so suppress it while disconnecting.
-  const connectionState = useConnectionState();
   const isDisconnecting =
     connectionState === ConnectionState.Disconnected ||
     connectionState === ConnectionState.Reconnecting;
@@ -1363,15 +1370,25 @@ const LiveKitControls = ({
               ? "border-red-600 bg-red-600 text-white hover:bg-red-700 hover:border-red-700"
               : "border-red-500 bg-red-500 text-white hover:bg-red-600 hover:border-red-600",
             isDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+            isStartingMedia && DISABLED_CONTROL_CLASS,
           )}
           aria-label={isRecording ? "Stop recording" : "Start recording"}
         >
           <BsFillRecordCircleFill
-            className={cn("size-4 text-white", isRecording && "animate-pulse")}
+            className={cn(
+              "size-4",
+              isStartingMedia ? "text-foreground/30" : "text-white",
+              isRecording && !isStartingMedia && "animate-pulse",
+            )}
           />
           <span className="max-md:hidden">{insideLabel}</span>
         </button>
-        <p className="text-[0.675rem] text-foreground/50 max-md:hidden">
+        <p
+          className={cn(
+            "text-[0.675rem] text-foreground/50 max-md:hidden",
+            isStartingMedia && DISABLED_LABEL_CLASS,
+          )}
+        >
           {caption}
         </p>
       </div>
@@ -1482,10 +1499,12 @@ const LiveKitControls = ({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            disabled={isStartingMedia}
             onClick={playClickSound}
             className={cn(
               "flex items-center justify-center border border-call-border p-3 rounded-xl text-lg font-medium cursor-pointer transition-all duration-200 hover:bg-muted",
               isOptionsMenuOpen ? "bg-muted" : "bg-primary",
+              isStartingMedia && DISABLED_CONTROL_CLASS,
             )}
             aria-label="Call options"
           >
@@ -1515,7 +1534,14 @@ const LiveKitControls = ({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <p className="text-[0.675rem] text-foreground/50 max-md:hidden">Options</p>
+      <p
+        className={cn(
+          "text-[0.675rem] text-foreground/50 max-md:hidden",
+          isStartingMedia && DISABLED_LABEL_CLASS,
+        )}
+      >
+        Options
+      </p>
     </div>
   );
 
@@ -1526,8 +1552,12 @@ const LiveKitControls = ({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
+              disabled={isStartingMedia}
               onClick={playClickSound}
-              className="flex items-center justify-center border border-red-500 bg-red-500 p-2.5 md:p-3 rounded-xl text-lg font-medium text-white cursor-pointer transition-all duration-200 hover:border-red-600 hover:bg-red-600"
+              className={cn(
+                "flex items-center justify-center border border-red-500 bg-red-500 p-2.5 md:p-3 rounded-xl text-lg font-medium text-white cursor-pointer transition-all duration-200 hover:border-red-600 hover:bg-red-600",
+                isStartingMedia && DISABLED_CONTROL_CLASS,
+              )}
               aria-label="End call options"
             >
               <BsFillTelephoneFill className="-rotate-[225deg]" />
@@ -1556,7 +1586,14 @@ const LiveKitControls = ({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <p className="text-[0.675rem] text-foreground/50 max-md:hidden">End</p>
+        <p
+          className={cn(
+            "text-[0.675rem] text-foreground/50 max-md:hidden",
+            isStartingMedia && DISABLED_LABEL_CLASS,
+          )}
+        >
+          End
+        </p>
       </div>
     ) : (
       <ControlButton
@@ -1564,6 +1601,7 @@ const LiveKitControls = ({
         label="End"
         onClick={onLeave}
         variant="danger"
+        disabled={isStartingMedia}
       />
     );
 
@@ -1753,7 +1791,7 @@ const LiveKitControls = ({
       <div
         className={cn(
           "flex items-stretch gap-0.5",
-          disabled && "pointer-events-none opacity-60",
+          disabled && "cursor-not-allowed",
         )}
         aria-disabled={disabled}
       >
@@ -1768,9 +1806,11 @@ const LiveKitControls = ({
             // On phones the device-menu chevron is hidden, so the button takes
             // the full rounding itself.
             "flex min-h-11 w-11 items-center justify-center rounded-l-xl border text-lg font-medium cursor-pointer transition-all duration-200 max-md:min-h-10 max-md:w-10 max-md:rounded-xl",
-            active
-              ? "border-call-border bg-primary hover:bg-muted"
-              : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
+            disabled
+              ? DISABLED_CONTROL_CLASS
+              : active
+                ? "border-call-border bg-primary hover:bg-muted"
+                : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
           )}
           aria-label={label}
         >
@@ -1790,13 +1830,15 @@ const LiveKitControls = ({
               onClick={playClickSound}
               className={cn(
                 "flex min-h-11 w-6 items-center justify-center rounded-r-xl border text-base font-medium cursor-pointer transition-all duration-200 max-md:hidden",
-                active
-                  ? openMediaMenu === menuId
-                    ? "border-call-border bg-muted"
-                    : "border-call-border bg-primary hover:bg-muted"
-                  : openMediaMenu === menuId
-                    ? "border-red-400/10 bg-red-400/40 text-red-400"
-                    : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
+                disabled
+                  ? DISABLED_CONTROL_CLASS
+                  : active
+                    ? openMediaMenu === menuId
+                      ? "border-call-border bg-muted"
+                      : "border-call-border bg-primary hover:bg-muted"
+                    : openMediaMenu === menuId
+                      ? "border-red-400/10 bg-red-400/40 text-red-400"
+                      : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
               )}
               aria-label={activeLabel}
             >
@@ -1806,7 +1848,14 @@ const LiveKitControls = ({
           {menu}
         </DropdownMenu>
       </div>
-      <p className="text-[0.675rem] text-foreground/50 max-md:hidden">{label}</p>
+      <p
+        className={cn(
+          "text-[0.675rem] text-foreground/50 max-md:hidden",
+          disabled && DISABLED_LABEL_CLASS,
+        )}
+      >
+        {label}
+      </p>
     </div>
   );
 
@@ -1817,7 +1866,11 @@ const LiveKitControls = ({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-center rounded-xl border border-blue-400/10 bg-blue-400/20 p-3 text-lg font-medium text-blue-400 cursor-pointer transition-all duration-200 hover:bg-blue-400/40"
+              disabled={isStartingMedia}
+              className={cn(
+                "flex items-center justify-center rounded-xl border border-blue-400/10 bg-blue-400/20 p-3 text-lg font-medium text-blue-400 cursor-pointer transition-all duration-200 hover:bg-blue-400/40",
+                isStartingMedia && DISABLED_CONTROL_CLASS,
+              )}
               aria-label="Screen share options"
             >
               <LuScreenShare />
@@ -1846,7 +1899,14 @@ const LiveKitControls = ({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <p className="text-[0.675rem] text-foreground/50 max-md:hidden">Share</p>
+        <p
+          className={cn(
+            "text-[0.675rem] text-foreground/50 max-md:hidden",
+            isStartingMedia && DISABLED_LABEL_CLASS,
+          )}
+        >
+          Share
+        </p>
       </div>
     ) : (
       <ControlButton
@@ -1871,7 +1931,7 @@ const LiveKitControls = ({
             className={cn(
               "flex min-h-11 w-11 items-center justify-center rounded-xl border border-call-border text-lg font-medium cursor-pointer transition-all duration-200 max-md:min-h-10 max-md:w-10",
               isReactionMenuOpen ? "bg-muted" : "bg-primary hover:bg-muted",
-              isStartingMedia && "cursor-not-allowed opacity-60",
+              isStartingMedia && DISABLED_CONTROL_CLASS,
             )}
             onClick={playClickSound}
             aria-label="Reactions"
@@ -1953,7 +2013,14 @@ const LiveKitControls = ({
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
-      <p className="text-[0.675rem] text-foreground/50 max-md:hidden">React</p>
+      <p
+        className={cn(
+          "text-[0.675rem] text-foreground/50 max-md:hidden",
+          isStartingMedia && DISABLED_LABEL_CLASS,
+        )}
+      >
+        React
+      </p>
     </div>
   );
 
@@ -1999,6 +2066,7 @@ const LiveKitControls = ({
         sound={false}
         onClick={() => toggleSidebar("info")}
         variant={activeSidebar === "info" ? "active" : "default"}
+        disabled={isStartingMedia}
       />
       <ControlButton
         icon={<LuUsers />}
@@ -2006,6 +2074,7 @@ const LiveKitControls = ({
         sound={false}
         onClick={() => toggleSidebar("users")}
         variant={activeSidebar === "users" ? "active" : "default"}
+        disabled={isStartingMedia}
       />
       <div className="relative">
         <ControlButton
@@ -2014,6 +2083,7 @@ const LiveKitControls = ({
           sound={false}
           onClick={() => toggleSidebar("chat")}
           variant={activeSidebar === "chat" ? "active" : "default"}
+          disabled={isStartingMedia}
         />
         {unreadChatCount > 0 && (
           <span className="pointer-events-none absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[0.65rem] font-semibold text-white">

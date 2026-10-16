@@ -56,13 +56,17 @@ const ControlButton: React.FC<ControlButtonProps> = ({
       <button
         onClick={handleClick}
         disabled={disabled}
-        className={`${baseClasses} ${getVariantClasses()} ${className} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+        className={`${baseClasses} ${getVariantClasses()} ${className} ${disabled ? "cursor-not-allowed !border-dashed !border-foreground/20 !bg-transparent !text-foreground/30" : ""}`}
       >
         {icon}
         {variant === "record" && iconText && <span>{iconText}</span>}
       </button>
       {showLabel && (
-        <p className="text-[0.675rem] text-foreground/50 max-md:hidden">
+        <p
+          className={`text-[0.675rem] max-md:hidden ${
+            disabled ? "text-foreground/30" : "text-foreground/50"
+          }`}
+        >
           {label}
         </p>
       )}

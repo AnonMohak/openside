@@ -310,6 +310,18 @@ const LiveKitSpaceScreen = ({
       const track = previewTracks.video;
       if (track?.readyState === "live") {
         try {
+          // Pre-join captures the camera's native frame (resizeMode "none"),
+          // which can be portrait or 4:3. Match what LiveKit would capture
+          // (16:9 at the call resolution) without restarting the camera.
+          const { width, height, aspectRatio } = VideoPresets.h2160.resolution;
+          await track.applyConstraints({
+            ...track.getConstraints(),
+            width: { ideal: width },
+            height: { ideal: height },
+            aspectRatio: { ideal: aspectRatio },
+            frameRate: { ideal: clampFps(user?.targetFps ?? DEFAULT_FPS) },
+            resizeMode: "crop-and-scale",
+          } as MediaTrackConstraints);
           // userProvidedTrack=false: LiveKit owns it, so camera-off still stops
           // the device and camera-on/device switches re-acquire as usual.
           await localParticipant.publishTrack(
@@ -348,7 +360,7 @@ const LiveKitSpaceScreen = ({
       wantsAudio ? publishAudio() : null,
     ]);
     setStartingMedia(null);
-  }, [room, previewTracks, wantsAudio, wantsVideo]);
+  }, [room, previewTracks, wantsAudio, wantsVideo, user?.targetFps]);
 
   // Drop a stale spotlight when that participant leaves - otherwise they'd be
   // silently re-spotlighted full-screen if they rejoined later. Their camera and
