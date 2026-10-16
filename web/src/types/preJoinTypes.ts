@@ -10,4 +10,9 @@ export interface PreJoinSettings {
   videoDeviceId?: string;
   audioOutputDeviceId?: string;
   livekit?: LiveKitJoinConfig;
+  /**
+   * The live pre-join preview (only the kinds left on). The call publishes these
+   * tracks instead of re-opening the camera/mic, so they go live on connect.
+   */
+  previewStream?: MediaStream;
 }

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveKitRoom } from "@livekit/components-react";
 import {
   DisconnectReason,
+  LocalAudioTrack,
+  LocalVideoTrack,
   MediaDeviceFailure,
   Room,
   RoomEvent,
@@ -23,6 +25,10 @@ import type { CallExitReason } from "./CallExitScreen";
 import AppLoader from "@/components/shared/AppLoader";
 import LiveKitControls from "./livekit/LiveKitControls";
 import LiveKitVideoStage from "./livekit/LiveKitVideoStage";
+import {
+  StartingMediaContext,
+  type StartingMedia,
+} from "./livekit/StartingMediaContext";
 import { LiveKitChatProvider } from "./chat/LiveKitChatProvider";
 import { LiveKitReactionsProvider } from "./reactions/LiveKitReactionsProvider";
 import LiveKitReactionsOverlay from "./reactions/LiveKitReactionsOverlay";
@@ -39,6 +45,33 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "space-sidebar-width";
 
 const clampSidebarWidth = (width: number) =>
   Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH);
+
+// Pick the pre-join preview tracks the call can publish as-is, and stop the
+// rest. The mic is only reused when its echo cancellation matches what the call
+// wants (pre-join captures with browser defaults); otherwise LiveKit reopens it.
+const takePreviewTracks = (
+  settings: PreJoinSettings | null,
+  echoCancellation: boolean,
+) => {
+  const stream = settings?.previewStream;
+  const isLive = (track: MediaStreamTrack) => track.readyState === "live";
+  const video = settings?.videoEnabled
+    ? stream?.getVideoTracks().find(isLive)
+    : undefined;
+  const audioCandidate = settings?.audioEnabled
+    ? stream?.getAudioTracks().find(isLive)
+    : undefined;
+  const audio =
+    audioCandidate?.getSettings().echoCancellation === echoCancellation
+      ? audioCandidate
+      : undefined;
+
+  stream?.getTracks().forEach((track) => {
+    if (track !== video && track !== audio) track.stop();
+  });
+
+  return { video, audio };
+};
 
 const isClientInitiatedDisconnectError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -134,6 +167,28 @@ const LiveKitSpaceScreen = ({
   const echoCancellation = preJoinSettings?.echoCancellation ?? true;
   const videoDeviceId = preJoinSettings?.videoDeviceId;
   const audioOutputDeviceId = preJoinSettings?.audioOutputDeviceId;
+  const wantsAudio = preJoinSettings?.audioEnabled ?? true;
+  const wantsVideo = preJoinSettings?.videoEnabled ?? true;
+
+  // Taken once at mount: the preview tracks belong to this call from now on.
+  const [previewTracks] = useState(() =>
+    takePreviewTracks(preJoinSettings, echoCancellation),
+  );
+  // Until the pre-join camera/mic are published, show those choices and lock
+  // the media controls (LiveKit reports both as off until then).
+  const [startingMedia, setStartingMedia] = useState<StartingMedia | null>(
+    () =>
+      wantsAudio || wantsVideo
+        ? {
+            audioOn: wantsAudio,
+            videoOn: wantsVideo,
+            videoTrack: previewTracks.video,
+          }
+        : null,
+  );
+  // The room local media was started for (the room is rebuilt if its options
+  // change, and each one needs its own publish).
+  const mediaStartedForRef = useRef<Room | null>(null);
 
   const roomOptions = useMemo<RoomOptions>(
     () => ({
@@ -217,13 +272,83 @@ const LiveKitSpaceScreen = ({
   }, [room]);
 
   // Belt-and-suspenders: whatever route the user takes out of the call, release
-  // the devices and drop the connection when this screen unmounts.
+  // the devices and drop the connection when this screen unmounts. Deferred a
+  // tick so StrictMode's mount/unmount/mount doesn't kill the preview tracks
+  // handed over from pre-join before they're published.
+  const pendingTeardownRef = useRef<{ room: Room; timer: number } | null>(
+    null,
+  );
   useEffect(() => {
+    const pending = pendingTeardownRef.current;
+    if (pending?.room === room) {
+      window.clearTimeout(pending.timer);
+      pendingTeardownRef.current = null;
+    }
     return () => {
-      releaseLocalMedia();
-      room.disconnect(true);
+      const timer = window.setTimeout(() => {
+        if (pendingTeardownRef.current?.timer === timer) {
+          pendingTeardownRef.current = null;
+        }
+        previewTracks.video?.stop();
+        previewTracks.audio?.stop();
+        releaseLocalMedia();
+        room.disconnect(true);
+      }, 0);
+      pendingTeardownRef.current = { room, timer };
     };
-  }, [room, releaseLocalMedia]);
+  }, [room, releaseLocalMedia, previewTracks]);
+
+  // Publish the pre-join camera/mic right after connecting. Preview tracks are
+  // published directly (no second camera start-up); anything without one is
+  // acquired by LiveKit as before.
+  const startLocalMedia = useCallback(async () => {
+    if (mediaStartedForRef.current === room) return;
+    mediaStartedForRef.current = room;
+    const localParticipant = room.localParticipant;
+
+    const publishVideo = async () => {
+      const track = previewTracks.video;
+      if (track?.readyState === "live") {
+        try {
+          // userProvidedTrack=false: LiveKit owns it, so camera-off still stops
+          // the device and camera-on/device switches re-acquire as usual.
+          await localParticipant.publishTrack(
+            new LocalVideoTrack(track, undefined, false),
+            { source: Track.Source.Camera },
+          );
+          return;
+        } catch (error) {
+          console.warn("Publishing pre-join camera failed:", error);
+          track.stop();
+        }
+      }
+      await localParticipant.setCameraEnabled(true);
+    };
+
+    const publishAudio = async () => {
+      const track = previewTracks.audio;
+      if (track?.readyState === "live") {
+        try {
+          await localParticipant.publishTrack(
+            new LocalAudioTrack(track, undefined, false),
+            { source: Track.Source.Microphone },
+          );
+          return;
+        } catch (error) {
+          console.warn("Publishing pre-join microphone failed:", error);
+          track.stop();
+        }
+      }
+      await localParticipant.setMicrophoneEnabled(true);
+    };
+
+    // Failures surface through onMediaDeviceFailure (and its retry).
+    await Promise.allSettled([
+      wantsVideo ? publishVideo() : null,
+      wantsAudio ? publishAudio() : null,
+    ]);
+    setStartingMedia(null);
+  }, [room, previewTracks, wantsAudio, wantsVideo]);
 
   // Drop a stale spotlight when that participant leaves - otherwise they'd be
   // silently re-spotlighted full-screen if they rejoined later. Their camera and
@@ -406,10 +531,13 @@ const LiveKitSpaceScreen = ({
       serverUrl={livekit.url}
       token={livekit.token}
       connect={connectionReady}
-      audio={preJoinSettings?.audioEnabled ?? true}
-      video={preJoinSettings?.videoEnabled ?? true}
+      // Published by startLocalMedia instead, so pre-join tracks can be reused.
+      audio={false}
+      video={false}
       connectOptions={connectOptions}
       onConnected={() => {
+        void startLocalMedia();
+
         // Carry the speaker chosen on pre-join into the call; LiveKit applies
         // the sinkId to every audio element it manages.
         if (audioOutputDeviceId) {
@@ -517,6 +645,7 @@ const LiveKitSpaceScreen = ({
       {isLeaving && (
         <AppLoader overlay message="Finishing your recording..." />
       )}
+      <StartingMediaContext.Provider value={startingMedia}>
       <RecordingProvider
         spaceId={spaceData?.id}
         roomCode={roomCode}
@@ -576,6 +705,7 @@ const LiveKitSpaceScreen = ({
           </LiveKitReactionsProvider>
         </LiveKitChatProvider>
       </RecordingProvider>
+      </StartingMediaContext.Provider>
     </LiveKitRoom>
   );
 };

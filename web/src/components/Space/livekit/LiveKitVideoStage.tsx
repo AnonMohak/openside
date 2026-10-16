@@ -28,6 +28,7 @@ import { AudioLinesIcon } from "@/components/shared/ui/audio-lines";
 import { useGetMe } from "@/hooks/useUserQuery";
 import { useSendSpaceInvite } from "@/hooks/useSpace";
 import { toast } from "@/lib/toast";
+import { useStartingMedia } from "./StartingMediaContext";
 
 const getRoleLabel = (attributes?: Record<string, string>) => {
   if (attributes?.role === "HOST") return "(Host)";
@@ -608,6 +609,31 @@ const LiveKitVideoStage = ({
   );
 };
 
+// The pre-join camera on the local tile while it's still being published, so
+// the user sees themselves right away instead of an avatar.
+const StartingLocalVideo = ({ track }: { track: MediaStreamTrack }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = new MediaStream([track]);
+    return () => {
+      video.srcObject = null;
+    };
+  }, [track]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      muted
+      playsInline
+      className="h-full w-full scale-x-[-1] object-cover"
+    />
+  );
+};
+
 interface ParticipantFrameProps {
   deafened: boolean;
   localAvatar?: string;
@@ -635,10 +661,17 @@ const ParticipantFrame = ({
   const participant = trackRef.participant;
   const isScreenShare = trackRef.source === Track.Source.ScreenShare;
   const { data: localUser } = useGetMe();
-  const isMicMuted = useIsMuted({
+  const liveKitMicMuted = useIsMuted({
     participant,
     source: Track.Source.Microphone,
   });
+  const startingMedia = useStartingMedia();
+  const isStartingLocalCamera =
+    participant.isLocal && !isScreenShare && startingMedia !== null;
+  // Until the pre-join mic is published, show the state chosen on pre-join.
+  const isMicMuted = isStartingLocalCamera
+    ? !startingMedia.audioOn
+    : liveKitMicMuted;
   const isCameraMuted = useIsMuted({
     participant,
     source: Track.Source.Camera,
@@ -675,6 +708,11 @@ const ParticipantFrame = ({
     isTrackReference(trackRef) &&
     (trackRef.source !== Track.Source.Camera ||
       (!isCameraMuted && !trackRef.publication.isMuted));
+  const startingVideoTrack =
+    isStartingLocalCamera && !shouldShowVideo
+      ? startingMedia.videoTrack
+      : undefined;
+  const showsVideo = shouldShowVideo || !!startingVideoTrack;
 
   // Size the card to the video's real aspect ratio so it hugs the frame - no
   // letterbox bars, and object-cover then fills it without cutting the top or
@@ -702,7 +740,7 @@ const ParticipantFrame = ({
       } ${
         showHandRaised
           ? "bg-blue-500/12"
-          : shouldShowVideo
+          : showsVideo
             ? "bg-black"
             : "bg-primary"
       } ${
@@ -716,7 +754,7 @@ const ParticipantFrame = ({
         className={`h-full w-full ${
           showHandRaised
             ? "bg-blue-500/12"
-            : shouldShowVideo
+            : showsVideo
               ? "bg-transparent"
               : "bg-primary"
         }`}
@@ -726,6 +764,8 @@ const ParticipantFrame = ({
             trackRef={trackRef as TrackReference}
             className={`h-full w-full ${videoObjectFit}`}
           />
+        ) : startingVideoTrack ? (
+          <StartingLocalVideo track={startingVideoTrack} />
         ) : (
           <UserAvatar name={displayName} avatar={avatar} />
         )}

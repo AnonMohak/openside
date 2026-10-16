@@ -62,6 +62,7 @@ import CallWarningDialog from "../ui/CallWarningDialog";
 import { useLiveKitChat } from "../chat/LiveKitChatProvider";
 import { useLiveKitReactions } from "../reactions/LiveKitReactionsProvider";
 import { useRecordingContext } from "../recording/RecordingProvider";
+import { useStartingMedia } from "./StartingMediaContext";
 
 // Screen-share capture options. NOTE: LiveKit's setScreenShareEnabled /
 // createScreenTracks do NOT merge the room's screenShareCaptureDefaults - they
@@ -402,6 +403,12 @@ const LiveKitControls = ({
     isScreenShareEnabled,
     localParticipant,
   } = useLocalParticipant();
+  // While the pre-join camera/mic are still being published, show the chosen
+  // state and lock the media controls so clicks can't race the publish.
+  const startingMedia = useStartingMedia();
+  const isStartingMedia = startingMedia !== null;
+  const showMicOn = startingMedia ? startingMedia.audioOn : isMicrophoneEnabled;
+  const showCameraOn = startingMedia ? startingMedia.videoOn : isCameraEnabled;
   const participantRole = localParticipant.attributes.role;
   const canEndForAll =
     isHost ||
@@ -1314,6 +1321,7 @@ const LiveKitControls = ({
       state === "stopping" ||
       state === "uploading";
     const isRecording = state === "recording";
+    const isDisabled = isBusy || isStartingMedia;
 
     const insideLabel = isRecording
       ? "Stop"
@@ -1344,17 +1352,17 @@ const LiveKitControls = ({
         <button
           type="button"
           onClick={() => {
-            if (isBusy) return;
+            if (isDisabled) return;
             playClickSound();
             recording.toggleRecording();
           }}
-          disabled={isBusy}
+          disabled={isDisabled}
           className={cn(
             "flex min-h-11 items-center justify-center gap-2 border px-3.5 rounded-xl text-sm font-medium transition-all duration-200 max-md:min-h-10 max-md:px-2.5",
             isRecording
               ? "border-red-600 bg-red-600 text-white hover:bg-red-700 hover:border-red-700"
               : "border-red-500 bg-red-500 text-white hover:bg-red-600 hover:border-red-600",
-            isBusy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+            isDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
           )}
           aria-label={isRecording ? "Stop recording" : "Start recording"}
         >
@@ -1730,6 +1738,7 @@ const LiveKitControls = ({
     activeLabel,
     active,
     menuId,
+    disabled = false,
   }: {
     icon: ReactNode;
     label: string;
@@ -1738,11 +1747,19 @@ const LiveKitControls = ({
     activeLabel: string;
     active: boolean;
     menuId: "mic" | "cam";
+    disabled?: boolean;
   }) => (
     <div className="flex flex-col gap-1 items-center">
-      <div className="flex items-stretch gap-0.5">
+      <div
+        className={cn(
+          "flex items-stretch gap-0.5",
+          disabled && "pointer-events-none opacity-60",
+        )}
+        aria-disabled={disabled}
+      >
         <button
           type="button"
+          disabled={disabled}
           onClick={() => {
             playClickSound();
             onClick();
@@ -1769,6 +1786,7 @@ const LiveKitControls = ({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
+              disabled={disabled}
               onClick={playClickSound}
               className={cn(
                 "flex min-h-11 w-6 items-center justify-center rounded-r-xl border text-base font-medium cursor-pointer transition-all duration-200 max-md:hidden",
@@ -1836,6 +1854,7 @@ const LiveKitControls = ({
         label="Share"
         sound={false}
         onClick={toggleScreenShare}
+        disabled={isStartingMedia}
       />
     );
 
@@ -1848,9 +1867,11 @@ const LiveKitControls = ({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            disabled={isStartingMedia}
             className={cn(
               "flex min-h-11 w-11 items-center justify-center rounded-xl border border-call-border text-lg font-medium cursor-pointer transition-all duration-200 max-md:min-h-10 max-md:w-10",
               isReactionMenuOpen ? "bg-muted" : "bg-primary hover:bg-muted",
+              isStartingMedia && "cursor-not-allowed opacity-60",
             )}
             onClick={playClickSound}
             aria-label="Reactions"
@@ -1940,22 +1961,24 @@ const LiveKitControls = ({
     <div className="select-none flex items-center gap-1.5 p-1 md:gap-2.5 md:p-2">
       {renderRecordingControl()}
       {renderSplitMediaControl({
-        icon: isMicrophoneEnabled ? <RiMicLine /> : <RiMicOffLine />,
+        icon: showMicOn ? <RiMicLine /> : <RiMicOffLine />,
         label: "Mic",
         onClick: toggleMicrophone,
         menu: renderMicDeviceMenu(),
         activeLabel: "Microphone and speaker options",
-        active: isMicrophoneEnabled,
+        active: showMicOn,
         menuId: "mic",
+        disabled: isStartingMedia,
       })}
       {renderSplitMediaControl({
-        icon: isCameraEnabled ? <FiVideo /> : <FiVideoOff />,
+        icon: showCameraOn ? <FiVideo /> : <FiVideoOff />,
         label: "Cam",
         onClick: toggleCamera,
         menu: renderCameraDeviceMenu(),
         activeLabel: "Camera options",
-        active: isCameraEnabled,
+        active: showCameraOn,
         menuId: "cam",
+        disabled: isStartingMedia,
       })}
       {/* Screen share is effectively unsupported in phone browsers, and the
           theme/fullscreen options are non-essential - both give up their slot

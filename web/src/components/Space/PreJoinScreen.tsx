@@ -105,6 +105,8 @@ const PreJoinScreen = ({
   // Dedicated capture for the loopback test (echo cancellation off), separate
   // from the processed preview stream.
   const micTestStreamRef = useRef<MediaStream | null>(null);
+  // Set once the preview stream is handed to the call, so unmount doesn't stop it.
+  const handedOffRef = useRef(false);
   const resizeRef = useRef<{
     startX: number;
     startY: number;
@@ -298,7 +300,9 @@ const PreJoinScreen = ({
       // the StrictMode mount/unmount/mount cycle safe: the first acquire's stream
       // is stopped and its token retired, so only the second one applies.
       acquireTokenRef.current += 1;
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      if (!handedOffRef.current) {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+      }
       streamRef.current = null;
       micTestStreamRef.current?.getTracks().forEach((track) => track.stop());
       micTestStreamRef.current = null;
@@ -576,6 +580,20 @@ const PreJoinScreen = ({
       },
       {
         onSuccess: (data) => {
+          // Hand the live preview to the call so the camera/mic don't have to
+          // start up again after connecting. Drop the kinds the user turned off.
+          const previewStream = streamRef.current ?? undefined;
+          previewStream?.getTracks().forEach((track) => {
+            const keep =
+              track.readyState === "live" &&
+              (track.kind === "video" ? videoEnabled : audioEnabled);
+            if (!keep) {
+              track.stop();
+              previewStream.removeTrack(track);
+            }
+          });
+          handedOffRef.current = !!previewStream;
+
           // After successful API call, update the UI state
           onJoinCall({
             videoEnabled,
@@ -587,6 +605,7 @@ const PreJoinScreen = ({
             videoDeviceId: selectedVideoId || undefined,
             audioOutputDeviceId: selectedSpeakerId || undefined,
             livekit: data.livekit,
+            previewStream,
           });
         },
         onError: (error: unknown) => {
