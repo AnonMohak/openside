@@ -686,7 +686,7 @@ const LiveKitSpaceScreen = ({
                 <div className="flex h-full shrink-0 items-center justify-center max-md:absolute max-md:inset-0 max-md:z-40 md:ml-2">
                   <div
                     style={{ width: sidebarWidth }}
-                    className="relative flex h-full flex-col items-stretch justify-start overflow-hidden rounded-2xl bg-primary max-md:!w-full"
+                    className="relative flex h-full flex-col items-stretch justify-start overflow-hidden rounded-2xl border border-border bg-primary max-md:!w-full"
                   >
                     <div
                       onPointerDown={handleSidebarResizeStart}

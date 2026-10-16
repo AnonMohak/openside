@@ -579,6 +579,9 @@ const LiveKitVideoStage = ({
                 localAvatar={localAvatar}
                 key={tileKey(trackRef)}
                 trackRef={trackRef}
+                // Fill the grid cell so the tile matches the invite panel's
+                // size instead of hugging the video's aspect ratio.
+                fill={showInvitePanel}
               />
             ))}
             {showInvitePanel && (
