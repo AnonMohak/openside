@@ -139,6 +139,13 @@ const RoomPage = () => {
     };
   }, [roomId]);
 
+  // No text selection anywhere in a space except what's meant to be copied
+  // (invite link, join code, chat messages) and form fields. See globals.css.
+  useEffect(() => {
+    document.body.classList.add("room-no-select");
+    return () => document.body.classList.remove("room-no-select");
+  }, []);
+
   useEffect(() => {
     if (!isHost || hasLeft || !hasUser || spaceCreated || isCreatingSpace) {
       return;

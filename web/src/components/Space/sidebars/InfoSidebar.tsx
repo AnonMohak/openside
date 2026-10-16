@@ -217,7 +217,7 @@ const InfoSidebar: React.FC<SidebarContentProps> = ({ onClose }) => {
                   Invite link
                 </span>
                 <div className="flex items-stretch gap-1.5 rounded-xl border border-border bg-background p-1.5 pl-3 transition-colors duration-150">
-                  <p className="flex min-w-0 flex-1 items-center truncate text-sm text-foreground/70">
+                  <p className="flex min-w-0 flex-1 select-text items-center truncate text-sm text-foreground/70">
                     {inviteLink}
                   </p>
                   <button
@@ -268,7 +268,7 @@ const InfoSidebar: React.FC<SidebarContentProps> = ({ onClose }) => {
                     <Hash size={13} />
                     Recording code
                   </span>
-                  <p className="w-fit rounded-lg bg-primary px-3 py-1.5 font-mono text-sm tracking-wide text-foreground">
+                  <p className="w-fit select-text rounded-lg bg-primary px-3 py-1.5 font-mono text-sm tracking-wide text-foreground">
                     {spaceData.joinCode}
                   </p>
                 </div>
