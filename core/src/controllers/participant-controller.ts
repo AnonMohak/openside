@@ -9,6 +9,7 @@ import {
 	joinSpace,
 	kickParticipant,
 	leaveSpace,
+	renameSelf,
 	stopParticipantTrack,
 	toPublicParticipant,
 	updateParticipantRole,
@@ -135,6 +136,82 @@ export async function joinSpaceController(
 			success: false,
 			data: null,
 			message: `Failed to join space: ${errorMessage}!`,
+		});
+	}
+}
+
+const MAX_DISPLAY_NAME_LENGTH = 60;
+
+export async function renameSelfController(
+	req: AuthenticatedRequest,
+	res: Response,
+): Promise<void> {
+	try {
+		const spaceId = req.params.spaceId as string | undefined;
+		const { displayName, participantSessionId } = req.body;
+
+		if (!spaceId) {
+			res
+				.status(400)
+				.json({ success: false, data: null, message: "Space ID is required!" });
+			return;
+		}
+
+		const trimmedName =
+			typeof displayName === "string" ? displayName.trim() : "";
+		if (!trimmedName || trimmedName.length > MAX_DISPLAY_NAME_LENGTH) {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} characters!`,
+			});
+			return;
+		}
+
+		let userId: string | undefined;
+		if (req.user) {
+			const user = await findOrCreateUser(req.user);
+			userId = user.id;
+		}
+
+		if (
+			!userId &&
+			(!participantSessionId || typeof participantSessionId !== "string")
+		) {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: "Participant session ID is required for guest users!",
+			});
+			return;
+		}
+
+		const participant = await renameSelf({
+			spaceId,
+			participantSessionId: participantSessionId?.trim(),
+			userId,
+			displayName: trimmedName,
+		});
+
+		res.status(200).json({
+			success: true,
+			data: { displayName: participant.displayName },
+			message: "Name updated!",
+		});
+	} catch (error: unknown) {
+		if (error instanceof Error && error.message === "PARTICIPANT_NOT_FOUND") {
+			res.status(404).json({
+				success: false,
+				data: null,
+				message: "Participant not found!",
+			});
+			return;
+		}
+		console.error("Error renaming participant:", error);
+		res.status(500).json({
+			success: false,
+			data: null,
+			message: "Failed to update name!",
 		});
 	}
 }

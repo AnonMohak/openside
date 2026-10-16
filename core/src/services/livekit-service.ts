@@ -252,6 +252,33 @@ export async function updateLiveKitParticipantAttributes(input: {
 	}
 }
 
+export async function updateLiveKitParticipantName(input: {
+	roomName: string | null | undefined;
+	identity: string | null | undefined;
+	name: string;
+}) {
+	if (!input.roomName || !input.identity) return;
+
+	const roomClient = getRoomServiceClient(
+		await resolveLiveKitForRoom(input.roomName),
+	);
+
+	try {
+		await roomClient.updateParticipant(input.roomName, input.identity, {
+			name: input.name,
+		});
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.toLowerCase().includes("not found")
+		) {
+			return;
+		}
+
+		throw error;
+	}
+}
+
 export async function muteLiveKitParticipantTrack(input: {
 	roomName: string | null | undefined;
 	identity: string | null | undefined;

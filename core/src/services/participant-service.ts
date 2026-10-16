@@ -9,6 +9,7 @@ import {
 	muteLiveKitParticipantTrack,
 	removeLiveKitParticipant,
 	updateLiveKitParticipantAttributes,
+	updateLiveKitParticipantName,
 } from "./livekit-service.ts";
 import { ensureSpaceFreshness } from "./space-service.ts";
 
@@ -230,6 +231,44 @@ export async function joinSpace(data: JoinSpaceData) {
 		livekit,
 		isRejoin: false,
 	};
+}
+
+/**
+ * Change your own display name mid-call. Updates the participant row (what
+ * recordings are labelled with) and pushes the name to LiveKit so everyone in
+ * the room sees it straight away.
+ */
+export async function renameSelf(data: {
+	spaceId: string;
+	participantSessionId?: string;
+	userId?: string;
+	displayName: string;
+}) {
+	const participant = await findExistingParticipant(
+		data.spaceId,
+		data.userId,
+		data.participantSessionId,
+	);
+
+	if (!participant) {
+		throw new Error("PARTICIPANT_NOT_FOUND");
+	}
+
+	const updatedParticipant = await prisma.spaceParticipant.update({
+		where: { id: participant.id },
+		data: { displayName: data.displayName },
+		include: {
+			space: { select: { livekitRoomName: true } },
+		},
+	});
+
+	await updateLiveKitParticipantName({
+		roomName: updatedParticipant.space.livekitRoomName,
+		identity: updatedParticipant.livekitIdentity,
+		name: data.displayName,
+	});
+
+	return updatedParticipant;
 }
 
 export async function leaveSpace(data: LeaveSpaceData) {

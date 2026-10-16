@@ -4,6 +4,7 @@ import {
 	joinSpaceController,
 	kickParticipantController,
 	leaveSpaceController,
+	renameSelfController,
 	stopParticipantTrackController,
 	updateRoleController,
 } from "../controllers/participant-controller";
@@ -22,6 +23,7 @@ router.post(
 	joinSpaceController,
 );
 router.post("/:spaceId/leave", optionalAuthMiddleware, leaveSpaceController);
+router.patch("/:spaceId/name", optionalAuthMiddleware, renameSelfController);
 router.get("/:spaceId/list", optionalAuthMiddleware, getParticipantsController);
 router.patch(
 	"/:spaceId/participant/:participantId/role",
