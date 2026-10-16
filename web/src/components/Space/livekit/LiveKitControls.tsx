@@ -369,20 +369,9 @@ const LiveKitControls = ({
 }: LiveKitControlsProps) => {
   const [pendingExitAction, setPendingExitAction] = useState<ExitAction>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [inputVolume, setInputVolume] = useState(100);
   const [outputVolume, setOutputVolume] = useState(100);
   const [micLevel, setMicLevel] = useState(0);
   const animFrameRef = useRef<number>(null);
-  const micGainContextRef = useRef<AudioContext | null>(null);
-  const micGainNodeRef = useRef<GainNode | null>(null);
-  const micGainSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const originalMicTrackRef = useRef<MediaStreamTrack | null>(null);
-  const processedMicTrackRef = useRef<MediaStreamTrack | null>(null);
-  // Removes the "ended" listener from the raw capture feeding the gain graph.
-  const micSourceEndedCleanupRef = useRef<(() => void) | null>(null);
-  // Bumped when the raw capture behind the gain graph dies and is re-acquired,
-  // so the pipeline effect re-runs and rebuilds on the replacement track.
-  const [micPipelineEpoch, setMicPipelineEpoch] = useState(0);
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [isReactionMenuOpen, setIsReactionMenuOpen] = useState(false);
   const [optimisticHandRaised, setOptimisticHandRaised] = useState<
@@ -395,11 +384,7 @@ const LiveKitControls = ({
   // useMediaDeviceSelect comment below.
   const [hasOpenedMediaMenu, setHasOpenedMediaMenu] = useState(false);
   const previousMicEnabledBeforeDeafenRef = useRef<boolean | null>(null);
-  const previousInputVolumeBeforeMuteRef = useRef(inputVolume);
-  const previousInputVolumeBeforeDeafenRef = useRef(inputVolume);
   const previousOutputVolumeBeforeDeafenRef = useRef(outputVolume);
-  const hasHandledInitialMicStateRef = useRef(false);
-  const shouldApplyMuteVolumeRuleRef = useRef(false);
   const { resolvedTheme, setTheme } = useTheme();
   const { sendReaction } = useLiveKitReactions();
   const recording = useRecordingContext();
@@ -517,7 +502,6 @@ const LiveKitControls = ({
   }, [attributeHandRaised, optimisticHandRaised]);
 
   const toggleMicrophone = async () => {
-    shouldApplyMuteVolumeRuleRef.current = true;
     markLocalMediaAction();
     try {
       if (deafened) {
@@ -686,14 +670,8 @@ const LiveKitControls = ({
     }
   };
 
-  // Read by the meter loop via a ref so dragging the volume slider doesn't
-  // tear down and recreate the whole AudioContext/analyser on every tick.
-  const inputVolumeRef = useRef(inputVolume);
-  inputVolumeRef.current = inputVolume;
-
   useEffect(() => {
-    // Muted/deafened: the raw capture behind the gain graph keeps producing
-    // audio even though nothing is sent, so hard-zero the meter instead of
+    // Muted/deafened: nothing is sent, so hard-zero the meter instead of
     // letting it dance.
     if (!isMicrophoneEnabled || deafened) {
       setMicLevel(0);
@@ -713,27 +691,14 @@ const LiveKitControls = ({
         // Gentler curve + higher boost than before so quiet speech still moves
         // the meter visibly.
         const curved = Math.pow(normalized, 1.2);
-        const inputGain = inputVolumeRef.current / 100;
-        // Lower input volume should reduce meter sensitivity and visible waves.
-        setMicLevel(Math.min(100, Math.round(curved * 100 * 4 * inputGain)));
+        setMicLevel(Math.min(100, Math.round(curved * 100 * 4)));
       }
       animFrameRef.current = requestAnimationFrame(poll);
     };
 
-    // The published track is post-gain once the volume pipeline is active, and
-    // the meter already simulates the gain via the inputGain factor above - so
-    // always tap the raw capture feeding the graph, or the volume applies to
-    // the meter twice (50% slider would read as ~25%).
-    const publishedTrack = localParticipant.getTrackPublication(
+    const track = localParticipant.getTrackPublication(
       Track.Source.Microphone,
     )?.track?.mediaStreamTrack;
-    const isPublishedTrackProcessed =
-      !!processedMicTrackRef.current &&
-      publishedTrack === processedMicTrackRef.current;
-    const track =
-      isPublishedTrackProcessed && originalMicTrackRef.current
-        ? originalMicTrackRef.current
-        : publishedTrack;
     if (track) {
       audioContext = new AudioContext();
       analyser = audioContext.createAnalyser();
@@ -792,273 +757,6 @@ const LiveKitControls = ({
     };
   }, [deafened, outputVolume]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const teardownGraph = () => {
-      micSourceEndedCleanupRef.current?.();
-      micSourceEndedCleanupRef.current = null;
-      micGainSourceRef.current?.disconnect();
-      micGainNodeRef.current?.disconnect();
-      processedMicTrackRef.current?.stop();
-      void micGainContextRef.current?.close();
-      micGainContextRef.current = null;
-      micGainSourceRef.current = null;
-      micGainNodeRef.current = null;
-      originalMicTrackRef.current = null;
-      processedMicTrackRef.current = null;
-    };
-
-    const setupMicGain = async () => {
-      const publication = localParticipant.getTrackPublication(
-        Track.Source.Microphone,
-      );
-      const localMicTrack = publication?.track;
-      const publishedTrack = localMicTrack?.mediaStreamTrack;
-
-      if (
-        !localMicTrack ||
-        !publishedTrack ||
-        !isMicrophoneEnabled ||
-        deafened
-      ) {
-        return;
-      }
-
-      const isPublishedTrackProcessed =
-        !!processedMicTrackRef.current &&
-        publishedTrack === processedMicTrackRef.current;
-      const sourceTrack =
-        isPublishedTrackProcessed && originalMicTrackRef.current
-          ? originalMicTrackRef.current
-          : publishedTrack;
-
-      // At full volume the gain graph is a no-op, so publish the raw capture
-      // directly. This matters beyond perf: a WebAudio track never fires
-      // "ended" and replaceTrack marks it user-provided, both of which defeat
-      // LiveKit's own mic recovery (device unplugged, resume from sleep).
-      // Keeping the raw track published whenever possible restores it.
-      if (inputVolume >= 100) {
-        if (isPublishedTrackProcessed) {
-          try {
-            // userProvidedTrack: false hands ownership back to LiveKit, so
-            // its native ended/sleep recovery applies to the capture again.
-            await localMicTrack.replaceTrack(sourceTrack, false);
-          } catch (error) {
-            // Keep the graph alive so audio keeps flowing through it.
-            console.error("Unable to restore raw mic track:", error);
-            if (micGainNodeRef.current) {
-              micGainNodeRef.current.gain.value = 1;
-            }
-            return;
-          }
-          teardownGraph();
-        }
-        return;
-      }
-
-      const needsRebuild =
-        !micGainNodeRef.current ||
-        !processedMicTrackRef.current ||
-        originalMicTrackRef.current !== sourceTrack;
-
-      if (needsRebuild) {
-        micSourceEndedCleanupRef.current?.();
-        micSourceEndedCleanupRef.current = null;
-        micGainSourceRef.current?.disconnect();
-        micGainNodeRef.current?.disconnect();
-        if (processedMicTrackRef.current) {
-          processedMicTrackRef.current.stop();
-        }
-        // Once the processed track is published, LiveKit no longer knows about
-        // the raw capture feeding the gain graph - a device switch stops only
-        // the processed track, leaving the previous mic open (indicator on)
-        // unless we release it ourselves.
-        if (
-          originalMicTrackRef.current &&
-          originalMicTrackRef.current !== sourceTrack
-        ) {
-          originalMicTrackRef.current.stop();
-        }
-        void micGainContextRef.current?.close();
-
-        const audioContext = new AudioContext();
-        const source = audioContext.createMediaStreamSource(
-          new MediaStream([sourceTrack]),
-        );
-        const gainNode = audioContext.createGain();
-        const destination = audioContext.createMediaStreamDestination();
-
-        source.connect(gainNode);
-        gainNode.connect(destination);
-
-        const processedTrack = destination.stream.getAudioTracks()[0];
-        if (!processedTrack) {
-          void audioContext.close();
-          return;
-        }
-
-        // Resume BEFORE publishing the processed track: a context that can't
-        // run (autoplay policy, device quirk) would replace the real mic with
-        // dead silence while the UI still shows the mic as on. If it won't
-        // run, keep the raw capture published - volume control is lost but
-        // the user stays audible.
-        try {
-          await audioContext.resume();
-        } catch (error) {
-          console.error("Mic gain AudioContext failed to resume:", error);
-        }
-        if (audioContext.state !== "running" || cancelled) {
-          processedTrack.stop();
-          void audioContext.close();
-          return;
-        }
-
-        try {
-          await localMicTrack.replaceTrack(processedTrack);
-        } catch (error) {
-          console.error("Unable to publish processed mic track:", error);
-          processedTrack.stop();
-          void audioContext.close();
-          return;
-        }
-        if (cancelled) {
-          // A newer run supersedes this one - put the raw capture back so the
-          // published track isn't a stopped processed track (dead silence).
-          try {
-            await localMicTrack.replaceTrack(sourceTrack);
-          } catch {
-            // best effort - the newer run will rebuild from whatever is live
-          }
-          processedTrack.stop();
-          void audioContext.close();
-          return;
-        }
-
-        // The published WebAudio track never ends, so LiveKit can't see the
-        // real capture dying (Bluetooth off, mic unplugged) - others would
-        // hear silence with the mic still showing as on. Watch the source
-        // ourselves, re-acquire, and bump the epoch so this effect rebuilds
-        // the graph on the replacement capture.
-        const handleSourceEnded = async () => {
-          micSourceEndedCleanupRef.current = null;
-          try {
-            await localMicTrack.restartTrack();
-          } catch {
-            // The configured device is gone - mirror LiveKit's own fallback
-            // and grab the default mic instead.
-            try {
-              await localMicTrack.restartTrack({ deviceId: "default" });
-            } catch (error) {
-              console.error("Mic died and could not be restarted:", error);
-            }
-          }
-          setMicPipelineEpoch((value) => value + 1);
-        };
-        sourceTrack.addEventListener("ended", handleSourceEnded);
-        micSourceEndedCleanupRef.current = () => {
-          sourceTrack.removeEventListener("ended", handleSourceEnded);
-        };
-
-        // Resume the graph if the browser suspends it mid-call (sleep/wake,
-        // audio route change) - a suspended context publishes pure silence.
-        audioContext.onstatechange = () => {
-          if (audioContext.state === "suspended") {
-            audioContext.resume().catch((error) => {
-              console.error("Mic gain AudioContext stuck suspended:", error);
-            });
-          }
-        };
-
-        micGainContextRef.current = audioContext;
-        micGainSourceRef.current = source;
-        micGainNodeRef.current = gainNode;
-        originalMicTrackRef.current = sourceTrack;
-        processedMicTrackRef.current = processedTrack;
-      }
-
-      if (micGainNodeRef.current) {
-        micGainNodeRef.current.gain.value = inputVolume / 100;
-      }
-    };
-
-    setupMicGain().catch((error) => {
-      console.error("Mic volume pipeline failed:", error);
-    });
-
-    // activeMicrophoneDeviceId: switching mics restarts the published track
-    // with a raw capture from the new device, detaching the gain chain.
-    // micPipelineEpoch: the raw capture died and was re-acquired. Re-run so
-    // input volume keeps applying to the capture actually in use.
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    deafened,
-    inputVolume,
-    isMicrophoneEnabled,
-    localParticipant,
-    activeMicrophoneDeviceId,
-    micPipelineEpoch,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      micSourceEndedCleanupRef.current?.();
-      micSourceEndedCleanupRef.current = null;
-      micGainSourceRef.current?.disconnect();
-      micGainNodeRef.current?.disconnect();
-      if (processedMicTrackRef.current) {
-        processedMicTrackRef.current.stop();
-      }
-      // Release the raw capture behind the gain graph too - LiveKit only ever
-      // stops the processed track it was handed.
-      if (originalMicTrackRef.current) {
-        originalMicTrackRef.current.stop();
-      }
-      void micGainContextRef.current?.close();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (deafened) {
-      if (inputVolume > 0) {
-        previousInputVolumeBeforeDeafenRef.current = inputVolume;
-      }
-      if (inputVolume !== 0) {
-        setInputVolume(0);
-      }
-      return;
-    }
-
-    if (!hasHandledInitialMicStateRef.current) {
-      hasHandledInitialMicStateRef.current = true;
-      return;
-    }
-
-    if (!isMicrophoneEnabled) {
-      if (!shouldApplyMuteVolumeRuleRef.current) {
-        return;
-      }
-      if (inputVolume > 0) {
-        previousInputVolumeBeforeMuteRef.current = inputVolume;
-      }
-      if (inputVolume !== 0) {
-        setInputVolume(0);
-      }
-      return;
-    }
-
-    if (shouldApplyMuteVolumeRuleRef.current && inputVolume === 0) {
-      setInputVolume(
-        previousInputVolumeBeforeMuteRef.current > 0
-          ? previousInputVolumeBeforeMuteRef.current
-          : 100,
-      );
-    }
-    shouldApplyMuteVolumeRuleRef.current = false;
-  }, [deafened, inputVolume, isMicrophoneEnabled]);
-
   const handleDeafenToggle = async (checked: boolean) => {
     const shouldDeafen = checked === true;
 
@@ -1068,7 +766,6 @@ const LiveKitControls = ({
 
     if (shouldDeafen) {
       previousMicEnabledBeforeDeafenRef.current = isMicrophoneEnabled;
-      previousInputVolumeBeforeDeafenRef.current = inputVolume;
       previousOutputVolumeBeforeDeafenRef.current = outputVolume;
 
       if (isMicrophoneEnabled) {
@@ -1081,20 +778,16 @@ const LiveKitControls = ({
         }
       }
 
-      setInputVolume(0);
       setOutputVolume(0);
     } else {
       setOutputVolume(previousOutputVolumeBeforeDeafenRef.current);
 
       if (previousMicEnabledBeforeDeafenRef.current === true) {
-        setInputVolume(previousInputVolumeBeforeDeafenRef.current);
         try {
           await localParticipant.setMicrophoneEnabled(true);
         } catch (error) {
           console.error("Unable to restore microphone after undeafen:", error);
         }
-      } else {
-        setInputVolume(0);
       }
       previousMicEnabledBeforeDeafenRef.current = null;
     }
@@ -1106,10 +799,6 @@ const LiveKitControls = ({
     } catch {
       // Ignore attribute update failures; local deafen behavior still applies.
     }
-  };
-
-  const handleInputVolumeChange = (value: number) => {
-    setInputVolume(value);
   };
 
   const handleOutputVolumeChange = (value: number) => {
@@ -1248,7 +937,7 @@ const LiveKitControls = ({
     const count = 29;
     const activeCount = Math.round((micLevel / 100) * count);
     return (
-      <div className="mt-4 grid grid-cols-[repeat(29,1fr)] gap-0.5">
+      <div className="mt-2 grid grid-cols-[repeat(29,1fr)] gap-0.5">
         {Array.from({ length: count }).map((_, index) => {
           const isActive = index < activeCount;
           const hue = Math.round(52 + (90 * index) / (count - 1));
@@ -1275,7 +964,6 @@ const LiveKitControls = ({
     label: string,
     value: number,
     onChange: (value: number) => void,
-    showMeter = false,
     disabled = false,
   ) => (
     <div className={`px-2.5 py-2 ${disabled ? "opacity-55" : ""}`}>
@@ -1309,7 +997,6 @@ const LiveKitControls = ({
           <span className="absolute left-1/2 top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-[5px] rotate-45 border-r border-b border-call-border/80 bg-primary-hover" />
         </span>
       </div>
-      {showMeter && renderVolumeMeter()}
     </div>
   );
 
@@ -1710,18 +1397,18 @@ const LiveKitControls = ({
       </DropdownMenuSub>
 
       <DropdownMenuSeparator className="mx-2 my-1.5 bg-call-border" />
-      {renderRangeControl(
-        "Input Volume",
-        inputVolume,
-        handleInputVolumeChange,
-        true,
-        deafened || !isMicrophoneEnabled,
-      )}
+      <div
+        className={`px-2.5 py-2 ${
+          deafened || !isMicrophoneEnabled ? "opacity-55" : ""
+        }`}
+      >
+        <p className="text-xs font-normal text-foreground/85">Input Level</p>
+        {renderVolumeMeter()}
+      </div>
       {renderRangeControl(
         "Output Volume",
         outputVolume,
         handleOutputVolumeChange,
-        false,
         deafened,
       )}
       <DropdownMenuSeparator className="mx-2 my-1.5 bg-call-border" />

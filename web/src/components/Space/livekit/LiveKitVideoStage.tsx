@@ -69,7 +69,7 @@ const useLocalMicSpeaking = (participant: Participant, isMicMuted: boolean) => {
   const [trackEpoch, setTrackEpoch] = useState(0);
   const attachedTrackIdRef = useRef<string | null>(null);
 
-  // A mic device switch (and the input-volume pipeline) replaces the published
+  // A mic device switch replaces the published
   // mediaStreamTrack without re-rendering this component, which used to leave
   // the analyser bound to a stopped track - the speaking ring froze off until
   // the next mute/unmute. Poll cheaply and re-attach when the track changes.
