@@ -21,7 +21,7 @@ import { useGetMe } from "@/hooks/useUserQuery";
 import type { PreJoinSettings } from "@/types/preJoinTypes";
 import { getOrCreateSessionId } from "@/utils/ParticipantSessionId";
 import { stopAllLocalMedia } from "@/lib/mediaTracker";
-import { playCallSound } from "@/lib/callSounds";
+import { installCallSoundsWarmup, playCallSound } from "@/lib/callSounds";
 import { DEFAULT_FPS, clampFps } from "@/lib/recordingConstants";
 import type { CallExitReason } from "./CallExitScreen";
 import AppLoader from "@/components/shared/AppLoader";
@@ -279,6 +279,12 @@ const LiveKitSpaceScreen = ({
   );
 
   const room = useMemo(() => new Room(roomOptions), [roomOptions]);
+
+  // Pre-render the call sounds on the first click/keypress so they play
+  // instantly (no-op if pre-join already did it).
+  useEffect(() => {
+    installCallSoundsWarmup();
+  }, []);
 
   // The frame rate is fixed in roomOptions for the call (see joinTargetFps),
   // but the host can change it in the in-call settings and the next recording

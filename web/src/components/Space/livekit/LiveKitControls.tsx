@@ -28,7 +28,6 @@ import {
   FiChevronUp,
   FiCheckSquare,
   FiExternalLink,
-  FiUploadCloud,
   FiSettings,
   FiSmile,
   FiSquare,
@@ -37,7 +36,14 @@ import {
 } from "react-icons/fi";
 import { FaCircleCheck } from "react-icons/fa6";
 import { IoChatbubbleOutline, IoHandRightOutline } from "react-icons/io5";
-import { Maximize, Minimize, ScanFace, SmilePlus, X } from "lucide-react";
+import {
+  Loader2,
+  Maximize,
+  Minimize,
+  ScanFace,
+  SmilePlus,
+  X,
+} from "lucide-react";
 import { LuScreenShare, LuScreenShareOff, LuUsers } from "react-icons/lu";
 import { MdCallEnd, MdLogout } from "react-icons/md";
 import { RiMicLine, RiMicOffLine } from "react-icons/ri";
@@ -59,7 +65,8 @@ import { cn } from "@/lib/utils";
 import { useGetRecordingSessionsBySpace } from "@/hooks/useRecording";
 import { canSelectAudioOutput, sortMediaDevices } from "@/lib/mediaDevices";
 import { markLocalMediaAction } from "@/lib/localMediaIntent";
-import { playCallSound } from "@/lib/callSounds";
+import { playCallSound, prepareCallSounds } from "@/lib/callSounds";
+import { toast } from "@/lib/toast";
 import ControlButton from "../controls/ControlButton";
 import CallWarningDialog from "../ui/CallWarningDialog";
 import { useLiveKitChat } from "../chat/LiveKitChatProvider";
@@ -256,11 +263,16 @@ const SavedSessionCard = ({
   spaceId,
   sessionId,
   onVisit,
+  uploadProgress = null,
 }: {
   spaceId: string | undefined;
   sessionId: string | null;
   onVisit: () => void;
+  /** Set while this participant's chunks are still uploading (0-100). */
+  uploadProgress?: number | null;
 }) => {
+  const isUploading = uploadProgress !== null;
+  const percent = Math.max(0, Math.min(100, Math.round(uploadProgress ?? 0)));
   const participants = useParticipants();
   // Pull the current session's per-track thumbnails (early posters from the first
   // chunk). Poll briefly so a thumbnail still generating shows up once ready.
@@ -312,22 +324,24 @@ const SavedSessionCard = ({
     setDismissed(true);
   };
 
-  if (dismissed) return null;
+  if (dismissed && !isUploading) return null;
 
   return (
     <div className="relative flex w-[19rem] flex-col gap-3 rounded-2xl border border-call-border bg-call-primary p-3.5">
-      <button
-        type="button"
-        aria-label="Dismiss"
-        onClick={handleDismiss}
-        className="absolute right-2.5 top-2.5 rounded-md p-1 text-foreground/40 transition-colors hover:bg-primary-hover hover:text-foreground"
-      >
-        <X className="size-4" />
-      </button>
+      {!isUploading && (
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={handleDismiss}
+          className="absolute right-2.5 top-2.5 rounded-md p-1 text-foreground/40 transition-colors hover:bg-primary-hover hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      )}
 
       {/* Header */}
       <p className="pr-6 text-lg font-semibold text-foreground">
-        Your recording is uploaded
+        {isUploading ? "Uploading your recording" : "Your recording is uploaded"}
       </p>
 
       {/* One row per participant in the recording */}
@@ -350,24 +364,48 @@ const SavedSessionCard = ({
                   <span className="truncate text-sm font-medium text-foreground">
                     {name}
                   </span>
-                  <span className="text-xs text-foreground/50">Uploaded</span>
+                  <span className="text-xs text-foreground/50">
+                    {isUploading ? "Uploading…" : "Uploaded"}
+                  </span>
                 </span>
               </span>
-              <FaCircleCheck className="size-4 shrink-0 text-emerald-500" />
+              {isUploading ? (
+                <Loader2 className="size-4 shrink-0 animate-spin text-foreground/50" />
+              ) : (
+                <FaCircleCheck className="size-4 shrink-0 text-emerald-500" />
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Go to project */}
-      <button
-        type="button"
-        onClick={onVisit}
-        className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-85"
-      >
-        Go to project
-        <FiExternalLink className="size-4" />
-      </button>
+      {isUploading ? (
+        // Takes the "Go to project" button's slot until the upload finishes.
+        <div
+          role="status"
+          aria-label={`Uploading recording, ${percent}%`}
+          className="flex min-h-10 items-center gap-2.5 rounded-xl border border-call-border bg-call-background px-3"
+        >
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
+            <div
+              className="h-full rounded-full bg-brand transition-[width] duration-500 ease-out"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <span className="w-9 shrink-0 text-right text-xs font-medium tabular-nums text-foreground/70">
+            {percent}%
+          </span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onVisit}
+          className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-85"
+        >
+          Go to project
+          <FiExternalLink className="size-4" />
+        </button>
+      )}
     </div>
   );
 };
@@ -405,6 +443,59 @@ const LiveKitControls = ({
   const previousOutputVolumeBeforeDeafenRef = useRef(outputVolume);
   const { sendReaction } = useLiveKitReactions();
   const recording = useRecordingContext();
+  const recordingStateForSound = recording.recordingState;
+  const previousRecordingStateRef = useRef(recordingStateForSound);
+  // Chime when a recording actually begins - i.e. right after the synced
+  // countdown, which every participant runs - but not when someone joins a
+  // recording that's already going (idle -> recording).
+  useEffect(() => {
+    const previous = previousRecordingStateRef.current;
+    previousRecordingStateRef.current = recordingStateForSound;
+    if (
+      recordingStateForSound === "recording" &&
+      (previous === "countdown" || previous === "starting")
+    ) {
+      playCallSound("recordingStart");
+    }
+  }, [recordingStateForSound]);
+
+  // Recording failures surface as toasts - never as inline UI in the bar.
+  // Each fires once, on the transition into the failed state.
+  const previousStopFailedRef = useRef(recording.stopRequestFailed);
+  useEffect(() => {
+    const previous = previousStopFailedRef.current;
+    previousStopFailedRef.current = recording.stopRequestFailed;
+    if (recording.stopRequestFailed && !previous) {
+      toast.error(
+        "Couldn't stop the recording. Press Retry to finish stopping it.",
+        6000,
+      );
+    }
+  }, [recording.stopRequestFailed]);
+  const previousRecordingErrorStateRef = useRef(recordingStateForSound);
+  useEffect(() => {
+    const previous = previousRecordingErrorStateRef.current;
+    previousRecordingErrorStateRef.current = recordingStateForSound;
+    // A failed stop has its own message above.
+    if (
+      recordingStateForSound === "error" &&
+      previous !== "error" &&
+      !recording.stopRequestFailed
+    ) {
+      toast.error("Recording failed. Please try again.", 6000);
+    }
+  }, [recordingStateForSound, recording.stopRequestFailed]);
+  const previousBackendStatusRef = useRef(recording.backendStatus);
+  useEffect(() => {
+    const previous = previousBackendStatusRef.current;
+    previousBackendStatusRef.current = recording.backendStatus;
+    if (recording.backendStatus === "FAILED" && previous !== "FAILED") {
+      toast.error(
+        "Your recording couldn't be processed. Check the project for details.",
+        8000,
+      );
+    }
+  }, [recording.backendStatus]);
   const { openCameraPreview, toggleCameraPreview, setCameraAnchor } =
     useCameraPreview();
   const {
@@ -1093,6 +1184,8 @@ const LiveKitControls = ({
           type="button"
           onClick={() => {
             if (isDisabled) return;
+            // Make sure the start chime (and every other sound) is ready.
+            prepareCallSounds();
             recording.toggleRecording();
           }}
           disabled={isDisabled}
@@ -1131,72 +1224,24 @@ const LiveKitControls = ({
 
   const renderRecordingIndicator = () => {
     // Only show once capture has actually started - never during "starting" or
-    // the synced "countdown" lead-in.
-    const state = recording.recordingState;
-    if (
-      state !== "recording" &&
-      state !== "uploading" &&
-      state !== "stopping" &&
-      state !== "complete"
-    ) {
-      return null;
-    }
-    const backendStatus = recording.backendStatus;
-
-    // Final drain phase (after stop) shows the upload progress %.
-    const isFinalizing = state === "uploading" || state === "stopping";
-    // Show the upload indicator for the whole recording, from the very start -
-    // it reads 0% until the first chunk is produced/uploaded.
-    const showUpload = state === "recording" || isFinalizing;
-
-    if (state === "complete") {
-      if (backendStatus === "FAILED") {
-        return (
-          <span className="rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-400 ring-1 ring-red-500/20">
-            Recording failed
-          </span>
-        );
-      }
-
-      // Saving is done - the "Visit project" CTA above the control bar
-      // (renderSavedCta) carries the ready/processing state, so nothing here.
-      return null;
-    }
+    // the synced "countdown" lead-in. After stop, the upload card above the
+    // control bar (renderRecordingCard) takes over.
+    // Failures are announced as toasts (see the recording-failure effect).
+    if (recording.recordingState !== "recording") return null;
 
     return (
-      <div className="flex items-center gap-2.5">
-        <div className="flex items-center gap-1.5">
-          <span className="relative flex size-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-            <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
-          </span>
-          <span
-            className={cn(
-              // Fixed width so digit/length changes never shift the rest of the
-              // bar. Left-aligned to keep the number anchored in its slot.
-              "inline-block min-w-[3.25rem] text-left text-base font-normal tabular-nums text-foreground",
-              // Blink the timer while the recording is being saved after stop.
-              isFinalizing && "animate-pulse",
-            )}
-          >
-            {formatRecordingDuration(recording.recordingDurationMs)}
-          </span>
-          {showUpload && (
-            <>
-              <span className="mx-1 h-5 w-px bg-foreground/30" />
-              <span
-                className="flex items-center gap-1.5 text-sm font-medium tabular-nums text-foreground"
-                title={`Uploading ${recording.uploadProgress}%`}
-                aria-label={`Uploading ${recording.uploadProgress}%`}
-              >
-                <FiUploadCloud className="size-[1.125rem]" />
-                <span className="inline-block min-w-[2.5rem] text-left">
-                  {recording.uploadProgress}%
-                </span>
-              </span>
-            </>
-          )}
-        </div>
+      <div className="flex items-center gap-1.5">
+        <span className="relative flex size-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+          <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
+        </span>
+        <span
+          // Fixed width so digit/length changes never shift the rest of the
+          // bar. Left-aligned to keep the number anchored in its slot.
+          className="inline-block min-w-[3.25rem] text-left text-base font-normal tabular-nums text-foreground"
+        >
+          {formatRecordingDuration(recording.recordingDurationMs)}
+        </span>
       </div>
     );
   };
@@ -1204,14 +1249,30 @@ const LiveKitControls = ({
   // Once the recording has stopped and its chunks have finished uploading, float
   // an upload-confirmation card above the control bar that links to the project
   // page (where server-side processing → ready is surfaced).
-  const renderSavedCta = () => {
-    // The project library belongs to the host, so this card is host-only.
+  const renderRecordingCard = () => {
+    const state = recording.recordingState;
+    const isUploading = state === "stopping" || state === "uploading";
+    // The project library belongs to the host, so "Go to project" is
+    // host-only. Everyone uploads their own tracks, so everyone sees progress.
     const isRecordingHost =
       isHost ||
       participantRole === "HOST" ||
       localParticipant.attributes.room_admin === "true";
-    if (!isRecordingHost) return null;
-    if (recording.recordingState !== "complete") return null;
+
+    if (isUploading) {
+      return (
+        <div className="absolute bottom-full left-1/2 z-20 mb-3 -translate-x-1/2">
+          <SavedSessionCard
+            spaceId={recording.spaceId}
+            sessionId={recording.sessionId}
+            onVisit={recording.openRecording}
+            uploadProgress={recording.uploadProgress}
+          />
+        </div>
+      );
+    }
+    if (state !== "complete" || !isRecordingHost) return null;
+    if (recording.backendStatus === "FAILED") return null;
 
     return (
       <div className="absolute bottom-full left-1/2 z-20 mb-3 -translate-x-1/2">
@@ -1852,7 +1913,7 @@ const LiveKitControls = ({
   return (
     <>
       <div className="relative mt-0 flex w-full items-center justify-between rounded-2xl bg-call-background px-2 py-1.5 max-md:flex-wrap max-md:gap-1 md:px-3 md:py-2">
-        {renderSavedCta()}
+        {renderRecordingCard()}
         {renderTimeCode()}
         {/* Absolute centering needs the side groups' width in slack, which only
             exists on wide screens - below lg the bar flows as a normal row. */}

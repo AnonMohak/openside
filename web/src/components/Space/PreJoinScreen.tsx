@@ -21,6 +21,7 @@ import {
 import UserMedia from "./UserMedia";
 import LowLightBadge from "./ui/LowLightBadge";
 import { useLowLight } from "@/hooks/useLowLight";
+import { installCallSoundsWarmup } from "@/lib/callSounds";
 import UserAvatar from "./ui/UserAvatar";
 import AppLoader from "@/components/shared/AppLoader";
 import { useGetMe } from "@/hooks/useUserQuery";
@@ -57,6 +58,11 @@ const PreJoinScreen = ({
   const isLowLight = useLowLight(
     videoEnabled ? stream?.getVideoTracks()[0] : undefined,
   );
+  // Get the call sounds ready on the first click here (e.g. Join), so the
+  // join chime and every in-call toggle sound play instantly.
+  useEffect(() => {
+    installCallSoundsWarmup();
+  }, []);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [name, setName] = useState("");
   const [isLoading, setIsLoading] = useState(true);

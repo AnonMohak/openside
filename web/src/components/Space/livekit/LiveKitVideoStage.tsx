@@ -4,9 +4,7 @@ import {
   VideoTrack,
   isTrackReference,
   useConnectionQualityIndicator,
-  useConnectionState,
   useIsMuted,
-  useLocalParticipant,
   useIsSpeaking,
   useParticipants,
   useTracks,
@@ -14,13 +12,12 @@ import {
 } from "@livekit/components-react";
 import {
   ConnectionQuality,
-  ConnectionState,
   Track,
   type Participant,
 } from "livekit-client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, Loader2, Mail, MicOff, X } from "lucide-react";
-import { FiSend, FiWifiOff } from "react-icons/fi";
+import { Link, Mail, MicOff, X } from "lucide-react";
+import { FiSend } from "react-icons/fi";
 import { TbCopy, TbCopyCheck } from "react-icons/tb";
 import { IoHandRightOutline } from "react-icons/io5";
 import { LuHeadphoneOff, LuWifiHigh } from "react-icons/lu";
@@ -387,29 +384,6 @@ const useElementSize = <T extends HTMLElement>() => {
   return [setElement, size] as const;
 };
 
-const getConnectionQualityWarning = (quality: ConnectionQuality | undefined) => {
-  if (quality === ConnectionQuality.Poor) {
-    return {
-      label: "Network unstable",
-      tone: "warning" as const,
-      icon: <LuWifiHigh size={20} />,
-    };
-  }
-
-  if (quality === ConnectionQuality.Lost) {
-    return {
-      label: "Connection lost",
-      tone: "danger" as const,
-      icon: <FiWifiOff size={20} />,
-    };
-  }
-
-  return null;
-};
-
-const DEMO_FORCE_CONNECTION_QUALITY: ConnectionQuality | null =
-  null;
-
 const LiveKitVideoStage = ({
   deafened,
   isHost,
@@ -421,7 +395,6 @@ const LiveKitVideoStage = ({
 }: LiveKitVideoStageProps) => {
   const [isInvitePanelHidden, setIsInvitePanelHidden] = useState(false);
   const [gridRef, gridSize] = useElementSize<HTMLDivElement>();
-  const { localParticipant } = useLocalParticipant();
   const participants = useParticipants();
   const tracks = useTracks(
     [
@@ -459,45 +432,10 @@ const LiveKitVideoStage = ({
     : undefined;
 
   const isAlone = remoteParticipantCount === 0;
-  const connectionWarning = getConnectionQualityWarning(
-    DEMO_FORCE_CONNECTION_QUALITY ?? localParticipant.connectionQuality,
-  );
-  // LiveKit recovers from network blips by reconnecting in the background;
-  // without a visible indicator the call just freezes unexplained.
-  const connectionState = useConnectionState();
-  const isReconnecting =
-    connectionState === ConnectionState.Reconnecting ||
-    connectionState === ConnectionState.SignalReconnecting;
-
   const showInvitePanel = isHost && isAlone && !isInvitePanelHidden;
 
   return (
     <div className="relative h-full min-h-0 flex flex-col gap-2">
-      {(isReconnecting || connectionWarning) && (
-        <div className="pointer-events-none absolute right-3 top-3 z-30">
-          {isReconnecting ? (
-            <span
-              className="inline-flex size-8 items-center justify-center rounded-full bg-amber-500/50 text-white "
-              title="Reconnecting..."
-            >
-              <Loader2 size={20} className="animate-spin" />
-            </span>
-          ) : (
-            <span
-              className={`inline-flex size-8 items-center justify-center rounded-full text-white  ${
-                connectionWarning!.tone === "danger"
-                  ? "bg-red-500/50"
-                  : connectionWarning!.tone === "warning"
-                    ? "bg-amber-500/50"
-                    : "bg-foreground/40"
-              }`}
-              title={connectionWarning!.label}
-            >
-              {connectionWarning!.icon}
-            </span>
-          )}
-        </div>
-      )}
       <div className="@container flex-1 min-h-0">
         {spotlightTile ? (
           // Focus mode: the spotlighted tile fills the stage; the rest sit in a
