@@ -28,8 +28,8 @@ import {
   Monitor,
   Moon,
   Play,
-  ScanFace,
   Square,
+  Speaker,
   Sun,
   X,
 } from "lucide-react";
@@ -99,13 +99,6 @@ const TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
     icon: <BsRecordCircle className="size-4" />,
   },
 ];
-
-const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
-  general: "Your space, your name, and how the call looks and sounds.",
-  audio: "Pick your mic and speaker, and check how you sound.",
-  video: "Choose a camera and set up your background.",
-  recording: "How your recordings are captured.",
-};
 
 const MAX_NAME_LENGTH = 60;
 
@@ -448,7 +441,7 @@ const CallSettingsDialog = ({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="group flex w-full min-w-0 items-center gap-2.5 rounded-lg border border-call-border bg-call-background px-3 py-2.5 text-left transition-colors hover:bg-primary-hover data-[state=open]:bg-primary-hover"
+            className="group flex w-full min-w-0 items-center gap-2.5 rounded-lg border border-call-border bg-call-background h-10 px-3 text-left transition-colors hover:bg-primary-hover data-[state=open]:bg-primary-hover"
           >
             <span className="min-w-0 flex-1 truncate text-sm text-foreground">
               {cleanDeviceLabel(selected?.label ?? "") || fallback}
@@ -498,57 +491,29 @@ const CallSettingsDialog = ({
     );
   };
 
-  const renderSegmented = <T extends string>(
-    value: T,
-    options: { value: T; label: string; icon?: ReactNode }[],
-    onChange: (value: T) => void,
-    disabled = false,
-  ) => (
-    <div className="flex items-center gap-0.5 rounded-lg border border-call-border bg-call-background p-0.5">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          disabled={disabled}
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            "flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-            value === option.value
-              ? "bg-primary-hover text-foreground shadow-sm"
-              : "text-foreground/55 hover:text-foreground",
-          )}
-        >
-          {option.icon}
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-
   const renderLevelMeter = () => {
-    const count = 32;
+    const count = 96;
     const activeCount = Math.round((micLevel / 100) * count);
     return (
       <div
-        className="grid flex-1 grid-cols-[repeat(32,1fr)] gap-[3px]"
+        className="flex h-6 min-w-0 flex-1 items-center justify-between"
         aria-hidden
       >
         {Array.from({ length: count }).map((_, index) => {
-          const isActive = index < activeCount;
-          const hue = Math.round(52 + (90 * index) / (count - 1));
+          const position = index / (count - 1);
           return (
             <span
               key={index}
               className={cn(
-                "h-2 rounded-full transition-colors duration-75",
-                !isActive && "bg-foreground/12",
+                "h-full w-[2px] rounded-full transition-colors duration-75",
+                index >= activeCount
+                  ? "bg-foreground/10"
+                  : position < 0.7
+                    ? "bg-emerald-500"
+                    : position < 0.9
+                      ? "bg-amber-400"
+                      : "bg-red-500",
               )}
-              style={
-                isActive
-                  ? { backgroundColor: `hsl(${hue}, 85%, 55%)` }
-                  : undefined
-              }
             />
           );
         })}
@@ -559,111 +524,170 @@ const CallSettingsDialog = ({
   // ---- Tabs ---------------------------------------------------------------
   const renderAudioTab = () => (
     <>
-      <SettingsGroup label="Microphone">
-        <SettingsCard>
-          <SettingsRow
-            title="Input device"
-            description={
-              isMicrophoneEnabled
-                ? "Speak to check the level."
-                : "Unmute to see your input level."
-            }
-            control={
-              !isMicrophoneEnabled && (
-                <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[0.7rem] font-medium text-red-500">
-                  Muted
-                </span>
-              )
-            }
-          >
-            {renderDeviceSelect(
-              "audioinput",
-              microphoneDevices,
-              microphone.activeDeviceId,
-              "Microphone",
+      <SettingsGroup
+        label="Microphone"
+        description="Choose your mic and check that others can hear you."
+      >
+        <div className="flex flex-col gap-1.5">
+          <span className={fieldLabelClassName}>Input device</span>
+          {renderDeviceSelect(
+            "audioinput",
+            microphoneDevices,
+            microphone.activeDeviceId,
+            "Microphone",
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className={fieldLabelClassName}>Input level</span>
+          <div className="flex h-8 items-center gap-3">
+            <span
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                isMicrophoneEnabled
+                  ? "bg-primary-hover text-foreground/60"
+                  : "bg-red-500/10 text-red-500",
+              )}
+            >
+              <RiMicLine className="size-4" />
+            </span>
+            {isMicrophoneEnabled ? (
+              renderLevelMeter()
+            ) : (
+              <span className="text-sm text-foreground/50">
+                You're muted. Unmute to test your mic.
+              </span>
             )}
-            <div className="flex items-center gap-3 px-0.5">
-              <RiMicLine className="size-4 shrink-0 text-foreground/45" />
-              {renderLevelMeter()}
-            </div>
-          </SettingsRow>
-          <SettingsRow
-            icon={<Headphones className="size-4" />}
-            title="Wearing headphones?"
-            description="Headphones turn echo cancellation off so you sound clearer. On speakers it stays on to stop echo."
-            control={renderSegmented(
-              usingHeadphones ? "yes" : "no",
+          </div>
+        </div>
+        <div className="mt-3 flex flex-col gap-1.5">
+          <span className={fieldLabelClassName}>
+            What are you listening on?
+          </span>
+          <div className="grid grid-cols-2 gap-2.5">
+            {(
               [
-                { value: "yes", label: "Yes" },
-                { value: "no", label: "No" },
-              ],
-              (value) => void setHeadphones(value === "yes"),
-              isApplyingHeadphones,
-            )}
-          />
-        </SettingsCard>
+                {
+                  value: true,
+                  label: "Headphones",
+                  hint: "Echo cancellation off, so you sound clearer",
+                  icon: Headphones,
+                },
+                {
+                  value: false,
+                  label: "Speakers",
+                  hint: "Echo cancellation on, so others don't hear an echo",
+                  icon: Speaker,
+                },
+              ] as const
+            ).map(({ value, label, hint, icon: Icon }) => {
+              const selected = usingHeadphones === value;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={isApplyingHeadphones}
+                  onClick={() => void setHeadphones(value)}
+                  className={cn(
+                    "flex items-start gap-3 rounded-xl border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                    selected
+                      ? "border-brand bg-brand/5 ring-1 ring-brand"
+                      : "border-call-border hover:bg-primary-hover",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+                      selected
+                        ? "bg-brand text-white"
+                        : "bg-primary-hover text-foreground/60",
+                    )}
+                  >
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">
+                      {label}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-5 text-foreground/55">
+                      {hint}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </SettingsGroup>
 
-      <SettingsGroup label="Speaker">
-        <SettingsCard>
-          <SettingsRow
-            title="Output device"
-            description={
-              canSelectAudioOutput
-                ? null
-                : "This browser plays call audio through your system's default output."
-            }
-            control={
-              <button
-                type="button"
-                onClick={() => void toggleSpeakerTest()}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-                  isTestingSpeaker
-                    ? "border-brand/40 bg-brand/15 text-foreground"
-                    : "border-call-border bg-call-background text-foreground/80 hover:bg-primary-hover",
+      <SettingsGroup
+        label="Speaker"
+        description={
+          canSelectAudioOutput
+            ? "Choose where call audio plays and play a test sound."
+            : "This browser plays call audio through your system's default output."
+        }
+      >
+        <div className="flex flex-col gap-1.5">
+          <span className={fieldLabelClassName}>Output device</span>
+          <div className="flex items-center gap-2">
+            {canSelectAudioOutput && (
+              <div className="min-w-0 flex-1">
+                {renderDeviceSelect(
+                  "audiooutput",
+                  speakerDevices,
+                  speaker.activeDeviceId,
+                  "Speaker",
                 )}
-              >
-                {isTestingSpeaker ? (
-                  <Square className="size-3.5 fill-current" />
-                ) : (
-                  <Play className="size-3.5 fill-current" />
-                )}
-                {isTestingSpeaker ? "Stop" : "Test"}
-              </button>
-            }
-          >
-            {canSelectAudioOutput &&
-              renderDeviceSelect(
-                "audiooutput",
-                speakerDevices,
-                speaker.activeDeviceId,
-                "Speaker",
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => void toggleSpeakerTest()}
+              aria-label={
+                isTestingSpeaker ? "Stop test sound" : "Play test sound"
+              }
+              className={cn(
+                "flex h-10 shrink-0 items-center gap-1.5 rounded-lg border px-3.5 text-sm font-medium transition-colors",
+                isTestingSpeaker
+                  ? "border-brand/40 bg-brand/15 text-foreground"
+                  : "border-call-border bg-call-background text-foreground/80 hover:bg-primary-hover",
               )}
-          </SettingsRow>
-          <SettingsRow title="Call volume">
-            <div className="flex items-center gap-3 px-0.5">
-              <RiVolumeUpLine className="size-4 shrink-0 text-foreground/45" />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={outputVolume}
-                onChange={(event) =>
-                  onOutputVolumeChange(Number(event.target.value))
-                }
-                aria-label="Call volume"
-                className="volume-slider h-1.5 min-w-0 flex-1 cursor-pointer"
-                style={
-                  { "--volume-progress": `${outputVolume}%` } as CSSProperties
-                }
-              />
-              <span className="w-9 shrink-0 text-right text-xs tabular-nums text-foreground/60">
-                {outputVolume}%
-              </span>
-            </div>
-          </SettingsRow>
-        </SettingsCard>
+            >
+              {isTestingSpeaker ? (
+                <Square className="size-3.5 fill-current" />
+              ) : (
+                <Play className="size-3.5 fill-current" />
+              )}
+              {isTestingSpeaker ? "Stop" : "Test"}
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className={fieldLabelClassName}>Call volume</span>
+          <div className="flex h-8 items-center gap-3">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-hover text-foreground/60">
+              <RiVolumeUpLine className="size-4" />
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={outputVolume}
+              onChange={(event) =>
+                onOutputVolumeChange(Number(event.target.value))
+              }
+              aria-label="Call volume"
+              className="volume-slider h-1.5 min-w-0 flex-1 cursor-pointer"
+              style={
+                { "--volume-progress": `${outputVolume}%` } as CSSProperties
+              }
+            />
+            <span className="w-9 shrink-0 text-right text-xs tabular-nums text-foreground/60">
+              {outputVolume}%
+            </span>
+          </div>
+        </div>
       </SettingsGroup>
     </>
   );
@@ -679,123 +703,116 @@ const CallSettingsDialog = ({
 
     return (
       <>
-        <SettingsCard>
-          <div className="p-3">
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-call-primary">
-              {liveCameraTrack ? (
-                <>
-                  <video
-                    ref={selfViewRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="h-full w-full scale-x-[-1] object-cover"
-                  />
-                  <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-2">
-                    {captureHeight ? (
-                      <span className="rounded-md bg-black/55 px-1.5 py-0.5 text-[0.65rem] font-medium tabular-nums text-white backdrop-blur-sm">
-                        {captureHeight >= 2160 ? "4K" : `${captureHeight}p`}
-                      </span>
-                    ) : (
-                      <span />
-                    )}
-                    {isLowLight && <LowLightBadge />}
-                  </div>
-                  <div className="pointer-events-none absolute inset-x-2.5 bottom-2.5 flex items-end justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm">
-                      <FiVideo className="size-3.5 shrink-0" />
-                      <span className="truncate">{cameraLabel}</span>
+        <SettingsGroup
+          label="Camera"
+          description={
+            !isBackgroundSupported
+              ? undefined
+              : liveCameraTrack
+                ? "Pick a background. Others see changes right away."
+                : "Pick a background. It's used next time your camera is on."
+          }
+        >
+          <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-call-border bg-call-primary">
+            {liveCameraTrack ? (
+              <>
+                <video
+                  ref={selfViewRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="h-full w-full scale-x-[-1] object-cover"
+                />
+                <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2">
+                  {captureHeight ? (
+                    <span className="rounded-md bg-black/55 px-1.5 py-0.5 text-[0.65rem] font-medium tabular-nums text-white backdrop-blur-sm">
+                      {captureHeight >= 2160 ? "4K" : `${captureHeight}p`}
                     </span>
-                  </div>
-                </>
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                  <span className="flex size-14 items-center justify-center rounded-full bg-primary-hover text-foreground/55">
-                    <FiVideoOff className="size-6" />
-                  </span>
-                  {isAudioOnly ? (
-                    <>
-                      <p className="text-sm font-medium text-foreground">
-                        This call is audio-only
-                      </p>
-                      <p className="max-w-[280px] text-xs leading-5 text-foreground/55">
-                        The host turned cameras off. You can still pick a camera
-                        and background for later.
-                      </p>
-                    </>
                   ) : (
-                    <>
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Your camera is off
-                        </p>
-                        <p className="mt-0.5 text-xs text-foreground/55">
-                          Turn it on to see how you look.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={onTurnOnCamera}
-                        className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85"
-                      >
-                        <FiVideo className="size-4" />
-                        Turn on camera
-                      </button>
-                    </>
+                    <span />
                   )}
+                  {isLowLight && <LowLightBadge />}
                 </div>
-              )}
-            </div>
+                <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                    <FiVideo className="size-3.5 shrink-0" />
+                    <span className="truncate">{cameraLabel}</span>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <span className="flex size-14 items-center justify-center rounded-full bg-primary-hover text-foreground/55">
+                  <FiVideoOff className="size-6" />
+                </span>
+                {isAudioOnly ? (
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      This call is audio-only
+                    </p>
+                    <p className="mt-0.5 max-w-[280px] text-xs leading-5 text-foreground/55">
+                      The host turned cameras off. You can still pick a camera
+                      and background for later.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Your camera is off
+                      </p>
+                      <p className="mt-0.5 text-xs text-foreground/55">
+                        Turn it on to see how you look.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onTurnOnCamera}
+                      className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85"
+                    >
+                      <FiVideo className="size-4" />
+                      Turn on camera
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
-          <SettingsRow title="Camera">
+          {isBackgroundSupported && (
+            <>
+              <BackgroundOptionsGrid
+                value={background}
+                customImageUrl={customImageUrl}
+                pendingKey={pendingBackgroundKey}
+                showLabels
+                className="grid-cols-4 gap-x-2 gap-y-2.5 sm:grid-cols-6"
+                onSelect={(next) => void selectBackground(next)}
+                onUploadClick={() => backgroundFileRef.current?.click()}
+              />
+              <input
+                ref={backgroundFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  void handleBackgroundUpload(event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
+            </>
+          )}
+          <div className="mt-3 flex flex-col gap-1.5">
+            <span className={fieldLabelClassName}>Camera device</span>
             {renderDeviceSelect(
               "videoinput",
               cameraDevices,
               camera.activeDeviceId,
               "Camera",
             )}
-          </SettingsRow>
-        </SettingsCard>
-
-        {isBackgroundSupported && (
-          <SettingsGroup label="Background">
-            <SettingsCard>
-              <SettingsRow
-                title="Background effect"
-                description={
-                  liveCameraTrack
-                    ? "Blur or replace what's behind you. Others see it right away."
-                    : "Blur or replace what's behind you. Used next time your camera is on."
-                }
-              >
-                <BackgroundOptionsGrid
-                  value={background}
-                  customImageUrl={customImageUrl}
-                  pendingKey={pendingBackgroundKey}
-                  showLabels
-                  className="grid-cols-3 gap-x-2.5 gap-y-3 sm:grid-cols-4"
-                  onSelect={(next) => void selectBackground(next)}
-                  onUploadClick={() => backgroundFileRef.current?.click()}
-                />
-                <input
-                  ref={backgroundFileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => {
-                    void handleBackgroundUpload(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-              </SettingsRow>
-            </SettingsCard>
-          </SettingsGroup>
-        )}
-
-        <SettingsGroup label="Preferences">
-          <SettingsCard>
+          </div>
+          <div className="mt-3">
             <SettingsRow
-              icon={<ScanFace className="size-4" />}
+              flat
               title="Preview before turning on"
               description="Check framing, lighting and background before others see you."
               control={
@@ -809,7 +826,7 @@ const CallSettingsDialog = ({
                 />
               }
             />
-          </SettingsCard>
+          </div>
         </SettingsGroup>
       </>
     );
@@ -817,90 +834,106 @@ const CallSettingsDialog = ({
 
   const renderGeneralTab = () => (
     <>
+      <SettingsGroup
+        label="Profile"
+        description="How others see you in this call."
+      >
+        <DisplayNameForm
+          spaceId={space?.id}
+          roomCode={roomCode}
+          currentName={localParticipant.name ?? ""}
+          onPendingChange={(pending) => setFormPending("name", pending)}
+          onSaveResult={setLastSaveOk}
+        />
+      </SettingsGroup>
+
       {isHost && space && (
-        <SettingsGroup label="Space">
-          <SettingsCard>
-            <SpaceDetailsForm
-              key={space.id}
-              spaceId={space.id}
-              title={space.title ?? ""}
-              description={space.description ?? ""}
-              onPendingChange={(pending) => setFormPending("space", pending)}
-              onSaveResult={setLastSaveOk}
-            />
-          </SettingsCard>
+        <SettingsGroup
+          label="Space"
+          description="Shown to everyone who joins. Only you can change it."
+        >
+          <SpaceDetailsForm
+            key={space.id}
+            spaceId={space.id}
+            title={space.title ?? ""}
+            description={space.description ?? ""}
+            onPendingChange={(pending) => setFormPending("space", pending)}
+            onSaveResult={setLastSaveOk}
+          />
         </SettingsGroup>
       )}
 
-      <SettingsGroup label="About you">
-        <SettingsCard>
-          <DisplayNameForm
-            spaceId={space?.id}
-            roomCode={roomCode}
-            avatar={user?.avatar ?? undefined}
-            currentName={localParticipant.name ?? ""}
-            onPendingChange={(pending) => setFormPending("name", pending)}
-            onSaveResult={setLastSaveOk}
-          />
-        </SettingsCard>
+      <SettingsGroup label="Appearance">
+        <div className="grid grid-cols-3 gap-3">
+          {(
+            [
+              { value: "light", label: "Light", icon: Sun },
+              { value: "dark", label: "Dark", icon: Moon },
+              { value: "system", label: "System", icon: Monitor },
+            ] as const
+          ).map(({ value, label, icon: Icon }) => {
+            const selected = (theme ?? "system") === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setTheme(value)}
+                className="group flex flex-col gap-2 text-left"
+              >
+                <span
+                  className={cn(
+                    "block overflow-hidden rounded-xl border-2 transition-colors",
+                    selected
+                      ? "border-brand"
+                      : "border-call-border group-hover:border-foreground/25",
+                  )}
+                >
+                  <ThemePreview mode={value} />
+                </span>
+                <span
+                  className={cn(
+                    "flex items-center gap-1.5 px-0.5 text-sm font-medium transition-colors",
+                    selected
+                      ? "text-foreground"
+                      : "text-foreground/60 group-hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                  {label}
+                  {selected && (
+                    <Check className="ml-auto size-3.5 text-brand" />
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </SettingsGroup>
 
-      <SettingsGroup label="Preferences">
-        <SettingsCard>
-          <SettingsRow title="Theme">
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  { value: "light", label: "Light", icon: Sun },
-                  { value: "dark", label: "Dark", icon: Moon },
-                  { value: "system", label: "System", icon: Monitor },
-                ] as const
-              ).map(({ value, label, icon: Icon }) => {
-                const selected = (theme ?? "system") === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setTheme(value)}
-                    className={cn(
-                      "flex flex-col items-center gap-1.5 rounded-lg border bg-call-background px-3 py-3 text-sm font-medium transition-colors",
-                      selected
-                        ? "border-brand text-foreground ring-1 ring-brand"
-                        : "border-call-border text-foreground/60 hover:bg-primary-hover hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="size-4" />
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </SettingsRow>
-          <SettingsRow
-            title="Call sounds"
-            description="Sounds for muting, camera on/off and people joining or leaving."
-            control={
-              <Switch
-                checked={soundsEnabled}
-                label="Call sounds"
-                onChange={(next) => {
-                  setCallSoundsEnabled(next);
-                  setSoundsEnabled(next);
-                }}
-              />
-            }
-          />
-        </SettingsCard>
+      <SettingsGroup label="Sounds">
+        <SettingsRow
+          flat
+          title="Call sounds"
+          description="Play sounds for muting, camera on/off and people joining or leaving."
+          control={
+            <Switch
+              checked={soundsEnabled}
+              label="Call sounds"
+              onChange={(next) => {
+                setCallSoundsEnabled(next);
+                setSoundsEnabled(next);
+              }}
+            />
+          }
+        />
       </SettingsGroup>
     </>
   );
 
-  const activeTab = tabs.find((item) => item.id === tab) ?? tabs[0];
-
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in-0"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in-0 max-sm:items-end max-sm:p-0"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -910,81 +943,77 @@ const CallSettingsDialog = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="call-settings-title"
-        className="relative flex h-[min(640px,calc(100dvh-2rem))] w-[min(900px,100%)] overflow-hidden rounded-2xl border border-call-border bg-call-background shadow-2xl animate-in fade-in-0 zoom-in-95 max-sm:flex-col"
+        className="relative flex h-[min(680px,calc(100dvh-2rem))] w-[min(920px,100%)] overflow-hidden rounded-2xl border border-call-border bg-call-background shadow-2xl animate-in fade-in-0 zoom-in-95 max-sm:h-[92dvh] max-sm:flex-col max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0"
       >
-        <aside className="flex shrink-0 flex-col gap-4 bg-primary/40 p-3 sm:w-52 sm:border-r sm:border-call-border max-sm:gap-2 max-sm:border-b max-sm:border-call-border">
-          <h2
-            id="call-settings-title"
-            className="px-2.5 pt-1.5 text-base font-semibold text-foreground max-sm:pr-10"
-          >
-            Settings
-          </h2>
-          <nav className="flex gap-1 sm:flex-col scrollbar-hide max-sm:overflow-x-auto">
-            {tabs.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                aria-current={tab === item.id ? "page" : undefined}
-                className={cn(
-                  "flex shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
-                  tab === item.id
-                    ? "bg-primary-hover text-foreground"
-                    : "text-foreground/60 hover:bg-primary-hover/60 hover:text-foreground",
-                )}
-              >
-                <span
+        <aside className="flex shrink-0 flex-col bg-primary/40 sm:w-56 sm:border-r sm:border-call-border max-sm:border-b max-sm:border-call-border">
+          <div className="flex items-center justify-between gap-2 px-5 pb-3 pt-5 max-sm:px-4 max-sm:pb-2 max-sm:pt-4">
+            <h2
+              id="call-settings-title"
+              className="text-base font-semibold text-foreground"
+            >
+              Settings
+            </h2>
+            <CloseButton onClick={onClose} className="sm:hidden" />
+          </div>
+          <nav className="flex gap-1 px-3 sm:flex-col scrollbar-hide max-sm:overflow-x-auto max-sm:pb-3">
+            {tabs.map((item) => {
+              const isActive = tab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setTab(item.id)}
+                  aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "transition-colors",
-                    tab === item.id ? "text-foreground" : "text-foreground/50",
+                    "flex shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-primary-hover text-foreground shadow-xs"
+                      : "text-foreground/60 hover:bg-primary-hover/60 hover:text-foreground",
                   )}
                 >
-                  {item.icon}
-                </span>
-                {item.label}
-              </button>
-            ))}
+                  <span
+                    className={cn(
+                      "transition-colors",
+                      isActive ? "text-foreground" : "text-foreground/50",
+                    )}
+                  >
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </button>
+              );
+            })}
           </nav>
-          <div className="mt-auto max-sm:hidden">
+          <div className="mt-auto px-3 pb-4 max-sm:hidden">
             <SaveStatus status={saveStatus} />
           </div>
         </aside>
 
-        <button
-          type="button"
-          aria-label="Close settings"
-          onClick={onClose}
-          className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-primary-hover text-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground"
-        >
-          <X className="size-4" />
-        </button>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <CloseButton
+            onClick={onClose}
+            className="absolute right-4 top-4 z-10 max-sm:hidden"
+          />
 
-        <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto">
-          <div className="flex flex-col gap-6 px-6 pb-8 pt-6 max-sm:px-4">
-            <header className="pr-8">
-              <h3 className="text-lg font-semibold text-foreground">
-                {activeTab.label}
-              </h3>
-              <p className="mt-0.5 text-sm text-foreground/55">
-                {TAB_DESCRIPTIONS[activeTab.id]}
-              </p>
-            </header>
-            {tab === "general" && renderGeneralTab()}
-            {tab === "audio" && renderAudioTab()}
-            {tab === "video" && renderVideoTab()}
-            {tab === "recording" && user && (
-              <RecordingSettings
-                variant="call"
-                locked={isRecordingActive}
-                note={
-                  isRecordingActive
-                    ? "Recording settings are locked while a recording is in progress."
-                    : isHost
-                      ? "Changes apply right away. Audio only turns off everyone's camera and screen share in this call."
-                      : "Recordings in this call use the host's settings. Yours apply to calls you host."
-                }
-              />
-            )}
+          <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto">
+            <div className="flex flex-col gap-7 pb-12 pl-8 pr-10 pt-6 max-sm:px-4 max-sm:pb-8 max-sm:pt-5">
+              {tab === "general" && renderGeneralTab()}
+              {tab === "audio" && renderAudioTab()}
+              {tab === "video" && renderVideoTab()}
+              {tab === "recording" && user && (
+                <RecordingSettings
+                  variant="call"
+                  locked={isRecordingActive}
+                  note={
+                    isRecordingActive
+                      ? "Recording settings are locked while a recording is in progress."
+                      : isHost
+                        ? undefined
+                        : "Recordings in this call use the host's settings. Yours apply to calls you host."
+                  }
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -994,49 +1023,70 @@ const CallSettingsDialog = ({
 
 // ---- Layout pieces ----------------------------------------------------------
 
+const CloseButton = ({
+  onClick,
+  className,
+}: {
+  onClick: () => void;
+  className?: string;
+}) => (
+  <button
+    type="button"
+    aria-label="Close settings"
+    onClick={onClick}
+    className={cn(
+      "flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-hover text-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground",
+      className,
+    )}
+  >
+    <X className="size-4" />
+  </button>
+);
+
 const SettingsGroup = ({
   label,
+  description,
   children,
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
 }) => (
-  <section className="flex flex-col gap-2">
-    <h4 className="px-1 text-[0.7rem] font-semibold uppercase tracking-wider text-foreground/45">
-      {label}
-    </h4>
+  <section className="flex flex-col gap-3">
+    {/* Right padding keeps the first heading clear of the close button. */}
+    <div className="pr-10">
+      <h4 className="text-sm font-semibold text-foreground">{label}</h4>
+      {description && (
+        <p className="mt-0.5 text-xs leading-5 text-foreground/55">
+          {description}
+        </p>
+      )}
+    </div>
     {children}
   </section>
 );
 
-const SettingsCard = ({ children }: { children: ReactNode }) => (
-  <div className="divide-y divide-call-border overflow-hidden rounded-xl border border-call-border bg-primary/40">
-    {children}
-  </div>
-);
-
-// One setting: optional icon tile, title + description, a control on the
-// right, and anything wider (selects, grids) underneath.
+// One setting: title + description on the left, its control on the right
+// (stacked on narrow screens), and anything wider (meters, grids) underneath.
 const SettingsRow = ({
-  icon,
   title,
   description,
   control,
+  wide = false,
+  flat = false,
   children,
 }: {
-  icon?: ReactNode;
   title: string;
   description?: string | null;
   control?: ReactNode;
+  /** Control is a select or slider: give it a fixed column (full width on mobile). */
+  wide?: boolean;
+  /** Outside a card: drop the row padding. */
+  flat?: boolean;
   children?: ReactNode;
 }) => (
-  <div className="flex flex-col gap-3 p-4">
-    <div className="flex items-center gap-3">
-      {icon && (
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-hover text-foreground/70">
-          {icon}
-        </span>
-      )}
+  <div className={cn("flex flex-col gap-3", !flat && "px-4 py-3.5")}>
+    <div className="flex items-center gap-x-6 gap-y-2.5 max-sm:flex-wrap">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-foreground">{title}</p>
         {description && (
@@ -1045,11 +1095,71 @@ const SettingsRow = ({
           </p>
         )}
       </div>
-      {control && <div className="shrink-0">{control}</div>}
+      {control && (
+        <div
+          className={cn(
+            "flex shrink-0 justify-end",
+            wide && "w-full sm:w-[280px]",
+          )}
+        >
+          {control}
+        </div>
+      )}
     </div>
     {children}
   </div>
 );
+
+// Mini window mock for the theme picker.
+const ThemePreview = ({ mode }: { mode: "light" | "dark" | "system" }) => {
+  const pane = (dark: boolean) => (
+    <span
+      className={cn(
+        "flex h-full flex-1 flex-col gap-1.5 p-2.5",
+        dark ? "bg-neutral-900" : "bg-neutral-100",
+      )}
+    >
+      <span
+        className={cn(
+          "h-1.5 w-1/2 rounded-full",
+          dark ? "bg-neutral-600" : "bg-neutral-300",
+        )}
+      />
+      <span className="grid flex-1 grid-cols-2 gap-1">
+        <span className={cn("rounded", dark ? "bg-neutral-700" : "bg-white")} />
+        <span className={cn("rounded", dark ? "bg-neutral-700" : "bg-white")} />
+      </span>
+      <span className="flex justify-center gap-1">
+        <span
+          className={cn(
+            "size-1.5 rounded-full",
+            dark ? "bg-neutral-500" : "bg-neutral-300",
+          )}
+        />
+        <span className="size-1.5 rounded-full bg-red-500" />
+        <span
+          className={cn(
+            "size-1.5 rounded-full",
+            dark ? "bg-neutral-500" : "bg-neutral-300",
+          )}
+        />
+      </span>
+    </span>
+  );
+
+  return (
+    <span className="flex aspect-[16/10] w-full" aria-hidden>
+      {mode === "system" ? (
+        <>
+          {pane(false)}
+          {pane(true)}
+        </>
+      ) : (
+        pane(mode === "dark")
+      )}
+    </span>
+  );
+};
 
 const inputClassName =
   "w-full rounded-lg border border-call-border bg-call-background px-3 py-2.5 text-sm text-foreground placeholder:text-foreground/40 transition-colors focus:border-brand focus:outline-none";
@@ -1156,7 +1266,7 @@ const SpaceDetailsForm = ({
   );
 
   return (
-    <div className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1.5">
         <span className={fieldLabelClassName}>Title</span>
         <input
@@ -1195,19 +1305,16 @@ const SpaceDetailsForm = ({
 const DisplayNameForm = ({
   spaceId,
   roomCode,
-  avatar,
   currentName,
   onPendingChange,
   onSaveResult,
 }: AutosaveFormProps & {
   spaceId: string | undefined;
   roomCode: string;
-  avatar?: string;
   currentName: string;
 }) => {
   const renameSelf = useRenameSelf(spaceId ?? "");
   const [draftName, setDraftName] = useState(currentName);
-  const [avatarFailed, setAvatarFailed] = useState(false);
   const trimmed = draftName.trim();
 
   useDebouncedAutosave(trimmed, currentName.trim(), {
@@ -1227,30 +1334,16 @@ const DisplayNameForm = ({
   });
 
   return (
-    <div className="flex items-center gap-3 p-4">
-      <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-base font-semibold text-white">
-        {avatar && !avatarFailed ? (
-          <img
-            src={avatar}
-            alt=""
-            onError={() => setAvatarFailed(true)}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          (trimmed || currentName || "?").charAt(0).toUpperCase()
-        )}
-      </span>
-      <label className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className={fieldLabelClassName}>Display name</span>
-        <input
-          value={draftName}
-          onChange={(event) => setDraftName(event.target.value)}
-          placeholder="Your name"
-          maxLength={MAX_NAME_LENGTH}
-          className={inputClassName}
-        />
-      </label>
-    </div>
+    <label className="flex flex-col gap-1.5">
+      <span className={fieldLabelClassName}>Display name</span>
+      <input
+        value={draftName}
+        onChange={(event) => setDraftName(event.target.value)}
+        placeholder="Your name"
+        maxLength={MAX_NAME_LENGTH}
+        className={inputClassName}
+      />
+    </label>
   );
 };
 

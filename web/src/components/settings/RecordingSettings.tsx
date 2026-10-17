@@ -49,14 +49,20 @@ const RecordingSettings = ({
   variant?: "page" | "call";
 }) => {
   const isCall = variant === "call";
+  // In the call dialog sections sit flat (no card), like the other tabs.
   const cardClassName = isCall
-    ? "rounded-xl border border-call-border bg-primary/40 p-4"
+    ? ""
     : "rounded-lg border border-border bg-background p-5";
   const headingClassName = isCall
     ? "text-sm font-semibold text-foreground"
     : "text-base font-semibold text-foreground";
+  // Unselected option tiles: call surfaces in the dialog, page surfaces elsewhere.
+  const optionClassName = isCall ? "border-call-border" : "border-border";
+  const selectedOptionClassName = isCall
+    ? "border-brand bg-brand/5 ring-1 ring-brand"
+    : "border-brand ring-1 ring-brand";
   const descriptionClassName = isCall
-    ? "mt-0.5 max-w-md text-xs leading-5 text-foreground/55"
+    ? "mt-0.5 pr-10 text-xs leading-5 text-foreground/55"
     : "mt-1 max-w-md text-sm text-fg-muted";
   const { data: user, isLoading } = useGetMe();
   const { data: usage } = useUsage();
@@ -80,9 +86,17 @@ const RecordingSettings = ({
   }
 
   return (
-    <div className={cn("flex flex-col", isCall ? "gap-3" : "gap-6")}>
+    <div className={cn("flex flex-col", isCall ? "gap-7" : "gap-6")}>
       {note && (
-        <p className="rounded-lg bg-muted px-3 py-2 text-xs leading-5 text-fg-muted">
+        <p
+          className={cn(
+            "text-xs leading-5",
+            // pr-10 keeps the call dialog's first line clear of its close button.
+            isCall
+              ? "pr-10 text-foreground/55"
+              : "rounded-lg bg-muted px-3 py-2 text-fg-muted",
+          )}
+        >
           {note}
         </p>
       )}
@@ -92,7 +106,12 @@ const RecordingSettings = ({
           Audio-only recordings skip video capture and produce lossless WAV and
           MP3 downloads.
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:max-w-md">
+        <div
+          className={cn(
+            "grid grid-cols-2",
+            isCall ? "mt-3 gap-2.5" : "mt-4 gap-3 sm:max-w-md",
+          )}
+        >
           {[
             ["VIDEO_AND_AUDIO", "Video + Audio", "Default"],
             ["AUDIO_ONLY", "Audio only", "PCM master only"],
@@ -118,8 +137,8 @@ const RecordingSettings = ({
                 className={cn(
                   "flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
                   selected
-                    ? "border-brand ring-1 ring-brand"
-                    : "border-border hover:border-fg-faint",
+                    ? selectedOptionClassName
+                    : cn(optionClassName, "hover:border-fg-faint"),
                 )}
               >
                 <span className="text-sm font-medium text-foreground">
@@ -139,7 +158,12 @@ const RecordingSettings = ({
           The frame rate your recordings capture at. When you host, this applies
           to everyone in the session so all tracks stay in sync.
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:max-w-sm">
+        <div
+          className={cn(
+            "grid grid-cols-2",
+            isCall ? "mt-3 gap-2.5" : "mt-4 gap-3 sm:max-w-sm",
+          )}
+        >
           {FRAME_RATE_OPTIONS.map(({ value, label, hint, recommended }) => {
             const selected = targetFps === value;
             // On DEMO the whole control is locked to 24.
@@ -160,7 +184,7 @@ const RecordingSettings = ({
                 }
                 className={cn(
                   "flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-                  selected ? "border-brand ring-1 ring-brand" : "border-border",
+                  selected ? selectedOptionClassName : optionClassName,
                   !locked && !selected && "hover:border-fg-faint",
                   locked ? "cursor-not-allowed" : "cursor-pointer",
                 )}
@@ -192,7 +216,12 @@ const RecordingSettings = ({
         <p className={descriptionClassName}>
           Caps camera capture height for recordings you host.
         </p>
-        <div className="mt-4 grid grid-cols-3 gap-3 sm:max-w-md">
+        <div
+          className={cn(
+            "grid grid-cols-3",
+            isCall ? "mt-3 gap-2.5" : "mt-4 gap-3 sm:max-w-md",
+          )}
+        >
           {VIDEO_RESOLUTION_OPTIONS.map(
             ({ value, label, hint, recommended }) => {
               const selected = videoResolution === value;
@@ -213,9 +242,7 @@ const RecordingSettings = ({
                   }
                   className={cn(
                     "flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-                    selected
-                      ? "border-brand ring-1 ring-brand"
-                      : "border-border",
+                    selected ? selectedOptionClassName : optionClassName,
                     !isDemo && !selected && "hover:border-fg-faint",
                     isDemo ? "cursor-not-allowed" : "cursor-pointer",
                   )}
@@ -255,7 +282,12 @@ const RecordingSettings = ({
           Requested for the lossless PCM recording master. Your device may use a
           different actual rate.
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:max-w-sm">
+        <div
+          className={cn(
+            "grid grid-cols-2",
+            isCall ? "mt-3 gap-2.5" : "mt-4 gap-3 sm:max-w-sm",
+          )}
+        >
           {AUDIO_SAMPLE_RATE_OPTIONS.map(({ value, label, recommended }) => {
             const selected = audioSampleRate === value;
             return (
@@ -275,7 +307,7 @@ const RecordingSettings = ({
                 }
                 className={cn(
                   "flex items-center justify-between rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-                  selected ? "border-brand ring-1 ring-brand" : "border-border",
+                  selected ? selectedOptionClassName : optionClassName,
                   !isDemo && !selected && "hover:border-fg-faint",
                   isDemo ? "cursor-not-allowed" : "cursor-pointer",
                 )}
@@ -311,7 +343,7 @@ const RecordingSettings = ({
           These controls affect only the recorded PCM master, not your live
           call.
         </p>
-        <div className="mt-4 flex flex-col gap-4">
+        <div className={cn("flex flex-col gap-4", isCall ? "mt-3" : "mt-4")}>
           {[
             [
               "Noise suppression",
