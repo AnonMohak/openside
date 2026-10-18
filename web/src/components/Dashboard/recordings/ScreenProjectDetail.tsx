@@ -52,6 +52,16 @@ const triggerBrowserDownload = (url: string) => {
   a.remove();
 };
 
+// 754000 -> "12:34"; null when the length isn't known yet.
+const formatClock = (ms?: number) => {
+  if (!ms || ms <= 0) return null;
+  const total = Math.round(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+};
+
 // The project exposes one finished screen video. Prefer the composed output
 // (screen + camera) and fall back to screen-only when no camera was recorded.
 const ScreenVideoCard = ({
@@ -80,42 +90,71 @@ const ScreenVideoCard = ({
   };
 
   return (
-    <div className="w-full self-start overflow-hidden rounded-2xl border border-border bg-primary p-3">
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border">
-        {url ? (
-          <VideoPlayer key={url} src={url} />
-        ) : (
-          <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
-            <FiLoader className="size-4 animate-spin" /> Loading…
-          </div>
-        )}
-      </div>
-      <div className="flex justify-end gap-2 px-1 pb-1 pt-3">
-        <button
-          type="button"
-          onClick={onShare}
-          className={`flex shrink-0 items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-semibold transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
-            rec.shareToken
-              ? "border-success/25 bg-success/10 text-success"
-              : "border-border bg-background text-foreground"
-          }`}
-        >
-          <FiShare2 className="size-4" />
-          {rec.shareToken ? "Shared" : "Share"}
-        </button>
-        <button
-          type="button"
-          disabled={downloading}
-          onClick={() => void handleDownload()}
-          className="flex shrink-0 items-center gap-2 rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {downloading ? (
-            <FiLoader className="size-4 animate-spin" />
+    <div className="flex w-full flex-col self-start overflow-hidden rounded-2xl border border-border/50 bg-primary">
+      <div className="p-2 pb-0">
+        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border/50">
+          {url ? (
+            <VideoPlayer key={url} src={url} />
           ) : (
-            <LuDownload className="size-4" />
+            <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
+              <FiLoader className="size-4 animate-spin" /> Loading…
+            </div>
           )}
-          {downloading ? "Preparing" : "Download video"}
-        </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-base font-semibold text-foreground">
+            {rec.title || "Untitled recording"}
+          </p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-fg-subtle">
+            {[
+              rec.startedAt &&
+                new Date(rec.startedAt).toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                }),
+              formatClock(rec.outputs?.[kind]?.durationMs),
+              kind === "both" ? "Screen + camera" : "Screen",
+            ]
+              .filter(Boolean)
+              .map((part, index) => (
+                <span key={index} className="flex items-center gap-1.5">
+                  {index > 0 && <span aria-hidden>·</span>}
+                  {part}
+                </span>
+              ))}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onShare}
+            className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-opacity hover:opacity-80 cursor-pointer ${
+              rec.shareToken
+                ? "bg-success/10 text-success"
+                : "bg-muted text-foreground"
+            }`}
+          >
+            <FiShare2 className="size-3.5" />
+            {rec.shareToken ? "Shared" : "Share"}
+          </button>
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={() => void handleDownload()}
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+          >
+            {downloading ? (
+              <FiLoader className="size-3.5 animate-spin" />
+            ) : (
+              <LuDownload className="size-3.5" />
+            )}
+            {downloading ? "Preparing" : "Download"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -176,30 +215,41 @@ const ScreenProjectDetailSkeleton = () => (
       </div>
     </div>
     <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
-      <section className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
-        <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
-        <div className="flex justify-end gap-2 rounded-xl bg-primary px-1 py-2">
-          <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
-          <div className="h-9 w-36 animate-pulse rounded-lg bg-muted" />
+      {/* Video card: player + title/details + Share / Download */}
+      <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
+        <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
+          <div className="p-2 pb-0">
+            <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
+          </div>
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="space-y-2">
+              <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
+              <div className="h-3 w-56 animate-pulse rounded-md bg-muted" />
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <div className="h-8 w-20 animate-pulse rounded-lg bg-muted" />
+              <div className="h-8 w-24 animate-pulse rounded-lg bg-muted" />
+            </div>
+          </div>
         </div>
       </section>
 
-      <aside className="flex min-h-[320px] flex-col gap-4 rounded-2xl border border-border bg-primary p-3 lg:my-5 lg:min-h-0">
-        <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
-        <div className="flex flex-1 flex-col gap-4">
+      {/* Comments: header, bubbles, composer */}
+      <aside className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:my-5 lg:min-h-0">
+        <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3.5">
+          <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
+          <div className="h-5 w-7 animate-pulse rounded-full bg-muted" />
+        </div>
+        <div className="flex flex-1 flex-col gap-3 px-4 py-4">
           {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="flex gap-2.5">
-              <div className="size-7 shrink-0 animate-pulse rounded-full bg-muted" />
-              <div className="flex-1 space-y-2 pt-0.5">
-                <div className="h-3 w-24 animate-pulse rounded-md bg-muted" />
-                <div className="h-3 w-full animate-pulse rounded-md bg-muted" />
-              </div>
+            <div key={index} className="flex items-start gap-3">
+              <div className="size-8 shrink-0 animate-pulse rounded-full bg-muted" />
+              <div className="h-14 flex-1 animate-pulse rounded-xl rounded-tl-sm bg-muted/60" />
             </div>
           ))}
         </div>
-        <div className="border-t border-border pt-3">
-          <div className="h-20 animate-pulse rounded-lg bg-muted" />
-          <div className="mt-2 h-9 animate-pulse rounded-lg bg-muted" />
+        <div className="border-t border-border/50 p-3">
+          <div className="h-24 animate-pulse rounded-xl bg-muted" />
         </div>
       </aside>
     </div>
@@ -348,7 +398,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
             {isProcessing && !screenVideoKind ? (
               <section className="flex flex-col gap-4">
-                <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black text-white/60 ring-1 ring-border">
+                <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-black text-white/60 ring-1 ring-border/50">
                   <FiLoader className="size-6 animate-spin" />
                   <span className="text-sm">Processing your recording…</span>
                   <span className="px-6 text-center text-xs text-white/40">
@@ -358,7 +408,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
                 </div>
               </section>
             ) : isFailed ? (
-              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-primary/60 py-20 text-center">
+              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/50 bg-primary/60 py-20 text-center">
                 <span className="flex size-12 items-center justify-center rounded-full bg-background text-danger">
                   <FiVideo className="size-6" />
                 </span>
@@ -380,14 +430,14 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
                     onShare={() => setShareOpen(true)}
                   />
                 ) : (
-                  <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-dashed border-border bg-primary/60 text-sm text-fg-muted">
+                  <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-dashed border-border/50 bg-primary/60 text-sm text-fg-muted">
                     Screen video unavailable
                   </div>
                 )}
               </section>
             )}
           </div>
-          <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border bg-primary [&>section]:bg-primary lg:my-5 lg:min-h-0">
+          <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border/50 bg-primary [&>section]:bg-primary lg:my-5 lg:min-h-0">
             <RecordingComments
               comments={comments ?? []}
               isLoading={areCommentsLoading}
@@ -416,7 +466,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
       )}
       {deleteConfirmOpen && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-screen-recording-title"
@@ -424,35 +474,35 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           onClick={() => setDeleteConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-[420px] rounded-2xl border border-border bg-background p-6 shadow-2xl"
+            className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
             onClick={(event) => event.stopPropagation()}
           >
             <h2
               id="delete-screen-recording-title"
-              className="text-lg font-semibold text-foreground"
+              className="text-base font-semibold text-foreground"
             >
               Delete this recording?
             </h2>
             <p
               id="delete-screen-recording-description"
-              className="mt-2 text-sm leading-6 text-fg-muted"
+              className="mt-1.5 text-sm leading-6 text-fg-muted"
             >
               <span className="font-medium text-foreground">{recTitle}</span>{" "}
               and its recorded media will be permanently deleted. This action
               cannot be undone.
             </p>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
+                className="h-9 rounded-lg bg-muted px-3.5 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
               >
                 Keep recording
               </button>
               <button
                 type="button"
                 onClick={handleDelete}
-                className="rounded-lg bg-danger px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85"
+                className="h-9 rounded-lg bg-danger px-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-85 cursor-pointer"
               >
                 Delete recording
               </button>

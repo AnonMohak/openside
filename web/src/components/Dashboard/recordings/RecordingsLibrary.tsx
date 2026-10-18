@@ -1173,7 +1173,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
       )}
       {recordingToDelete && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-recording-title"
@@ -1181,18 +1181,18 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           onClick={() => setRecordingToDelete(null)}
         >
           <div
-            className="w-full max-w-[420px] rounded-2xl border border-border bg-background p-6 shadow-2xl"
+            className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
             onClick={(event) => event.stopPropagation()}
           >
             <h2
               id="delete-recording-title"
-              className="text-lg font-semibold text-foreground"
+              className="text-base font-semibold text-foreground"
             >
               Delete this recording?
             </h2>
             <p
               id="delete-recording-description"
-              className="mt-2 text-sm leading-6 text-fg-muted"
+              className="mt-1.5 text-sm leading-6 text-fg-muted"
             >
               <span className="font-medium text-foreground">
                 {recordingToDelete.title}
@@ -1200,18 +1200,18 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
               and all of its tracks will be permanently deleted. This action
               cannot be undone.
             </p>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setRecordingToDelete(null)}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
+                className="h-9 rounded-lg bg-muted px-3.5 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
               >
                 Keep recording
               </button>
               <button
                 type="button"
                 onClick={handleRecordingDelete}
-                className="rounded-lg bg-danger px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85"
+                className="h-9 rounded-lg bg-danger px-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-85 cursor-pointer"
               >
                 Delete recording
               </button>
@@ -1221,7 +1221,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
       )}
       {deleteConfirmOpen && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-project-title"
@@ -1231,18 +1231,18 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           }}
         >
           <div
-            className="w-full max-w-[420px] rounded-2xl border border-border bg-background p-6 shadow-2xl"
+            className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
             onClick={(event) => event.stopPropagation()}
           >
             <h2
               id="delete-project-title"
-              className="text-lg font-semibold text-foreground"
+              className="text-base font-semibold text-foreground"
             >
               Delete this project?
             </h2>
             <p
               id="delete-project-description"
-              className="mt-2 text-sm leading-6 text-fg-muted"
+              className="mt-1.5 text-sm leading-6 text-fg-muted"
             >
               <span className="font-medium text-foreground">
                 {space.title || "Untitled space"}
@@ -1250,12 +1250,12 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
               and all of its recordings will be permanently deleted. This action
               cannot be undone.
             </p>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
                 disabled={deleteSpace.isPending}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-9 rounded-lg bg-muted px-3.5 text-sm font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
               >
                 Keep project
               </button>
@@ -1263,7 +1263,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
                 type="button"
                 onClick={() => void handleDelete()}
                 disabled={deleteSpace.isPending}
-                className="flex min-w-28 items-center justify-center gap-2 rounded-lg bg-danger px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex h-9 min-w-28 items-center justify-center gap-2 rounded-lg bg-danger px-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
               >
                 {deleteSpace.isPending && (
                   <FiLoader className="size-4 animate-spin" />

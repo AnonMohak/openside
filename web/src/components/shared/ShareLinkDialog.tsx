@@ -110,7 +110,7 @@ const ShareLinkDialog = ({
 
         <p className="mt-2.5 flex items-center gap-1.5 px-0.5 text-xs text-fg-subtle">
           <Globe size={13} className="shrink-0" />
-          Anyone with the link can {accessNote}. No account needed.
+          Anyone with the link can {accessNote}.
         </p>
 
         <div className="mt-6 flex items-center justify-between gap-2">
