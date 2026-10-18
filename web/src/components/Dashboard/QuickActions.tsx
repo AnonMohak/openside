@@ -135,6 +135,7 @@ const QuickActions = () => {
       title: "Screen Recorder",
       description: "Capture your screen",
       icon: <FiMonitor size={18} />,
+      badge: "Beta",
       onClick: () => navigate("/dashboard/screen-recorder"),
       // Phone/tablet browsers can't capture the screen, so the card is
       // desktop-only.
@@ -162,6 +163,7 @@ const QuickActions = () => {
             description={action.description}
             icon={action.icon}
             accentHex={action.accentHex}
+            badge={action.badge}
             onClick={action.onClick}
             className={action.className}
           />

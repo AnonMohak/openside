@@ -3,6 +3,7 @@
 import {
   CalendarDays,
   ChevronDown,
+  Crown,
   FolderClosed,
   House,
   LogOut,
@@ -10,7 +11,6 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import { IoBugOutline } from "react-icons/io5";
-import { RiShareBoxFill } from "react-icons/ri";
 import { Link, useLocation } from "react-router-dom";
 import {
   DropdownMenu,
@@ -20,6 +20,8 @@ import {
 } from "@/components/shared/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
 import { useGetMe } from "@/hooks/useUserQuery";
+import { useCreateCheckout, useUsage } from "@/hooks/useUsage";
+import { toast } from "@/lib/toast";
 
 const GITHUB_NEW_ISSUE_URL =
   "https://github.com/rinkitadhana/openside/issues/new";
@@ -40,6 +42,19 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
   const { pathname } = useLocation();
   const { data: user, isLoading } = useGetMe();
   const { logout } = useAuth();
+  const { data: usage } = useUsage();
+  const checkout = useCreateCheckout();
+  // Free (demo) users only - pro and self-host already have everything.
+  const showUpgrade = usage?.plan === "demo";
+
+  const handleUpgrade = () =>
+    checkout.mutate(undefined, {
+      onSuccess: (url) => {
+        window.location.href = url;
+      },
+      onError: () =>
+        toast.error("Couldn't start checkout. Try again in a moment."),
+    });
 
   const navLinkClass = (isActive: boolean) =>
     `flex h-10 items-center overflow-hidden rounded-md text-sm font-medium transition-colors ${
@@ -92,39 +107,49 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
       </nav>
 
       <div className="flex flex-col gap-1">
+        {showUpgrade && (
+          <button
+            type="button"
+            onClick={handleUpgrade}
+            disabled={checkout.isPending}
+            title="Upgrade to Pro"
+            className="mb-1 flex h-10 items-center overflow-hidden rounded-md bg-brand text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
+          >
+            <span
+              className={`flex shrink-0 items-center justify-center ${
+                isOpen ? "w-[42px]" : "w-full"
+              }`}
+            >
+              <Crown size={16} className="fill-current" />
+            </span>
+            {isOpen && (
+              <span className="min-w-0 flex-1 truncate text-left">
+                {checkout.isPending ? "Starting..." : "Upgrade to Pro"}
+              </span>
+            )}
+          </button>
+        )}
+
         <a
           href={GITHUB_NEW_ISSUE_URL}
           target="_blank"
           rel="noreferrer"
-          title="Report issue"
-          className="flex h-10 items-center overflow-hidden rounded-md border border-warning/30 bg-warning/10 text-sm font-medium text-warning transition-colors hover:bg-warning/20"
+          title="Report an issue"
+          className="flex h-10 items-center overflow-hidden rounded-md border border-border/50 bg-primary text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
           <span
             className={`flex shrink-0 items-center justify-center ${
               isOpen ? "w-[42px]" : "w-full"
             }`}
           >
-            <IoBugOutline size={18} />
+            <IoBugOutline size={17} />
           </span>
           {isOpen && (
-            <>
-              <span className="min-w-0 flex-1 truncate">Report issue</span>
-              <RiShareBoxFill size={14} className="mr-3 shrink-0" />
-            </>
+            <span className="min-w-0 flex-1 truncate pr-3">
+              Report an issue
+            </span>
           )}
         </a>
-
-        <Link
-          to="/dashboard/settings"
-          title="Settings"
-          onClick={onNavigate}
-          className={navLinkClass(pathname === "/dashboard/settings")}
-        >
-          <span className="flex w-[42px] shrink-0 items-center justify-center">
-            <Settings size={18} />
-          </span>
-          <span className="min-w-0 flex-1 truncate pr-3">Settings</span>
-        </Link>
 
         <div className="my-1 h-px bg-border" />
 
@@ -168,8 +193,17 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
             side="top"
             align="start"
             sideOffset={8}
-            className="w-40 rounded-lg border-border bg-background p-1.5 shadow-sm"
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-48 rounded-lg border-border bg-background p-1.5 shadow-sm"
           >
+            <DropdownMenuItem
+              asChild
+              className="h-9 cursor-pointer rounded-md px-2.5"
+            >
+              <Link to="/dashboard/settings" onClick={onNavigate}>
+                <Settings className="h-4 w-4" />
+                <span>Settings</span>
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem
               className="h-9 cursor-pointer rounded-md px-2.5 text-danger focus:bg-danger/10 focus:text-danger"
               onClick={logout}
