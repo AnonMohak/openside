@@ -705,13 +705,7 @@ const CallSettingsDialog = ({
       <>
         <SettingsGroup
           label="Camera"
-          description={
-            !isBackgroundSupported
-              ? undefined
-              : liveCameraTrack
-                ? "Pick a background. Others see changes right away."
-                : "Pick a background. It's used next time your camera is on."
-          }
+          description="Check how you look before others see you."
         >
           <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-call-border bg-call-primary">
             {liveCameraTrack ? (
@@ -779,7 +773,15 @@ const CallSettingsDialog = ({
             )}
           </div>
           {isBackgroundSupported && (
-            <>
+            <div className="mt-3 flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className={fieldLabelClassName}>Background</span>
+                <span className="text-xs text-foreground/45">
+                  {liveCameraTrack
+                    ? "Others see changes right away"
+                    : "Used next time your camera is on"}
+                </span>
+              </div>
               <BackgroundOptionsGrid
                 value={background}
                 customImageUrl={customImageUrl}
@@ -799,9 +801,12 @@ const CallSettingsDialog = ({
                   event.target.value = "";
                 }}
               />
-            </>
+            </div>
           )}
-          <div className="mt-3 flex flex-col gap-1.5">
+        </SettingsGroup>
+
+        <SettingsGroup label="Device">
+          <div className="flex flex-col gap-1.5">
             <span className={fieldLabelClassName}>Camera device</span>
             {renderDeviceSelect(
               "videoinput",
