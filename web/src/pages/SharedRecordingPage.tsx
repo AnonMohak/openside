@@ -29,6 +29,7 @@ import {
   useSharedRecording,
 } from "@/hooks/useSharedRecording";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
+import VideoPlayer from "@/components/shared/VideoPlayer";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "";
@@ -98,7 +99,7 @@ const SharedPlayer = ({
             <span className="text-sm">Nothing to play yet</span>
           </div>
         ) : url ? (
-          <video key={kind} src={url} controls playsInline className="h-full w-full" />
+          <VideoPlayer key={url} src={url} />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
             <FiLoader className="size-4 animate-spin" /> Loading…
@@ -160,7 +161,7 @@ const SharedSpacePlayer = ({
           <span className="text-sm">Nothing to play yet</span>
         </div>
       ) : url ? (
-        <video key={outputId} src={url} controls playsInline className="h-full w-full" />
+        <VideoPlayer key={url} src={url} />
       ) : (
         <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
           <FiLoader className="size-4 animate-spin" /> Loading…

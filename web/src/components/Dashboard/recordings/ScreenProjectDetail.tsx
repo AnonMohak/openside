@@ -34,6 +34,7 @@ import {
   type ScreenRecording,
 } from "@/hooks/useScreenRecordings";
 import RecordingComments from "./RecordingComments";
+import VideoPlayer from "@/components/shared/VideoPlayer";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
 
 /** Public URL a share token resolves to (the SharedRecordingPage route). */
@@ -89,7 +90,7 @@ const ScreenVideoCard = ({
     <div className="w-full self-start overflow-hidden rounded-2xl border border-border bg-primary p-3">
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border">
         {url ? (
-          <video src={url} controls playsInline className="h-full w-full" />
+          <VideoPlayer key={url} src={url} />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
             <FiLoader className="size-4 animate-spin" /> Loading…

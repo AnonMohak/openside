@@ -54,6 +54,7 @@ import type {
 import OutputCard from "./OutputCard";
 import ProjectCard from "./ProjectCard";
 import ScreenRecordingsSection from "./ScreenRecordingsSection";
+import VideoPlayer from "@/components/shared/VideoPlayer";
 
 const PROJECTS_PER_PAGE = 8;
 const shareUrlFor = (token: string) =>
@@ -122,7 +123,7 @@ const TrackPlayer = ({ output }: { output: FinalOutput | null }) => {
           <span className="text-sm">Select a track to play it here</span>
         </div>
       ) : url ? (
-        <video src={url} controls playsInline className="h-full w-full" />
+        <VideoPlayer key={url} src={url} />
       ) : (
         <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
           <FiLoader className="size-4 animate-spin" /> Loading…
