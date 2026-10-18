@@ -1,12 +1,14 @@
 "use client";
 
-import { Star } from "lucide-react";
+import { Heart, Star } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { GoSidebarCollapse, GoSidebarExpand } from "react-icons/go";
 import { FaGithub } from "react-icons/fa";
 
 const GITHUB_REPO_URL = "https://github.com/rinkitadhana/openside";
-const GITHUB_REPO_API_URL = "https://api.github.com/repos/rinkitadhana/openside";
+const GITHUB_REPO_API_URL =
+  "https://api.github.com/repos/rinkitadhana/openside";
+const GITHUB_SPONSORS_URL = "https://github.com/sponsors/rinkitadhana";
 
 interface GitHubRepository {
   stargazers_count: number;
@@ -61,21 +63,33 @@ const DashboardHeader = ({
         )}
       </button>
 
-      <a
-        href={GITHUB_REPO_URL}
-        target="_blank"
-        rel="noreferrer"
-        title={`GitHub repository${
-          githubStars === undefined ? "" : `, ${githubStars} stars`
-        }`}
-        className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-      >
-        <FaGithub size={18} />
-        <span className="flex items-center gap-1 tabular-nums">
-          <Star size={12} fill="currentColor" />
-          {githubStars === undefined ? "..." : formatStarCount(githubStars)}
-        </span>
-      </a>
+      <div className="flex items-center gap-2">
+        <a
+          href={GITHUB_SPONSORS_URL}
+          target="_blank"
+          rel="noreferrer"
+          title="Sponsor on GitHub"
+          className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <Heart size={14} className="fill-current text-pink-500" />
+          Sponsor
+        </a>
+        <a
+          href={GITHUB_REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          title={`GitHub repository${
+            githubStars === undefined ? "" : `, ${githubStars} stars`
+          }`}
+          className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <FaGithub size={18} />
+          <span className="flex items-center gap-1 tabular-nums">
+            <Star size={12} fill="currentColor" />
+            {githubStars === undefined ? "..." : formatStarCount(githubStars)}
+          </span>
+        </a>
+      </div>
     </header>
   );
 };
