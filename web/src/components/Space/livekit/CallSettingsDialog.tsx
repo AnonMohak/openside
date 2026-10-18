@@ -102,6 +102,8 @@ const TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
 
 const MAX_NAME_LENGTH = 60;
 
+const CLOSE_ANIMATION_MS = 150;
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 type SelectableKind = "audioinput" | "audiooutput" | "videoinput";
@@ -231,6 +233,24 @@ const CallSettingsDialog = ({
           ? "saved"
           : "idle";
 
+  // Closing plays the scale-down first, then unmounts.
+  const [isClosing, setIsClosing] = useState(false);
+  const requestClose = useCallback(() => setIsClosing(true), []);
+  // The parent passes a fresh onClose each render; read it from a ref so its
+  // re-renders don't keep restarting the timer.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  useEffect(() => {
+    if (!isClosing) return;
+    const timer = window.setTimeout(
+      () => onCloseRef.current(),
+      CLOSE_ANIMATION_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isClosing]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // A device menu open inside the dialog handles its own Esc.
@@ -238,12 +258,12 @@ const CallSettingsDialog = ({
         event.key === "Escape" &&
         !document.querySelector("[data-radix-popper-content-wrapper]")
       ) {
-        onClose();
+        requestClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [requestClose]);
 
   // ---- Devices ------------------------------------------------------------
   // requestPermissions: the dialog is an explicit "show me my devices" moment,
@@ -938,9 +958,14 @@ const CallSettingsDialog = ({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in-0 max-sm:items-end max-sm:p-0"
+      className={cn(
+        "fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm duration-150 max-sm:items-end max-sm:p-0",
+        isClosing ? "animate-out fade-out-0" : "animate-in fade-in-0",
+      )}
+      // Hold the faded-out frame until unmount instead of snapping back.
+      style={isClosing ? { animationFillMode: "forwards" } : undefined}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) requestClose();
       }}
     >
       <audio ref={speakerTestRef} className="hidden" />
@@ -948,7 +973,13 @@ const CallSettingsDialog = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="call-settings-title"
-        className="relative flex h-[min(680px,calc(100dvh-2rem))] w-[min(920px,100%)] overflow-hidden rounded-2xl border border-call-border bg-call-background shadow-2xl animate-in fade-in-0 zoom-in-95 max-sm:h-[92dvh] max-sm:flex-col max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0"
+        className={cn(
+          "relative flex h-[min(680px,calc(100dvh-2rem))] w-[min(920px,100%)] overflow-hidden rounded-2xl border border-call-border bg-call-background shadow-2xl duration-150 max-sm:h-[92dvh] max-sm:flex-col max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0",
+          isClosing
+            ? "animate-out fade-out-0 zoom-out-95"
+            : "animate-in fade-in-0 zoom-in-95",
+        )}
+        style={isClosing ? { animationFillMode: "forwards" } : undefined}
       >
         <aside className="flex shrink-0 flex-col bg-primary/40 sm:w-56 sm:border-r sm:border-call-border max-sm:border-b max-sm:border-call-border">
           <div className="flex items-center justify-between gap-2 px-5 pb-3 pt-5 max-sm:px-4 max-sm:pb-2 max-sm:pt-4">
@@ -958,7 +989,7 @@ const CallSettingsDialog = ({
             >
               Settings
             </h2>
-            <CloseButton onClick={onClose} className="sm:hidden" />
+            <CloseButton onClick={requestClose} className="sm:hidden" />
           </div>
           <nav className="flex gap-1 px-3 sm:flex-col scrollbar-hide max-sm:overflow-x-auto max-sm:pb-3">
             {tabs.map((item) => {
@@ -996,7 +1027,7 @@ const CallSettingsDialog = ({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <CloseButton
-            onClick={onClose}
+            onClick={requestClose}
             className="absolute right-4 top-4 z-10 max-sm:hidden"
           />
 
