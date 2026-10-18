@@ -1,3 +1,4 @@
+import { Clapperboard } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -1416,24 +1417,8 @@ const RecordingsLibrary = () => {
   if (isLoading || areScreenRecordingsLoading)
     return <ProjectsListSkeleton filter={filter} />;
 
-  if (spacesWithRecordings.length === 0 && screenRecs.length === 0) {
-    return (
-      <div className="flex min-h-[calc(100vh-3rem)] flex-col items-center justify-start gap-4 p-4 pt-40 text-center">
-        <span className="flex size-14 items-center justify-center rounded-xl bg-muted ring-1 ring-border">
-          <FiFolder className="size-7 text-fg-subtle" />
-        </span>
-        <div className="space-y-1.5">
-          <h1 className="text-lg font-semibold text-foreground">
-            No recordings yet
-          </h1>
-          <p className="max-w-sm text-sm text-fg-muted">
-            Start a call and hit record. Your processed recordings will show up
-            here, ready to preview and download.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const hasNoRecordings =
+    spacesWithRecordings.length === 0 && screenRecs.length === 0;
 
   return (
     <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
@@ -1483,10 +1468,29 @@ const RecordingsLibrary = () => {
         </DropdownMenu>
       </div>
 
-      {filter === "space" && spacesWithRecordings.length === 0 && (
-        <FilterEmpty label="space recordings" />
+      {hasNoRecordings && (
+        <div className="flex flex-col items-center gap-4 pt-28 text-center">
+          <span className="flex size-14 items-center justify-center rounded-xl bg-muted ring-1 ring-border">
+            <Clapperboard className="size-7 text-fg-subtle" />
+          </span>
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-semibold text-foreground">
+              No recordings yet
+            </h2>
+            <p className="max-w-sm text-sm text-fg-muted">
+              Start a call and hit record. Your processed recordings will show
+              up here, ready to preview and download.
+            </p>
+          </div>
+        </div>
       )}
-      {filter === "screen" && screenRecs.length === 0 && (
+
+      {!hasNoRecordings &&
+        filter === "space" &&
+        spacesWithRecordings.length === 0 && (
+          <FilterEmpty label="space recordings" />
+        )}
+      {!hasNoRecordings && filter === "screen" && screenRecs.length === 0 && (
         <FilterEmpty label="screen recordings" />
       )}
 
