@@ -14,7 +14,6 @@ import SharedRecordingPage from "@/pages/SharedRecordingPage";
 import MeetingEndedPage from "@/pages/MeetingEndedPage";
 import LocalMediaProvider from "@/components/ScreenRecorder/LocalMediaProvider";
 import ScreenRecordingProvider from "@/components/ScreenRecorder/ScreenRecordingProvider";
-import RecorderPip from "@/components/ScreenRecorder/RecorderPip";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 const App = () => {
@@ -106,7 +105,6 @@ const App = () => {
       />
         <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        <RecorderPip />
       </ScreenRecordingProvider>
     </LocalMediaProvider>
   );
