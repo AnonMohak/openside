@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlignLeft, Users, X } from "lucide-react";
 import { useScheduleSpace } from "@/hooks/useSpace";
 import MeetingDateTimePicker from "./MeetingDateTimePicker";
@@ -9,6 +9,8 @@ interface ScheduleModalProps {
 }
 
 const DEFAULT_DURATION_MINUTES = 60;
+
+const CLOSE_ANIMATION_MS = 150;
 
 // Default the start to the next round half-hour.
 const defaultStart = (): Date => {
@@ -24,7 +26,7 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
   const [description, setDescription] = useState("");
   const [startAt, setStartAt] = useState<Date>(defaultStart);
   const [durationMinutes, setDurationMinutes] = useState(
-    DEFAULT_DURATION_MINUTES
+    DEFAULT_DURATION_MINUTES,
   );
   const [inviteeInput, setInviteeInput] = useState("");
   const [invitees, setInvitees] = useState<string[]>([]);
@@ -37,14 +39,30 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
     }
   }, [open]);
 
+  // Closing plays the scale-down first, then tells the parent to unmount.
+  const [isClosing, setIsClosing] = useState(false);
+  const requestClose = useCallback(() => setIsClosing(true), []);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  useEffect(() => {
+    if (!isClosing) return;
+    const timer = window.setTimeout(() => {
+      setIsClosing(false);
+      onCloseRef.current();
+    }, CLOSE_ANIMATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [isClosing]);
+
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") requestClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open, requestClose]);
 
   // Reset the form whenever the modal is reopened.
   useEffect(() => {
@@ -113,7 +131,7 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
         invitees: finalInvitees,
       });
 
-      onClose();
+      requestClose();
     } catch {
       // Keep the modal open so the user can correct the details and retry.
     }
@@ -124,23 +142,47 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
       <button
         type="button"
         aria-label="Close schedule recording dialog"
-        onClick={onClose}
-        className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm cursor-default animate-in fade-in duration-200"
+        onClick={requestClose}
+        className={`fixed inset-0 z-[100] cursor-default bg-background/60 backdrop-blur-sm duration-150 ${
+          isClosing ? "animate-out fade-out-0" : "animate-in fade-in-0"
+        }`}
+        style={isClosing ? { animationFillMode: "forwards" } : undefined}
       />
       <div className="fixed left-1/2 top-1/2 z-[110] w-[min(520px,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2">
-        <div className="rounded-xl border border-border bg-background shadow-2xl shadow-black/30 animate-in fade-in zoom-in-95 duration-200">
-          {/* Header: the title field doubles as the heading */}
-          <div className="flex items-start gap-3 px-5 pt-5">
+        <div
+          className={`rounded-2xl border border-border bg-background shadow-2xl shadow-black/30 duration-150 ${
+            isClosing
+              ? "animate-out fade-out-0 zoom-out-95"
+              : "animate-in fade-in-0 zoom-in-95"
+          }`}
+          style={isClosing ? { animationFillMode: "forwards" } : undefined}
+        >
+          <div className="flex items-center justify-between gap-3 px-5 pt-4">
+            <span className="text-xs font-medium text-fg-subtle">
+              Schedule a recording
+            </span>
+            <button
+              type="button"
+              onClick={requestClose}
+              aria-label="Close"
+              className="flex size-7 items-center justify-center rounded-full bg-muted text-fg-muted transition-colors hover:text-foreground cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* The title field doubles as the heading */}
+          <div className="px-5 pt-3">
             <input
               ref={titleInputRef}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Untitled Recording"
-              className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-foreground outline-none placeholder:text-fg-faint"
+              placeholder="Untitled recording"
+              className="w-full bg-transparent text-xl font-semibold text-foreground outline-none placeholder:text-fg-faint"
             />
           </div>
 
-          <div className="flex flex-col gap-2.5 px-5 py-5">
+          <div className="flex flex-col gap-3 px-5 pb-5 pt-4">
             {/* Date & time */}
             <MeetingDateTimePicker
               value={startAt}
@@ -152,12 +194,12 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
             />
 
             {/* Invitees */}
-            <div className="flex items-center gap-2 overflow-x-auto rounded-lg border border-border bg-primary px-3 py-3 scrollbar-hide">
-              <Users size={16} className="shrink-0 text-foreground" />
+            <div className="flex min-h-10 items-center gap-2.5 overflow-x-auto rounded-lg border border-border/50 bg-primary/40 px-3 py-1.5 transition-colors scrollbar-hide focus-within:border-fg-faint">
+              <Users size={16} className="shrink-0 text-fg-subtle" />
               {invitees.map((email) => (
                 <span
                   key={email}
-                  className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-background px-2.5 text-sm text-foreground"
+                  className="flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-muted px-2 text-xs font-medium text-foreground"
                 >
                   {email}
                   <button
@@ -179,7 +221,11 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
                     commitInvitee();
                   }
                   // Backspace on an empty input removes the last chip.
-                  if (e.key === "Backspace" && !inviteeInput && invitees.length) {
+                  if (
+                    e.key === "Backspace" &&
+                    !inviteeInput &&
+                    invitees.length
+                  ) {
                     removeInvitee(invitees[invitees.length - 1]);
                   }
                 }}
@@ -190,27 +236,24 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
             </div>
 
             {/* Description */}
-            <div className="flex items-start gap-2.5 rounded-lg border border-border bg-primary px-3 py-3">
-              <AlignLeft
-                size={16}
-                className="mt-0.5 shrink-0 text-foreground"
-              />
+            <div className="flex items-start gap-2.5 rounded-lg border border-border/50 bg-primary/40 px-3 py-2.5 transition-colors focus-within:border-fg-faint">
+              <AlignLeft size={16} className="mt-0.5 shrink-0 text-fg-subtle" />
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Add a description"
-                rows={3}
-                className="min-w-0 flex-1 resize-y bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-fg-faint"
+                rows={4}
+                className="min-h-16 min-w-0 flex-1 resize-y bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-fg-faint"
               />
             </div>
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-2 px-5 py-3.5">
+          <div className="flex items-center justify-end gap-2 px-5 pb-5">
             <button
               type="button"
-              onClick={onClose}
-              className="rounded-md border border-border bg-transparent px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+              onClick={requestClose}
+              className="h-9 rounded-lg bg-muted px-3.5 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
             >
               Cancel
             </button>
@@ -218,7 +261,7 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
               type="button"
               onClick={handleSubmit}
               disabled={isPending || !canSubmit}
-              className="rounded-md bg-brand px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+              className="h-9 rounded-lg bg-brand px-4 text-sm font-semibold text-white transition-colors hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
             >
               {isPending ? "Scheduling…" : "Schedule"}
             </button>

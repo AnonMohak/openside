@@ -102,7 +102,7 @@ const MeetingDateTimePicker = ({
   onChange,
 }: MeetingDateTimePickerProps) => {
   const [openPanel, setOpenPanel] = useState<"date" | "start" | "end" | null>(
-    null
+    null,
   );
   const [viewMonth, setViewMonth] = useState(() => startOfDay(value));
 
@@ -114,6 +114,8 @@ const MeetingDateTimePicker = ({
     const gridStart = startOfWeek(first);
     return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   }, [viewMonth]);
+
+  const today = startOfDay(new Date());
 
   const selectDay = (day: Date) => {
     const next = new Date(day);
@@ -132,16 +134,17 @@ const MeetingDateTimePicker = ({
 
   const selectEnd = (mins: number) => {
     // End is always after start; if an earlier slot is chosen, roll to next day.
-    const duration = mins > startMins ? mins - startMins : mins + 1440 - startMins;
+    const duration =
+      mins > startMins ? mins - startMins : mins + 1440 - startMins;
     onChange(value, duration);
     setOpenPanel(null);
   };
 
   const fieldClass =
-    "flex items-center gap-2 rounded-lg border border-border bg-primary px-3 py-3 text-sm text-foreground cursor-pointer";
+    "flex h-10 items-center gap-2.5 rounded-lg border border-border/50 bg-primary/40 px-3 text-sm text-foreground transition-colors hover:border-fg-faint cursor-pointer";
 
   return (
-    <div className="flex flex-wrap items-stretch gap-2">
+    <div className="flex flex-wrap items-stretch gap-3">
       {/* Date */}
       <div className="relative min-w-[180px] flex-1">
         <button
@@ -150,21 +153,21 @@ const MeetingDateTimePicker = ({
             setViewMonth(startOfDay(value));
             setOpenPanel((p) => (p === "date" ? null : "date"));
           }}
-          className={`w-full ${fieldClass}`}
+          className={`w-full ${fieldClass} ${openPanel === "date" ? "border-fg-faint!" : ""}`}
         >
-          <CalendarDays size={16} className="shrink-0 text-foreground" />
+          <CalendarDays size={16} className="shrink-0 text-fg-subtle" />
           <span className="font-normal">{formatDateLabel(value)}</span>
         </button>
 
         {openPanel === "date" && (
           <Popover onClose={() => setOpenPanel(null)}>
-            <div className="w-[320px] rounded-xl border border-border bg-background p-4 shadow-2xl shadow-black/30">
-              <div className="mb-3 flex items-center justify-between px-1">
+            <div className="w-[296px] rounded-xl border border-border bg-background p-3 shadow-2xl shadow-black/30">
+              <div className="mb-2 flex items-center justify-between">
                 <button
                   type="button"
                   aria-label="Previous month"
                   onClick={() => setViewMonth((m) => addMonths(m, -1))}
-                  className="flex size-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-primary hover:text-foreground cursor-pointer"
+                  className="flex size-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
                 >
                   <ChevronLeft size={18} />
                 </button>
@@ -178,7 +181,7 @@ const MeetingDateTimePicker = ({
                   type="button"
                   aria-label="Next month"
                   onClick={() => setViewMonth((m) => addMonths(m, 1))}
-                  className="flex size-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-primary hover:text-foreground cursor-pointer"
+                  className="flex size-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
                 >
                   <ChevronRight size={18} />
                 </button>
@@ -188,7 +191,7 @@ const MeetingDateTimePicker = ({
                 {WEEKDAYS.map((d, i) => (
                   <div
                     key={`${d}-${i}`}
-                    className="flex h-9 items-center justify-center text-xs font-medium text-foreground"
+                    className="flex h-8 items-center justify-center text-xs font-medium text-fg-subtle"
                   >
                     {d}
                   </div>
@@ -196,20 +199,29 @@ const MeetingDateTimePicker = ({
                 {monthGrid.map((day) => {
                   const inMonth = day.getMonth() === viewMonth.getMonth();
                   const selected = isSameDay(day, value);
+                  const isToday = isSameDay(day, today);
+                  // Recordings can't be scheduled in the past.
+                  const isPast = day < today;
                   return (
                     <button
                       key={day.toISOString()}
                       type="button"
+                      disabled={isPast}
                       onClick={() => selectDay(day)}
-                      className={`mx-auto flex size-9 items-center justify-center rounded-full text-sm transition-colors cursor-pointer ${
+                      className={`relative mx-auto flex size-9 items-center justify-center rounded-lg text-sm tabular-nums transition-colors ${
                         selected
-                          ? "bg-primary font-semibold text-background"
-                          : inMonth
-                          ? "text-foreground hover:bg-primary"
-                          : "text-fg-subtle hover:bg-primary"
+                          ? "bg-brand font-semibold text-white"
+                          : isPast
+                            ? "cursor-not-allowed text-fg-faint"
+                            : inMonth
+                              ? "cursor-pointer text-foreground hover:bg-muted"
+                              : "cursor-pointer text-fg-subtle hover:bg-muted"
                       }`}
                     >
                       {day.getDate()}
+                      {isToday && !selected && (
+                        <span className="absolute bottom-1 size-1 rounded-full bg-brand" />
+                      )}
                     </button>
                   );
                 })}
@@ -224,8 +236,10 @@ const MeetingDateTimePicker = ({
         <div className="relative">
           <button
             type="button"
-            onClick={() => setOpenPanel((p) => (p === "start" ? null : "start"))}
-            className={fieldClass}
+            onClick={() =>
+              setOpenPanel((p) => (p === "start" ? null : "start"))
+            }
+            className={`${fieldClass} ${openPanel === "start" ? "border-fg-faint!" : ""}`}
           >
             <span className="font-normal tabular-nums">
               {formatMinutes(startMins)}
@@ -247,7 +261,7 @@ const MeetingDateTimePicker = ({
           <button
             type="button"
             onClick={() => setOpenPanel((p) => (p === "end" ? null : "end"))}
-            className={fieldClass}
+            className={`${fieldClass} ${openPanel === "end" ? "border-fg-faint!" : ""}`}
           >
             <span className="font-normal tabular-nums">
               {formatMinutes(endMins)}
@@ -278,43 +292,61 @@ const TimeList = ({
   selected: number;
   onSelect: (mins: number) => void;
   referenceMins?: number;
-}) => (
-  <div className="max-h-[260px] w-[180px] overflow-y-auto rounded-xl border border-border bg-background p-1.5 shadow-2xl shadow-black/30 scrollbar-hide">
-    {TIME_SLOTS.map((mins) => {
-      const isSelected = mins === selected;
-      const duration =
-        referenceMins !== undefined
-          ? mins > referenceMins
-            ? mins - referenceMins
-            : mins + 1440 - referenceMins
-          : null;
-      return (
-        <button
-          key={mins}
-          type="button"
-          onClick={() => onSelect(mins)}
-          className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors cursor-pointer ${
-            isSelected
-              ? "bg-primary font-semibold text-background"
-              : "text-foreground hover:bg-primary"
-          }`}
-        >
-          <span className="tabular-nums">{formatMinutes(mins)}</span>
-          {duration !== null && (
-            <span
-              className={`text-xs ${
-                isSelected ? "text-background/70" : "text-foreground"
-              }`}
-            >
-              {duration % 60 === 0
-                ? `${duration / 60} hr`
-                : `${Math.floor(duration / 60) > 0 ? `${Math.floor(duration / 60)}h ` : ""}${duration % 60}m`}
-            </span>
-          )}
-        </button>
-      );
-    })}
-  </div>
-);
+}) => {
+  const listRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // Open centred on the current choice instead of at 12:00 AM.
+  useEffect(() => {
+    const list = listRef.current;
+    const option = selectedRef.current;
+    if (!list || !option) return;
+    list.scrollTop =
+      option.offsetTop - list.clientHeight / 2 + option.clientHeight / 2;
+  }, []);
+
+  return (
+    <div
+      ref={listRef}
+      className="max-h-[264px] w-[200px] overflow-y-auto rounded-xl border border-border bg-background p-1 shadow-2xl shadow-black/30 scrollbar-hide"
+    >
+      {TIME_SLOTS.map((mins) => {
+        const isSelected = mins === selected;
+        const duration =
+          referenceMins !== undefined
+            ? mins > referenceMins
+              ? mins - referenceMins
+              : mins + 1440 - referenceMins
+            : null;
+        return (
+          <button
+            key={mins}
+            ref={isSelected ? selectedRef : undefined}
+            type="button"
+            onClick={() => onSelect(mins)}
+            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${
+              isSelected
+                ? "bg-brand font-medium text-white"
+                : "text-foreground hover:bg-muted"
+            }`}
+          >
+            <span className="tabular-nums">{formatMinutes(mins)}</span>
+            {duration !== null && (
+              <span
+                className={`text-xs ${
+                  isSelected ? "text-white/70" : "text-fg-subtle"
+                }`}
+              >
+                {duration % 60 === 0
+                  ? `${duration / 60} hr`
+                  : `${Math.floor(duration / 60) > 0 ? `${Math.floor(duration / 60)}h ` : ""}${duration % 60}m`}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 export default MeetingDateTimePicker;
