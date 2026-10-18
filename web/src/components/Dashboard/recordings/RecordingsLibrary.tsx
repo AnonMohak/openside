@@ -5,15 +5,11 @@ import {
   FiChevronDown,
   FiChevronLeft,
   FiCheck,
-  FiCopy,
   FiEdit2,
   FiFilter,
   FiFolder,
-  FiLink,
   FiLoader,
   FiMonitor,
-  FiMoreHorizontal,
-  FiMoreVertical,
   FiShare2,
   FiTrash2,
   FiVideo,
@@ -26,7 +22,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 import {
   useDeleteSpace,
   useGetSpaceById,
@@ -55,6 +50,9 @@ import OutputCard from "./OutputCard";
 import ProjectCard from "./ProjectCard";
 import ScreenRecordingsSection from "./ScreenRecordingsSection";
 import VideoPlayer from "@/components/shared/VideoPlayer";
+import RenameDialog from "@/components/shared/RenameDialog";
+import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
+import { toast } from "@/lib/toast";
 
 const PROJECTS_PER_PAGE = 8;
 const shareUrlFor = (token: string) =>
@@ -71,6 +69,43 @@ const formatDay = (value?: string) =>
 
 const recordingLabel = (count: number) =>
   `${count} recording${count === 1 ? "" : "s"}`;
+
+// "Oct 18, 9:30 PM", "12:34", "4K", "30 fps" - whatever the session knows.
+const sessionMeta = (session: RecordingSession) => {
+  const parts: string[] = [];
+  const started = new Date(session.startedAt);
+  if (!Number.isNaN(started.getTime())) {
+    parts.push(
+      started.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    );
+  }
+  if (session.stoppedAt) {
+    const seconds = Math.round(
+      (new Date(session.stoppedAt).getTime() - started.getTime()) / 1000,
+    );
+    if (seconds > 0) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const sec = String(seconds % 60).padStart(2, "0");
+      parts.push(
+        h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`,
+      );
+    }
+  }
+  if (session.recordingMode === "AUDIO_ONLY") parts.push("Audio only");
+  else if (session.videoResolution)
+    parts.push(
+      session.videoResolution >= 2160 ? "4K" : `${session.videoResolution}p`,
+    );
+  if (session.targetFps && session.recordingMode !== "AUDIO_ONLY")
+    parts.push(`${session.targetFps} fps`);
+  return parts;
+};
 
 const groupOutputVariants = (outputs: FinalOutput[]) => {
   const grouped = outputs.reduce<Record<string, FinalOutput[]>>(
@@ -116,7 +151,7 @@ const TrackPlayer = ({ output }: { output: FinalOutput | null }) => {
     output?.mimeType === "video/mp4" ? "mp4" : "webm";
   const { data: url } = useInlineOutputUrl(output?.id ?? "", format, !!output);
   return (
-    <div className="relative aspect-video w-full max-w-4xl self-start overflow-hidden rounded-xl bg-black ring-1 ring-border">
+    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border/50">
       {!output ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45">
           <FiVideo className="size-6" />
@@ -133,43 +168,74 @@ const TrackPlayer = ({ output }: { output: FinalOutput | null }) => {
   );
 };
 
+// Bottom-right of a recording card: a "Shared" badge when public, and one
+// options menu for share / rename / delete.
 const RecordingSessionActions = ({
+  shareToken,
+  onShare,
   onRename,
   onDelete,
 }: {
-  onRename: () => void;
-  onDelete: () => void;
+  shareToken?: string | null;
+  onShare?: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
 }) => {
-  const [menuOpen, setMenuOpen] = useState(false);
-
+  if (!onShare && !onRename && !onDelete) return null;
   return (
-    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="Recording options"
-          className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60",
-            menuOpen ? "bg-background text-foreground" : "text-fg-subtle",
+    <>
+      {shareToken && (
+        <span className="mr-1 flex h-6 items-center gap-1 rounded-md bg-success/10 px-2 text-xs font-medium text-success">
+          <FiShare2 className="size-3" />
+          Shared
+        </span>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Recording options"
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 data-[state=open]:opacity-80 cursor-pointer"
+          >
+            Options
+            <FiChevronDown className="size-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          sideOffset={6}
+          className="w-44 rounded-xl border-border/50 bg-primary p-1"
+        >
+          {onShare && (
+            <DropdownMenuItem
+              onSelect={onShare}
+              className="cursor-pointer rounded-lg py-2"
+            >
+              <FiShare2 />
+              {shareToken ? "Sharing settings" : "Share"}
+            </DropdownMenuItem>
           )}
-        >
-          <FiMoreVertical className="size-4.5" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={onRename}>
-          <FiEdit2 />
-          Rename
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={onDelete}
-          className="text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
-        >
-          <FiTrash2 />
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          {onRename && (
+            <DropdownMenuItem
+              onSelect={onRename}
+              className="cursor-pointer rounded-lg py-2"
+            >
+              <FiEdit2 />
+              Rename
+            </DropdownMenuItem>
+          )}
+          {onDelete && (
+            <DropdownMenuItem
+              onSelect={onDelete}
+              className="cursor-pointer rounded-lg py-2 text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
+            >
+              <FiTrash2 />
+              Delete
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 };
 
@@ -182,120 +248,41 @@ const SpaceRecordingShareDialog = ({
   spaceId: string;
   onClose: () => void;
 }) => {
-  const [copied, setCopied] = useState(false);
   const share = useShareSpaceRecording(spaceId);
   const unshare = useUnshareSpaceRecording(spaceId);
   const token = session.shareToken;
-  const url = token ? shareUrlFor(token) : "";
-
-  const copy = async () => {
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // The field remains selectable when clipboard permission is unavailable.
-    }
-  };
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="share-space-recording-title"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-[460px] rounded-2xl border border-border bg-background p-6 shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2
-          id="share-space-recording-title"
-          className="text-lg font-semibold text-foreground"
-        >
-          Share this recording
-        </h2>
-        <p className="mt-2 text-sm leading-6 text-fg-muted">
-          {token
-            ? "Anyone with this link can watch and download this recording. No account needed."
-            : "Create a link that lets anyone watch and download this recording. No account needed."}
-        </p>
-        {token ? (
-          <>
-            <div className="mt-4 flex items-center gap-2">
-              <input
-                readOnly
-                value={url}
-                onFocus={(event) => event.currentTarget.select()}
-                className="min-w-0 flex-1 rounded-lg border border-border bg-primary px-3 py-2 text-sm text-fg-muted outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => void copy()}
-                className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-3 text-sm font-semibold text-background transition-opacity hover:opacity-85"
-              >
-                {copied ? (
-                  <FiCheck className="size-4" />
-                ) : (
-                  <FiCopy className="size-4" />
-                )}
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-            <div className="mt-6 flex justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => unshare.mutate(session.id)}
-                disabled={unshare.isPending}
-                className="flex items-center gap-1.5 rounded-lg border border-danger/25 bg-danger/10 px-3.5 py-2 text-sm font-medium text-danger transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {unshare.isPending && (
-                  <FiLoader className="size-4 animate-spin" />
-                )}
-                Stop sharing
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
-              >
-                Done
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="mt-6 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => share.mutate(session.id)}
-              disabled={share.isPending}
-              className="flex items-center gap-1.5 rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {share.isPending ? (
-                <FiLoader className="size-4 animate-spin" />
-              ) : (
-                <FiLink className="size-4" />
-              )}
-              Create link
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+    <ShareLinkDialog
+      recordingTitle={session.title ?? undefined}
+      url={token ? shareUrlFor(token) : null}
+      accessNote="watch and download this recording"
+      isStopping={unshare.isPending}
+      onCreate={() =>
+        share.mutate(session.id, {
+          onError: () => {
+            toast.error("Couldn't create a share link.");
+            onClose();
+          },
+        })
+      }
+      onStop={() => unshare.mutate(session.id, { onSuccess: onClose })}
+      onClose={onClose}
+    />
   );
 };
 
 // One recording (a single start→stop run within the meeting). Has its own
 // player and its own track list, with its own selected track.
+const TracksHeading = ({ count }: { count: number }) => (
+  <div className="flex items-center gap-2 px-1">
+    <h3 className="text-sm font-semibold text-foreground">Tracks</h3>
+    <span className="rounded-full bg-muted px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted">
+      {count}
+    </span>
+  </div>
+);
+
 const RecordingBlock = ({
   id,
   rows,
@@ -306,6 +293,7 @@ const RecordingBlock = ({
   onDelete,
   shareToken,
   onShare,
+  session,
 }: {
   id: string;
   rows: TrackRow[];
@@ -318,6 +306,8 @@ const RecordingBlock = ({
   onDelete?: () => void;
   shareToken?: string | null;
   onShare?: () => void;
+  /** Source of the date / length / quality line under the title. */
+  session?: RecordingSession;
 }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -357,36 +347,40 @@ const RecordingBlock = ({
   return (
     <section
       id={`recording-session-${id}`}
-      className={`flex flex-col gap-4 ${showDivider ? "mt-6 border-t border-border pt-12" : ""}`}
+      className={`flex flex-col gap-4 ${showDivider ? "border-t border-border/50 pt-8" : ""}`}
     >
-      <div className="flex w-full max-w-4xl flex-col gap-3 rounded-2xl border border-border bg-primary p-3">
-        <TrackPlayer output={activeOutput} />
-        <div className="flex w-full items-center justify-between gap-2 px-0.5 pb-0.5">
-          <p className="min-w-0 truncate text-base font-semibold text-foreground">
-            {title}
-          </p>
+      <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
+        <div className="p-2 pb-0">
+          <TrackPlayer output={activeOutput} />
+        </div>
+        <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-foreground">
+              {title}
+            </p>
+            {session && (
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-fg-subtle">
+                {sessionMeta(session).map((part, index) => (
+                  <span key={part} className="flex items-center gap-1.5">
+                    {index > 0 && <span aria-hidden>·</span>}
+                    {part}
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
           <div className="flex shrink-0 items-center gap-1">
-            {onShare && (
-              <button
-                type="button"
-                onClick={onShare}
-                className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-opacity hover:opacity-70 ${shareToken ? "border-success/25 bg-success/10 text-success" : "border-border bg-muted text-foreground"}`}
-              >
-                <FiShare2 className="size-3.5" />
-                {shareToken ? "Shared" : "Share"}
-              </button>
-            )}
-            {onRename && onDelete && (
-              <RecordingSessionActions
-                onRename={onRename}
-                onDelete={onDelete}
-              />
-            )}
+            <RecordingSessionActions
+              shareToken={shareToken}
+              onShare={onShare}
+              onRename={onRename}
+              onDelete={onDelete}
+            />
           </div>
         </div>
       </div>
-      <h3 className="text-sm font-semibold text-fg-muted">Tracks</h3>
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <TracksHeading count={rows.length + cooking.length} />
+      <div className="flex min-w-0 flex-1 flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
         {groupedRows.flatMap((group, groupIndex) =>
           group.map(({ primary, aligned, cloud }, partIndex) => (
             <OutputCard
@@ -467,33 +461,21 @@ const ProcessingTrackCard = ({
     track.participant?.displayName ||
     track.participant?.user?.name ||
     `Participant ${index + 1}`;
-  // The early poster (extracted from the first chunk) is usually ready even while
-  // the track is still processing - show it; fall back to the avatar / icon.
-  const thumbnail = track.thumbnailUrl ?? null;
   const avatar = track.participant?.user?.avatar;
   const pct = estimateTrackProgress(track, now);
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-primary px-2.5 py-1.5">
-      <span className="relative flex aspect-[4/3] h-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted ring-1 ring-border">
-        {thumbnail ? (
-          <img src={thumbnail} alt="" className="h-full w-full object-cover" />
-        ) : avatar ? (
-          <span className="flex size-8 items-center justify-center overflow-hidden rounded-full">
-            <img src={avatar} alt="" className="h-full w-full object-cover" />
-          </span>
+    <div className="flex items-center gap-3 px-3 py-2.5">
+      <span className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
+        {avatar ? (
+          <img src={avatar} alt="" className="h-full w-full object-cover" />
         ) : (
-          <FiVideo className="size-5 text-fg-subtle" />
-        )}
-        {!failed && !thumbnail && (
-          <span className="absolute inset-0 animate-pulse bg-muted" />
+          <FiVideo className="size-4 text-fg-subtle" />
         )}
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-semibold text-foreground">
-          {name}
-        </p>
+        <p className="truncate text-sm font-semibold text-foreground">{name}</p>
         {failed ? (
           <span className="mt-1 inline-block rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
             Failed
@@ -544,40 +526,38 @@ const ProcessingRecordingBlock = ({
 }) => (
   <section
     id={`recording-session-${id}`}
-    className={`flex flex-col gap-4 ${showDivider ? "border-t border-border pt-6" : ""}`}
+    className={`flex flex-col gap-4 ${showDivider ? "border-t border-border/50 pt-8" : ""}`}
   >
-    <div className="flex w-full max-w-4xl flex-col gap-3 rounded-2xl border border-border bg-primary p-3">
-      <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black text-white/60 ring-1 ring-border">
-        <FiLoader className="size-6 animate-spin" />
-        <span className="text-sm">Processing your recording…</span>
-        <span className="px-6 text-center text-xs text-white/40">
-          Tracks become playable as they finish. You can leave this page and it
-          keeps going.
-        </span>
+    <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
+      <div className="p-2 pb-0">
+        <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black text-white/60 ring-1 ring-border/50">
+          <FiLoader className="size-6 animate-spin" />
+          <span className="text-sm">Processing your recording…</span>
+          <span className="px-6 text-center text-xs text-white/40">
+            Tracks become playable as they finish. You can leave this page and
+            it keeps going.
+          </span>
+        </div>
       </div>
-      <div className="flex w-full items-center justify-between gap-2 px-0.5 pb-0.5">
-        <p className="min-w-0 truncate text-base font-semibold text-foreground">
-          {title}
-        </p>
+      <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-base font-semibold text-foreground">
+            {title}
+          </p>
+          <p className="mt-0.5 text-xs text-fg-subtle">Processing…</p>
+        </div>
         <div className="flex shrink-0 items-center gap-1">
-          {onShare && (
-            <button
-              type="button"
-              onClick={onShare}
-              className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-opacity hover:opacity-70 ${shareToken ? "border-success/25 bg-success/10 text-success" : "border-border bg-muted text-foreground"}`}
-            >
-              <FiShare2 className="size-3.5" />
-              {shareToken ? "Shared" : "Share"}
-            </button>
-          )}
-          {onRename && onDelete && (
-            <RecordingSessionActions onRename={onRename} onDelete={onDelete} />
-          )}
+          <RecordingSessionActions
+            shareToken={shareToken}
+            onShare={onShare}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
         </div>
       </div>
     </div>
-    <h3 className="text-sm font-semibold text-fg-muted">Tracks</h3>
-    <div className="flex min-w-0 flex-1 flex-col gap-2">
+    <TracksHeading count={tracks.length} />
+    <div className="flex min-w-0 flex-1 flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
       {tracks.map((track, index) => (
         <ProcessingTrackCard key={track.id} track={track} index={index} />
       ))}
@@ -818,6 +798,7 @@ const SpaceOutputs = ({
             canManage ? () => onDeleteSession(rec.id, rec.title) : undefined
           }
           shareToken={rec.session?.shareToken}
+          session={rec.session ?? undefined}
           onShare={
             canManage && rec.session
               ? () => onShareSession(rec.session as RecordingSession)
@@ -870,38 +851,49 @@ const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
 );
 
 const ProjectDetailSkeleton = () => (
-  <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
-    <div className="-mx-6 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="size-8 shrink-0 animate-pulse rounded-lg bg-muted" />
-        <div className="h-8 w-px bg-border" />
+  <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-2 pb-8 pt-4">
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex min-w-0 items-center gap-3.5">
+        <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
         <div className="min-w-0 space-y-2">
           <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
           <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
         </div>
       </div>
-      <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
+      <div className="flex gap-2">
+        <div className="h-9 w-24 animate-pulse rounded-lg bg-muted" />
+        <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
+      </div>
     </div>
     <section className="flex flex-col gap-4">
-      <div className="flex w-full max-w-4xl flex-col gap-3 rounded-2xl border border-border bg-primary p-3">
-        <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
-        <div className="flex items-center justify-between gap-2 px-0.5 pb-0.5">
-          <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
-          <div className="size-8 shrink-0 animate-pulse rounded-full bg-muted" />
+      <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
+        <div className="p-2 pb-0">
+          <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
+        </div>
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div className="space-y-2">
+            <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
+            <div className="h-3 w-56 animate-pulse rounded-md bg-muted" />
+          </div>
+          {/* Options button */}
+          <div className="h-8 w-24 shrink-0 animate-pulse rounded-lg bg-muted" />
         </div>
       </div>
-      <div className="h-4 w-16 animate-pulse rounded-md bg-muted" />
-      <div className="flex flex-col gap-2">
+      {/* "Tracks" + count */}
+      <div className="flex items-center gap-2 px-1">
+        <div className="h-4 w-14 animate-pulse rounded-md bg-muted" />
+        <div className="h-5 w-7 animate-pulse rounded-full bg-muted" />
+      </div>
+      <div className="flex flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
         {Array.from({ length: 3 }).map((_, index) => (
-          <div
-            key={index}
-            className="flex items-center gap-3 rounded-xl border border-border bg-primary px-2.5 py-1.5"
-          >
-            <div className="aspect-[4/3] h-14 shrink-0 animate-pulse rounded-md bg-muted" />
+          <div key={index} className="flex items-center gap-3 px-3 py-2.5">
+            <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
             <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-4 w-1/3 animate-pulse rounded-md bg-muted" />
-              <div className="h-3 w-1/4 animate-pulse rounded-md bg-muted" />
+              <div className="h-3.5 w-32 animate-pulse rounded-md bg-muted" />
+              <div className="h-3 w-48 animate-pulse rounded-md bg-muted" />
             </div>
+            {/* Download button */}
+            <div className="h-8 w-24 shrink-0 animate-pulse rounded-lg bg-muted" />
           </div>
         ))}
       </div>
@@ -1003,7 +995,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
         <button
           type="button"
           onClick={() => navigate("/dashboard/project")}
-          className="group flex h-9 w-fit items-center gap-2 rounded-lg border border-border bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+          className="group -ml-2 flex h-9 w-fit items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-fg-muted transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
         >
           <FiChevronLeft className="size-4 transition-transform group-hover:-translate-x-0.5" />
           All projects
@@ -1081,20 +1073,19 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
 
   return (
     <>
-      <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
-        <header className="-mx-6 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3">
-          <div className="flex min-w-0 items-center gap-3">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-2 pb-8 pt-4">
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3.5">
             <button
               type="button"
               onClick={() => navigate("/dashboard/project")}
               aria-label="Back to all projects"
               title="All projects"
-              className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-fg-muted hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+              className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
             >
-              <FiChevronLeft className="size-4" />
+              <FiChevronLeft className="size-5" />
             </button>
-            <span className="h-8 w-px shrink-0 bg-border" aria-hidden />
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0 space-y-0.5">
               <h1 className="truncate text-xl font-semibold leading-tight tracking-[-0.01em] text-foreground">
                 {space.title || "Untitled space"}
               </h1>
@@ -1110,35 +1101,29 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
             </div>
           </div>
           {canManage && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Project options"
-                  disabled={deleteSpace.isPending}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-fg-muted hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {deleteSpace.isPending ? (
-                    <FiLoader className="size-4 animate-spin" />
-                  ) : (
-                    <FiMoreHorizontal className="size-[18px]" />
-                  )}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onSelect={openRename}>
-                  <FiEdit2 />
-                  Rename project
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={openDeleteConfirmation}
-                  className="text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
-                >
-                  <FiTrash2 />
-                  Delete project
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={openRename}
+                className="flex h-9 items-center gap-1.5 rounded-lg bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
+              >
+                <FiEdit2 className="size-3.5" />
+                Rename
+              </button>
+              <button
+                type="button"
+                onClick={openDeleteConfirmation}
+                disabled={deleteSpace.isPending}
+                className="flex h-9 items-center gap-1.5 rounded-lg bg-danger/10 px-3 text-sm font-medium text-danger transition-colors hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+              >
+                {deleteSpace.isPending ? (
+                  <FiLoader className="size-3.5 animate-spin" />
+                ) : (
+                  <FiTrash2 className="size-3.5" />
+                )}
+                Delete
+              </button>
+            </div>
           )}
         </header>
         <SpaceOutputs
@@ -1161,105 +1146,30 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
         />
       )}
       {renaming && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setRenaming(false)}
-        >
-          <div
-            className="w-full max-w-[380px] rounded-xl border border-border bg-background p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 className="text-base font-semibold text-foreground">
-              Rename project
-            </h2>
-            <input
-              autoFocus
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submitRename();
-                if (event.key === "Escape") setRenaming(false);
-              }}
-              placeholder="Project name"
-              className="mt-4 w-full rounded-lg border border-border bg-primary px-3 py-2 text-sm text-foreground outline-none focus:border-fg-faint"
-            />
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRenaming(false)}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-primary/85"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitRename}
-                disabled={!title.trim()}
-                className="rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <RenameDialog
+          heading="Rename project"
+          description="Shown on your projects list and shared links."
+          value={title}
+          maxLength={100}
+          placeholder="Project name"
+          onChange={setTitle}
+          onCancel={() => setRenaming(false)}
+          onSave={submitRename}
+        />
       )}
       {recordingToRename && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="rename-recording-title"
-          onClick={() => setRecordingToRename(null)}
-        >
-          <div
-            className="w-full max-w-[380px] rounded-xl border border-border bg-background p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2
-              id="rename-recording-title"
-              className="text-base font-semibold text-foreground"
-            >
-              Rename recording
-            </h2>
-            <input
-              autoFocus
-              value={recordingToRename.title}
-              onChange={(event) =>
-                setRecordingToRename((recording) =>
-                  recording
-                    ? { ...recording, title: event.target.value }
-                    : recording,
-                )
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submitRecordingRename();
-                if (event.key === "Escape") setRecordingToRename(null);
-              }}
-              maxLength={120}
-              placeholder="Recording name"
-              className="mt-4 w-full rounded-lg border border-border bg-primary px-3 py-2 text-sm text-foreground outline-none focus:border-fg-faint"
-            />
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRecordingToRename(null)}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitRecordingRename}
-                disabled={!recordingToRename.title.trim()}
-                className="rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <RenameDialog
+          heading="Rename recording"
+          value={recordingToRename.title}
+          placeholder="Recording name"
+          onChange={(value) =>
+            setRecordingToRename((recording) =>
+              recording ? { ...recording, title: value } : recording,
+            )
+          }
+          onCancel={() => setRecordingToRename(null)}
+          onSave={submitRecordingRename}
+        />
       )}
       {recordingToDelete && (
         <div

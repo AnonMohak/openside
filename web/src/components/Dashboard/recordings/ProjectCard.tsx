@@ -7,16 +7,14 @@ import { useEntitlements } from "@/hooks/useUsage";
 import type { Space } from "@/types/spaceTypes";
 import type { FinalOutput } from "@/types/outputTypes";
 import { cn } from "@/lib/utils";
-import {
-  formatRetentionRemaining,
-  retentionExpiryMs,
-} from "@/lib/retention";
+import { formatRetentionRemaining, retentionExpiryMs } from "@/lib/retention";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
+import RenameDialog from "@/components/shared/RenameDialog";
 
 const formatDate = (value?: string) =>
   value
@@ -161,7 +159,8 @@ const ProjectRetentionNote = ({ spaceId }: { spaceId: string }) => {
       session?.stoppedAt ?? session?.startedAt ?? output.createdAt,
       retentionHours,
     );
-    if (expiry != null && (soonest == null || expiry < soonest)) soonest = expiry;
+    if (expiry != null && (soonest == null || expiry < soonest))
+      soonest = expiry;
   }
 
   const remaining = formatRetentionRemaining(soonest);
@@ -299,49 +298,16 @@ const ProjectCard = ({
       </div>
 
       {renaming && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setRenaming(false)}
-        >
-          <div
-            className="w-full max-w-[380px] rounded-lg border border-border bg-background p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 className="text-base font-semibold text-foreground">
-              Rename project
-            </h2>
-            <input
-              autoFocus
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submitRename();
-                if (event.key === "Escape") setRenaming(false);
-              }}
-              placeholder="Project name"
-              className="mt-4 w-full rounded-md border border-border bg-primary px-3 py-2 text-sm text-foreground outline-none focus:border-fg-faint"
-            />
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRenaming(false)}
-                className="rounded-md border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-primary/85"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitRename}
-                disabled={!title.trim()}
-                className="rounded-md bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <RenameDialog
+          heading="Rename project"
+          description="Shown on your projects list and shared links."
+          value={title}
+          maxLength={100}
+          placeholder="Project name"
+          onChange={setTitle}
+          onCancel={() => setRenaming(false)}
+          onSave={submitRename}
+        />
       )}
     </>
   );

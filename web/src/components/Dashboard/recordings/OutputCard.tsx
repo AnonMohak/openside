@@ -14,10 +14,7 @@ import {
 } from "@/components/shared/ui/dropdown-menu";
 import { fetchDownloadUrl } from "@/hooks/useFinalOutputs";
 import { useEntitlements } from "@/hooks/useUsage";
-import {
-  formatRetentionRemaining,
-  retentionExpiryMs,
-} from "@/lib/retention";
+import { formatRetentionRemaining, retentionExpiryMs } from "@/lib/retention";
 import type { DownloadFormat, FinalOutput } from "@/types/outputTypes";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -81,9 +78,7 @@ interface OutputCardProps {
 }
 
 const compositeLabel = (output: FinalOutput) =>
-  output.variant === "CLOUD"
-    ? "Cloud mix"
-    : "Mixed recording";
+  output.variant === "CLOUD" ? "Cloud mix" : "Mixed recording";
 
 const statusLabel = (status: FinalOutput["status"]) => {
   switch (status) {
@@ -114,6 +109,9 @@ const NowPlayingBars = () => (
   </span>
 );
 
+// Compact row avatar: the participant's picture (or initial) for camera
+// tracks, a kind icon for screen shares / composites. Selected shows a
+// now-playing scrim; a playable row shows a play glyph on hover.
 const RowThumbnail = ({
   output,
   fallbackIcon: FallbackIcon,
@@ -126,64 +124,44 @@ const RowThumbnail = ({
   selected?: boolean;
 }) => {
   const participant = output.sourceRecording?.participant;
-  const stored = output.thumbnailUrl ?? null;
   const avatar = participant?.user?.avatar ?? null;
   const name = participant?.displayName || participant?.user?.name || "";
-  const [storedFailed, setStoredFailed] = useState(false);
-  const [storedLoaded, setStoredLoaded] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
-
-  const showStored = !!stored && !storedFailed;
+  const showPerson =
+    !output.sourceRecording?.isScreenShare && (!!name || !!avatar);
 
   return (
-    <span className="relative flex aspect-[4/3] h-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted ring-1 ring-border">
-      {showStored ? (
-        <>
-          {!storedLoaded && (
-            <span className="skeleton-shimmer absolute inset-0" />
-          )}
+    <span
+      className={`relative flex size-9 shrink-0 items-center justify-center overflow-hidden ${
+        showPerson
+          ? "rounded-full bg-brand text-sm font-semibold text-white"
+          : "rounded-lg bg-muted text-fg-muted"
+      }`}
+    >
+      {showPerson ? (
+        avatar && !avatarFailed ? (
           <img
-            src={stored}
+            src={avatar}
             alt=""
             loading="lazy"
-            onLoad={() => setStoredLoaded(true)}
-            onError={() => setStoredFailed(true)}
-            className={`h-full w-full object-cover transition-opacity duration-300 ${
-              storedLoaded ? "opacity-100" : "opacity-0"
-            }`}
+            onError={() => setAvatarFailed(true)}
+            className="h-full w-full object-cover"
           />
-        </>
-      ) : name || avatar ? (
-        // Camera-off style: a centered round profile picture, or the person's
-        // first initial when they have no picture.
-        <span className="flex size-8 items-center justify-center overflow-hidden rounded-full bg-brand text-sm font-semibold text-white">
-          {avatar && !avatarFailed ? (
-            <img
-              src={avatar}
-              alt=""
-              loading="lazy"
-              onError={() => setAvatarFailed(true)}
-              className="h-full w-full rounded-full object-cover"
-            />
-          ) : (
-            (name.trim()[0] || "?").toUpperCase()
-          )}
-        </span>
+        ) : (
+          (name.trim()[0] || "?").toUpperCase()
+        )
       ) : (
-        <FallbackIcon className="size-5 text-fg-muted" />
+        <FallbackIcon className="size-4" />
       )}
 
-      {/* Selected → a steady now-playing scrim. Playable but idle → a play glyph
-          that fades in on row hover to signal the row is clickable. Both use a
-          neutral black scrim, no accent colour. */}
       {selected ? (
-        <span className="absolute inset-0 flex items-center justify-center bg-black/45">
+        <span className="absolute inset-0 flex items-center justify-center bg-black/50">
           <NowPlayingBars />
         </span>
       ) : (
         canPlay && (
-          <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/40 group-hover:opacity-100">
-            <LuPlay className="size-4 fill-white text-white" />
+          <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/45 group-hover:opacity-100">
+            <LuPlay className="size-3.5 fill-white text-white" />
           </span>
         )
       )}
@@ -304,7 +282,8 @@ const OutputCard = ({
       videoItems.push({
         id: `${output.id}:${format}`,
         name: "Raw video",
-        description: "High-quality video recorded locally in the participant's browser.",
+        description:
+          "High-quality video recorded locally in the participant's browser.",
         output,
         format,
       });
@@ -357,7 +336,8 @@ const OutputCard = ({
     videoItems.push({
       id: `${cloudOutput.id}:mp4`,
       name: "Cloud",
-      description: "Server-side video backup of this track from the live session.",
+      description:
+        "Server-side video backup of this track from the live session.",
       output: cloudOutput,
       format: "mp4",
     });
@@ -409,10 +389,8 @@ const OutputCard = ({
     <div
       onClick={canPlay ? onSelect : undefined}
       aria-pressed={canPlay ? selected : undefined}
-      className={`group flex items-center gap-3 rounded-xl border px-2.5 py-2 transition-colors ${
-        selected
-          ? "border-fg-faint bg-muted"
-          : "border-border bg-primary hover:border-fg-faint"
+      className={`group flex items-center gap-3 px-3 py-2.5 transition-colors ${
+        selected ? "bg-brand/[0.07]" : "hover:bg-muted/50"
       } ${canPlay ? "cursor-pointer" : ""}`}
     >
       <RowThumbnail
@@ -423,39 +401,38 @@ const OutputCard = ({
       />
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-foreground">
-          {title}
+        <p className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold text-foreground">
+            {title}
+          </span>
+          {selected && (
+            <span className="shrink-0 rounded-md bg-brand/15 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-brand dark:text-blue-300">
+              Playing
+            </span>
+          )}
         </p>
         {/* Always show the status so users know where the recording stands; on
             a ready track, follow it with the useful stats. */}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-fg-subtle">
-          <span
-            className={`inline-flex items-center gap-1.5 whitespace-nowrap font-medium ${
-              isReady
-                ? "text-success"
-                : isFailed
-                  ? "text-danger"
-                  : "text-warning"
-            }`}
-          >
+          {/* Ready tracks lead with their stats; anything else shows its status. */}
+          {!isReady && (
             <span
-              className={`size-1.5 rounded-full ${
-                isReady
-                  ? "bg-success"
-                  : isFailed
-                    ? "bg-danger"
-                    : "bg-warning"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap font-medium ${
+                isFailed ? "text-danger" : "text-warning"
               }`}
-            />
-            {statusLabel(output.status)}
-          </span>
+            >
+              <span
+                className={`size-1.5 rounded-full ${
+                  isFailed ? "bg-danger" : "bg-warning"
+                }`}
+              />
+              {statusLabel(output.status)}
+            </span>
+          )}
           {isReady && (
             <>
-              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                <span className="text-fg-faint">·</span>
-                <span className="tabular-nums">
-                  {formatDuration(output.durationMs)}
-                </span>
+              <span className="tabular-nums whitespace-nowrap">
+                {formatDuration(output.durationMs)}
               </span>
               {hasVideo && qualityLabel(output) && (
                 <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -491,19 +468,21 @@ const OutputCard = ({
             type="button"
             disabled={!canDownload || !!downloading}
             onClick={(event) => event.stopPropagation()}
-            className="flex shrink-0 items-center gap-2 rounded-lg border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={downloading ? "Preparing download" : "Download"}
+            title={downloading ? "Preparing download" : "Download"}
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:opacity-80 cursor-pointer"
           >
             {downloading ? (
-              <FiLoader className="size-4 animate-spin" />
+              <FiLoader className="size-3.5 animate-spin" />
             ) : (
-              <LuDownload className="size-4 text-fg-muted" />
+              <LuDownload className="size-3.5" />
             )}
             {downloading ? "Preparing" : "Download"}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-52 overflow-visible rounded-xl border-border bg-background p-1.5"
+          className="w-56 overflow-visible rounded-xl border-border/50 bg-primary p-1.5"
           style={{ overflow: "visible" }}
         >
           {videoItems.length > 0 && (

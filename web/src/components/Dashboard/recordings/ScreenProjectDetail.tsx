@@ -2,23 +2,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FiChevronLeft,
-  FiCheck,
-  FiCopy,
   FiEdit2,
-  FiLink,
   FiLoader,
-  FiMoreHorizontal,
   FiShare2,
   FiTrash2,
   FiVideo,
 } from "react-icons/fi";
 import { LuDownload } from "react-icons/lu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/shared/ui/dropdown-menu";
 import {
   fetchScreenOutputUrl,
   useCreateScreenComment,
@@ -35,6 +25,9 @@ import {
 } from "@/hooks/useScreenRecordings";
 import RecordingComments from "./RecordingComments";
 import VideoPlayer from "@/components/shared/VideoPlayer";
+import RenameDialog from "@/components/shared/RenameDialog";
+import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
+import { toast } from "@/lib/toast";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
 
 /** Public URL a share token resolves to (the SharedRecordingPage route). */
@@ -140,123 +133,27 @@ const ShareDialog = ({
   rec: ScreenRecording;
   onClose: () => void;
 }) => {
-  const [copied, setCopied] = useState(false);
   const share = useShareScreenRecording();
   const unshare = useUnshareScreenRecording();
   const token = rec.shareToken;
-  const url = token ? shareUrlFor(token) : "";
-
-  const copy = async () => {
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard blocked - the input is selectable so it can be copied by hand.
-    }
-  };
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="share-recording-title"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-[460px] rounded-2xl border border-border bg-background p-6 shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <span className="flex size-10 items-center justify-center rounded-full bg-muted text-fg-muted ring-1 ring-border">
-          <FiLink className="size-4.5" />
-        </span>
-        <h2
-          id="share-recording-title"
-          className="mt-3 text-lg font-semibold text-foreground"
-        >
-          Share this recording
-        </h2>
-        <p className="mt-1.5 text-sm leading-6 text-fg-muted">
-          {token
-            ? "Anyone with this link can watch this recording and leave comments. No account needed."
-            : "Create a link that lets anyone watch this recording and leave comments. No account needed."}
-        </p>
-
-        {token ? (
-          <>
-            <div className="mt-4 flex items-center gap-1.5 rounded-lg border border-border bg-primary p-1.5 pl-3">
-              <input
-                readOnly
-                value={url}
-                onFocus={(event) => event.currentTarget.select()}
-                className="min-w-0 flex-1 truncate bg-transparent text-sm text-fg-muted outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => void copy()}
-                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-semibold transition-colors ${
-                  copied
-                    ? "bg-success/10 text-success"
-                    : "bg-foreground text-background hover:opacity-85"
-                }`}
-              >
-                {copied ? (
-                  <FiCheck className="size-4" />
-                ) : (
-                  <FiCopy className="size-4" />
-                )}
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-            <div className="mt-6 flex justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => unshare.mutate(rec.id)}
-                disabled={unshare.isPending}
-                className="flex items-center gap-1.5 rounded-lg border border-danger/25 bg-danger/10 px-3.5 py-2 text-sm font-medium text-danger transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {unshare.isPending && (
-                  <FiLoader className="size-4 animate-spin" />
-                )}
-                Stop sharing
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
-              >
-                Done
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="mt-6 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => share.mutate(rec.id)}
-              disabled={share.isPending}
-              className="flex items-center gap-1.5 rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {share.isPending ? (
-                <FiLoader className="size-4 animate-spin" />
-              ) : (
-                <FiLink className="size-4" />
-              )}
-              Create link
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+    <ShareLinkDialog
+      recordingTitle={rec.title ?? undefined}
+      url={token ? shareUrlFor(token) : null}
+      accessNote="watch this recording and leave comments"
+      isStopping={unshare.isPending}
+      onCreate={() =>
+        share.mutate(rec.id, {
+          onError: () => {
+            toast.error("Couldn't create a share link.");
+            onClose();
+          },
+        })
+      }
+      onStop={() => unshare.mutate(rec.id, { onSuccess: onClose })}
+      onClose={onClose}
+    />
   );
 };
 
@@ -265,17 +162,17 @@ const ScreenProjectDetailSkeleton = () => (
     aria-label="Loading recording project"
     className="flex flex-col gap-6 px-2 pb-2 pt-0 lg:h-full lg:min-h-0 lg:gap-0 lg:pb-0"
   >
-    <div className="-mx-6 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3 lg:mb-0">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="size-8 shrink-0 animate-pulse rounded-lg bg-muted" />
-        <div className="h-8 w-px bg-border" />
+    <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+      <div className="flex min-w-0 items-center gap-3.5">
+        <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
         <div className="min-w-0 space-y-2">
           <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
           <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <div className="size-9 animate-pulse rounded-lg bg-muted" />
+        <div className="h-9 w-24 animate-pulse rounded-lg bg-muted" />
+        <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
       </div>
     </div>
     <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -397,19 +294,18 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           lg:gap-0 + lg:pb-0, with each pane owning its own spacing. Below lg
           the panes stack and the page scrolls normally. */}
       <div className="flex flex-col gap-6 px-2 pb-2 pt-0 lg:h-full lg:min-h-0 lg:gap-0 lg:pb-0">
-        <header className="-mx-6 -mt-4 flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3">
-          <div className="flex min-w-0 items-center gap-3">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-4 pt-2">
+          <div className="flex min-w-0 items-center gap-3.5">
             <button
               type="button"
               onClick={() => navigate("/dashboard/project")}
               aria-label="Back to all projects"
               title="All projects"
-              className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-fg-muted hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+              className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
             >
-              <FiChevronLeft className="size-4" />
+              <FiChevronLeft className="size-5" />
             </button>
-            <span className="h-8 w-px shrink-0 bg-border" aria-hidden />
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0 space-y-0.5">
               <h1 className="truncate text-xl font-semibold leading-tight tracking-[-0.01em] text-foreground">
                 {recTitle}
               </h1>
@@ -429,30 +325,22 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
             aria-label="Recording actions"
             className="flex shrink-0 items-center gap-2"
           >
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Recording options"
-                  className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-fg-muted hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
-                >
-                  <FiMoreHorizontal className="size-[18px]" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuItem onSelect={openRename}>
-                  <FiEdit2 />
-                  Rename recording
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => setDeleteConfirmOpen(true)}
-                  className="text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
-                >
-                  <FiTrash2 />
-                  Delete recording
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <button
+              type="button"
+              onClick={openRename}
+              className="flex h-9 items-center gap-1.5 rounded-lg bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
+            >
+              <FiEdit2 className="size-3.5" />
+              Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleteConfirmOpen(true)}
+              className="flex h-9 items-center gap-1.5 rounded-lg bg-danger/10 px-3 text-sm font-medium text-danger transition-colors hover:bg-danger/15 cursor-pointer"
+            >
+              <FiTrash2 className="size-3.5" />
+              Delete
+            </button>
           </div>
         </header>
 
@@ -517,50 +405,14 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
         <ShareDialog rec={rec} onClose={() => setShareOpen(false)} />
       )}
       {renaming && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setRenaming(false)}
-        >
-          <div
-            className="w-full max-w-[380px] rounded-xl border border-border bg-background p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 className="text-base font-semibold text-foreground">
-              Rename recording
-            </h2>
-            <input
-              autoFocus
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submitRename();
-                if (event.key === "Escape") setRenaming(false);
-              }}
-              maxLength={120}
-              placeholder="Recording name"
-              className="mt-4 w-full rounded-lg border border-border bg-primary px-3 py-2 text-sm text-foreground outline-none focus:border-fg-faint"
-            />
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRenaming(false)}
-                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitRename}
-                disabled={!title.trim()}
-                className="rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <RenameDialog
+          heading="Rename recording"
+          value={title}
+          placeholder="Recording name"
+          onChange={setTitle}
+          onCancel={() => setRenaming(false)}
+          onSave={submitRename}
+        />
       )}
       {deleteConfirmOpen && (
         <div
