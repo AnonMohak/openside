@@ -23,6 +23,7 @@ import LowLightBadge from "./ui/LowLightBadge";
 import { useLowLight } from "@/hooks/useLowLight";
 import { installCallSoundsWarmup } from "@/lib/callSounds";
 import UserAvatar from "./ui/UserAvatar";
+import EditableSpaceTitle from "./ui/EditableSpaceTitle";
 import AppLoader from "@/components/shared/AppLoader";
 import { useGetMe } from "@/hooks/useUserQuery";
 import { useGetSpaceByJoinCode } from "@/hooks/useSpace";
@@ -782,16 +783,28 @@ const PreJoinScreen = ({
                 <button
                   type="button"
                   onClick={() => navigate(-1)}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-foreground/80 bg-primary hover:bg-primary/60 cursor-pointer transition-all duration-200"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium bg-foreground text-background hover:opacity-85 cursor-pointer transition-all duration-200"
                 >
                   <ArrowLeft size={16} />
                   <span>Back</span>
                 </button>
               )}
-              <div className="flex flex-col gap-1.5 mb-2">
-                <h1 className="text-xl font-semibold">
-                  {spaceData?.title || "Let's check your cam and mic"}
-                </h1>
+              <div className="mb-2 flex w-full flex-col gap-1.5">
+                {spaceData ? (
+                  <EditableSpaceTitle
+                    spaceId={spaceData.id}
+                    title={spaceData.title ?? ""}
+                    canEdit={
+                      !!user &&
+                      user.id === (spaceData.host?.id ?? spaceData.hostId)
+                    }
+                    fallback="Let's check your cam and mic"
+                  />
+                ) : (
+                  <h1 className="text-xl font-semibold">
+                    Let's check your cam and mic
+                  </h1>
+                )}
               </div>
 
               {/* Device selectors */}
@@ -1002,7 +1015,7 @@ const PreJoinScreen = ({
                     onClick={() => setHeadphonesChoice(true)}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium select-none cursor-pointer transition-all duration-200 ${
                       usingHeadphones
-                        ? "bg-brand/20 text-foreground"
+                        ? "bg-brand/60 text-white"
                         : "bg-primary text-foreground/60 hover:bg-primary/60"
                     }`}
                   >
@@ -1013,7 +1026,7 @@ const PreJoinScreen = ({
                     onClick={() => setHeadphonesChoice(false)}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium select-none cursor-pointer transition-all duration-200 ${
                       !usingHeadphones
-                        ? "bg-brand/20 text-foreground"
+                        ? "bg-brand/60 text-white"
                         : "bg-primary text-foreground/60 hover:bg-primary/60"
                     }`}
                   >
