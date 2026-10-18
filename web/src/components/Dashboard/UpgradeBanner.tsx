@@ -42,7 +42,7 @@ const UpgradeBanner = () => {
         type="button"
         onClick={handleUpgrade}
         disabled={checkout.isPending}
-        className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-3 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-60"
+        className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-brand px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
       >
         {checkout.isPending ? "Starting..." : "Upgrade"}
       </button>
