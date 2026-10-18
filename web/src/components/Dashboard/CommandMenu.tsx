@@ -57,10 +57,12 @@ const CommandMenu = () => {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-9 w-96 items-center gap-2 rounded-md border border-border/50 bg-primary px-3 text-sm text-fg-subtle transition-colors hover:text-foreground cursor-pointer max-md:w-9 max-md:justify-center max-md:px-0"
+        className="flex h-9 w-80 items-center gap-2 rounded-md border border-border/50 bg-primary px-3 text-sm text-fg-subtle transition-colors hover:text-foreground cursor-pointer max-md:w-9 max-md:justify-center max-md:px-0"
       >
         <Search size={15} className="shrink-0" />
-        <span className="flex-1 text-left max-md:hidden">Search...</span>
+        <span className="flex-1 truncate text-left max-md:hidden">
+          Search projects, pages, actions...
+        </span>
         <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-sans text-[0.65rem] font-medium text-fg-muted max-md:hidden">
           {isMac ? "⌘K" : "Ctrl K"}
         </kbd>

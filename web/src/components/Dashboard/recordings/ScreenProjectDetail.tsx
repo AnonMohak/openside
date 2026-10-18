@@ -35,6 +35,7 @@ import {
 } from "@/hooks/useScreenRecordings";
 import RecordingComments from "./RecordingComments";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
+import PageLoader from "./PageLoader";
 
 /** Public URL a share token resolves to (the SharedRecordingPage route). */
 export const shareUrlFor = (token: string) =>
@@ -259,55 +260,6 @@ const ShareDialog = ({
   );
 };
 
-const ScreenProjectDetailSkeleton = () => (
-  <div
-    aria-label="Loading recording project"
-    className="flex flex-col gap-6 px-2 pb-2 pt-0 lg:h-full lg:min-h-0 lg:gap-0 lg:pb-0"
-  >
-    <div className="-mx-6 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3 lg:mb-0">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="size-8 shrink-0 animate-pulse rounded-lg bg-muted" />
-        <div className="h-8 w-px bg-border" />
-        <div className="min-w-0 space-y-2">
-          <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
-          <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <div className="size-9 animate-pulse rounded-lg bg-muted" />
-      </div>
-    </div>
-    <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
-      <section className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
-        <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
-        <div className="flex justify-end gap-2 rounded-xl bg-primary px-1 py-2">
-          <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
-          <div className="h-9 w-36 animate-pulse rounded-lg bg-muted" />
-        </div>
-      </section>
-
-      <aside className="flex min-h-[320px] flex-col gap-4 rounded-2xl border border-border bg-primary p-3 lg:my-5 lg:min-h-0">
-        <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
-        <div className="flex flex-1 flex-col gap-4">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="flex gap-2.5">
-              <div className="size-7 shrink-0 animate-pulse rounded-full bg-muted" />
-              <div className="flex-1 space-y-2 pt-0.5">
-                <div className="h-3 w-24 animate-pulse rounded-md bg-muted" />
-                <div className="h-3 w-full animate-pulse rounded-md bg-muted" />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="border-t border-border pt-3">
-          <div className="h-20 animate-pulse rounded-lg bg-muted" />
-          <div className="mt-2 h-9 animate-pulse rounded-lg bg-muted" />
-        </div>
-      </aside>
-    </div>
-  </div>
-);
-
 const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   const navigate = useNavigate();
   const [renaming, setRenaming] = useState(false);
@@ -329,7 +281,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   // active, so incoming comments land in this panel without a refresh.
   useRealtimeRecordingComments(rec?.shareToken, "screen", sessionId);
 
-  if (isLoading) return <ScreenProjectDetailSkeleton />;
+  if (isLoading) return <PageLoader />;
 
   if (!rec) {
     return (

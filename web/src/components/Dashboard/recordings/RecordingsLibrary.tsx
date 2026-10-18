@@ -6,6 +6,7 @@ import {
   FiCheck,
   FiCopy,
   FiEdit2,
+  FiFilter,
   FiFolder,
   FiLink,
   FiLoader,
@@ -19,6 +20,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -49,9 +52,11 @@ import type {
 import OutputCard from "./OutputCard";
 import ProjectCard from "./ProjectCard";
 import ScreenRecordingsSection from "./ScreenRecordingsSection";
+import PageLoader from "./PageLoader";
 
 const PROJECTS_PER_PAGE = 8;
-const shareUrlFor = (token: string) => `${window.location.origin}/share/${token}`;
+const shareUrlFor = (token: string) =>
+  `${window.location.origin}/share/${token}`;
 
 const formatDay = (value?: string) =>
   value
@@ -143,9 +148,7 @@ const RecordingSessionActions = ({
           aria-label="Recording options"
           className={cn(
             "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60",
-            menuOpen
-              ? "bg-background text-foreground"
-              : "text-fg-subtle",
+            menuOpen ? "bg-background text-foreground" : "text-fg-subtle",
           )}
         >
           <FiMoreVertical className="size-4.5" />
@@ -206,7 +209,10 @@ const SpaceRecordingShareDialog = ({
         className="w-full max-w-[460px] rounded-2xl border border-border bg-background p-6 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id="share-space-recording-title" className="text-lg font-semibold text-foreground">
+        <h2
+          id="share-space-recording-title"
+          className="text-lg font-semibold text-foreground"
+        >
           Share this recording
         </h2>
         <p className="mt-2 text-sm leading-6 text-fg-muted">
@@ -228,7 +234,11 @@ const SpaceRecordingShareDialog = ({
                 onClick={() => void copy()}
                 className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-3 text-sm font-semibold text-background transition-opacity hover:opacity-85"
               >
-                {copied ? <FiCheck className="size-4" /> : <FiCopy className="size-4" />}
+                {copied ? (
+                  <FiCheck className="size-4" />
+                ) : (
+                  <FiCopy className="size-4" />
+                )}
                 {copied ? "Copied" : "Copy"}
               </button>
             </div>
@@ -239,17 +249,27 @@ const SpaceRecordingShareDialog = ({
                 disabled={unshare.isPending}
                 className="flex items-center gap-1.5 rounded-lg border border-danger/25 bg-danger/10 px-3.5 py-2 text-sm font-medium text-danger transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {unshare.isPending && <FiLoader className="size-4 animate-spin" />}
+                {unshare.isPending && (
+                  <FiLoader className="size-4 animate-spin" />
+                )}
                 Stop sharing
               </button>
-              <button type="button" onClick={onClose} className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
+              >
                 Done
               </button>
             </div>
           </>
         ) : (
           <div className="mt-6 flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-border bg-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
+            >
               Cancel
             </button>
             <button
@@ -258,7 +278,11 @@ const SpaceRecordingShareDialog = ({
               disabled={share.isPending}
               className="flex items-center gap-1.5 rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {share.isPending ? <FiLoader className="size-4 animate-spin" /> : <FiLink className="size-4" />}
+              {share.isPending ? (
+                <FiLoader className="size-4 animate-spin" />
+              ) : (
+                <FiLink className="size-4" />
+              )}
               Create link
             </button>
           </div>
@@ -351,7 +375,10 @@ const RecordingBlock = ({
               </button>
             )}
             {onRename && onDelete && (
-              <RecordingSessionActions onRename={onRename} onDelete={onDelete} />
+              <RecordingSessionActions
+                onRename={onRename}
+                onDelete={onDelete}
+              />
             )}
           </div>
         </div>
@@ -800,67 +827,6 @@ const SpaceOutputs = ({
   );
 };
 
-const SkeletonCard = () => (
-  <div className="flex flex-col gap-3 rounded-xl border border-border bg-primary p-3">
-    <div className="aspect-video animate-pulse rounded-lg bg-muted" />
-    <div className="space-y-2 px-1 pb-1">
-      <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
-    </div>
-  </div>
-);
-
-const SpaceRecordingsSkeleton = () => (
-  <section className="flex flex-col gap-4">
-    <h2 className="text-sm font-semibold text-foreground">Space Recordings</h2>
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <SkeletonCard key={index} />
-      ))}
-    </div>
-  </section>
-);
-
-const ProjectDetailSkeleton = () => (
-  <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
-    <div className="-mx-6 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="size-8 shrink-0 animate-pulse rounded-lg bg-muted" />
-        <div className="h-8 w-px bg-border" />
-        <div className="min-w-0 space-y-2">
-          <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
-          <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
-        </div>
-      </div>
-      <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
-    </div>
-    <section className="flex flex-col gap-4">
-      <div className="flex w-full max-w-4xl flex-col gap-3 rounded-2xl border border-border bg-primary p-3">
-        <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
-        <div className="flex items-center justify-between gap-2 px-0.5 pb-0.5">
-          <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
-          <div className="size-8 shrink-0 animate-pulse rounded-full bg-muted" />
-        </div>
-      </div>
-      <div className="h-4 w-16 animate-pulse rounded-md bg-muted" />
-      <div className="flex flex-col gap-2">
-        {Array.from({ length: 3 }).map((_, index) => (
-          <div
-            key={index}
-            className="flex items-center gap-3 rounded-xl border border-border bg-primary px-2.5 py-1.5"
-          >
-            <div className="aspect-[4/3] h-14 shrink-0 animate-pulse rounded-md bg-muted" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-4 w-1/3 animate-pulse rounded-md bg-muted" />
-              <div className="h-3 w-1/4 animate-pulse rounded-md bg-muted" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  </div>
-);
-
 export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -875,8 +841,9 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
     id: string;
     title: string;
   } | null>(null);
-  const [sharingSession, setSharingSession] =
-    useState<RecordingSession | null>(null);
+  const [sharingSession, setSharingSession] = useState<RecordingSession | null>(
+    null,
+  );
   const focusedRecordingSessionId = searchParams.get("recordingSessionId");
   const { data: user } = useGetMe();
   const renameSpace = useRenameSpace();
@@ -946,7 +913,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
     return () => cancelAnimationFrame(frame);
   }, [focusedRecordingSessionId, isInitialLoading, space]);
 
-  if (isInitialLoading) return <ProjectDetailSkeleton />;
+  if (isInitialLoading) return <PageLoader />;
 
   if (!space) {
     return (
@@ -1319,10 +1286,31 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   );
 };
 
+type ProjectFilter = "all" | "space" | "screen";
+
+const PROJECT_FILTERS: { value: ProjectFilter; label: string }[] = [
+  { value: "all", label: "All projects" },
+  { value: "space", label: "Space recordings" },
+  { value: "screen", label: "Screen recordings" },
+];
+
 const RecordingsLibrary = () => {
   const navigate = useNavigate();
-  const [visibleSpaceCount, setVisibleSpaceCount] =
-    useState(PROJECTS_PER_PAGE);
+  // Kept in the URL so the choice survives opening a project and coming back.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter: ProjectFilter =
+    PROJECT_FILTERS.find((item) => item.value === searchParams.get("type"))
+      ?.value ?? "all";
+  const setFilter = (next: ProjectFilter) =>
+    setSearchParams(
+      (params) => {
+        if (next === "all") params.delete("type");
+        else params.set("type", next);
+        return params;
+      },
+      { replace: true },
+    );
+  const [visibleSpaceCount, setVisibleSpaceCount] = useState(PROJECTS_PER_PAGE);
   const { data: spaces, isLoading } = useGetUserSpaces("hosted");
   const { data: screenRecordings, isLoading: areScreenRecordingsLoading } =
     useScreenRecordings();
@@ -1341,12 +1329,9 @@ const RecordingsLibrary = () => {
     spacesWithRecordings.length - visibleSpaces.length,
   );
 
-  if (
-    !isLoading &&
-    !areScreenRecordingsLoading &&
-    spacesWithRecordings.length === 0 &&
-    screenRecs.length === 0
-  ) {
+  if (isLoading || areScreenRecordingsLoading) return <PageLoader />;
+
+  if (spacesWithRecordings.length === 0 && screenRecs.length === 0) {
     return (
       <div className="flex min-h-[calc(100vh-3rem)] flex-col items-center justify-start gap-4 p-4 pt-40 text-center">
         <span className="flex size-14 items-center justify-center rounded-xl bg-muted ring-1 ring-border">
@@ -1366,19 +1351,56 @@ const RecordingsLibrary = () => {
   }
 
   return (
-    <div className="flex flex-col gap-8 p-2">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold text-foreground">Projects</h1>
           <p className="text-sm text-fg-muted">
             Your recordings, ready to preview and download.
           </p>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex h-9 items-center gap-2 rounded-lg border border-border/50 bg-primary px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted data-[state=open]:bg-muted cursor-pointer"
+            >
+              <FiFilter size={14} className="text-fg-subtle" />
+              {PROJECT_FILTERS.find((item) => item.value === filter)?.label}
+              <FiChevronDown size={14} className="text-fg-subtle" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={6}
+            className="w-48 rounded-xl border-border/50 p-1.5"
+          >
+            <DropdownMenuRadioGroup
+              value={filter}
+              onValueChange={(value) => setFilter(value as ProjectFilter)}
+            >
+              {PROJECT_FILTERS.map((item) => (
+                <DropdownMenuRadioItem
+                  key={item.value}
+                  value={item.value}
+                  className="cursor-pointer rounded-lg py-2 text-sm"
+                >
+                  {item.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      {isLoading ? (
-        <SpaceRecordingsSkeleton />
-      ) : spacesWithRecordings.length > 0 ? (
+      {filter === "space" && spacesWithRecordings.length === 0 && (
+        <FilterEmpty label="space recordings" />
+      )}
+      {filter === "screen" && screenRecs.length === 0 && (
+        <FilterEmpty label="screen recordings" />
+      )}
+
+      {filter !== "screen" && spacesWithRecordings.length > 0 ? (
         <section className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-foreground">
@@ -1413,9 +1435,7 @@ const RecordingsLibrary = () => {
                 className="flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
               >
                 Show more
-                <span className="text-fg-subtle">
-                  ({remainingSpaces} more)
-                </span>
+                <span className="text-fg-subtle">({remainingSpaces} more)</span>
                 <FiChevronDown size={14} />
               </button>
             </div>
@@ -1423,12 +1443,17 @@ const RecordingsLibrary = () => {
         </section>
       ) : null}
 
-      <ScreenRecordingsSection
-        recordings={screenRecs}
-        isLoading={areScreenRecordingsLoading}
-      />
+      {filter !== "space" && (
+        <ScreenRecordingsSection recordings={screenRecs} />
+      )}
     </div>
   );
 };
+
+const FilterEmpty = ({ label }: { label: string }) => (
+  <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-border/50 text-sm text-fg-subtle">
+    No {label} yet
+  </div>
+);
 
 export default RecordingsLibrary;
