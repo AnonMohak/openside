@@ -32,7 +32,7 @@ const RecentProjectsSection = () => {
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={index}
-              className="aspect-[4/3] animate-pulse rounded-xl border border-border bg-muted"
+              className="aspect-[4/3] animate-pulse rounded-xl border border-border/50 bg-muted"
             />
           ))}
         </div>

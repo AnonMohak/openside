@@ -2,7 +2,7 @@
 import { useState } from "react";
 import generateRoomId from "@/utils/GenerateRoomId";
 import { createIntentKey } from "@/pages/RoomPage";
-import { CalendarDays, ChevronRight, CalendarClock } from "lucide-react";
+import { CalendarDays, ChevronRight } from "lucide-react";
 import { BsFillRecordCircleFill } from "react-icons/bs";
 import { RiMovie2Line } from "react-icons/ri";
 import { FiMonitor } from "react-icons/fi";
@@ -12,20 +12,15 @@ import { useNavigate } from "react-router-dom";
 import { useGetUserSpaces } from "@/hooks/useSpace";
 
 const UpcomingSessionsSkeleton = () => (
-  <div className="flex flex-col gap-2">
+  <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
     {Array.from({ length: 2 }).map((_, index) => (
-      <div
-        key={index}
-        className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-2 py-1.5"
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="size-9 shrink-0 animate-pulse rounded-md bg-primary" />
-          <div className="space-y-2">
-            <div className="h-3.5 w-32 animate-pulse rounded bg-primary" />
-            <div className="h-3 w-24 animate-pulse rounded bg-primary" />
-          </div>
+      <div key={index} className="flex items-center gap-3 px-3 py-2.5">
+        <div className="size-10 shrink-0 animate-pulse rounded-lg bg-muted" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3.5 w-40 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-28 animate-pulse rounded bg-muted" />
         </div>
-        <div className="h-7 w-14 shrink-0 animate-pulse rounded-md bg-primary" />
+        <div className="h-6 w-16 shrink-0 animate-pulse rounded-md bg-muted" />
       </div>
     ))}
   </div>
@@ -57,22 +52,50 @@ const QuickActions = () => {
       (space) =>
         space.status === "SCHEDULED" &&
         space.scheduledFor &&
-        new Date(space.scheduledFor).getTime() >= now
+        new Date(space.scheduledFor).getTime() >= now,
     )
     .sort(
       (a, b) =>
         new Date(a.scheduledFor!).getTime() -
-        new Date(b.scheduledFor!).getTime()
+        new Date(b.scheduledFor!).getTime(),
     );
 
-  const formatWhen = (value: string) =>
-    new Intl.DateTimeFormat("en", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
+  // "Today · 9:30 PM", "Tomorrow · 9:30 PM", or "Tue, Oct 20 · 9:30 PM".
+  const formatWhen = (value: string) => {
+    const date = new Date(value);
+    const time = new Intl.DateTimeFormat("en", {
       hour: "numeric",
       minute: "2-digit",
-    }).format(new Date(value));
+    }).format(date);
+    const dayDiff = Math.round(
+      (new Date(date).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) /
+        86_400_000,
+    );
+    const day =
+      dayDiff === 0
+        ? "Today"
+        : dayDiff === 1
+          ? "Tomorrow"
+          : new Intl.DateTimeFormat("en", {
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            }).format(date);
+    return `${day} · ${time}`;
+  };
+
+  const formatRelative = (value: string) => {
+    const minutes = Math.max(
+      0,
+      Math.round((new Date(value).getTime() - now) / 60_000),
+    );
+    if (minutes < 1) return "now";
+    if (minutes < 60) return `in ${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `in ${hours} hr`;
+    const days = Math.round(hours / 24);
+    return `in ${days} day${days === 1 ? "" : "s"}`;
+  };
 
   const actions = [
     {
@@ -132,7 +155,9 @@ const QuickActions = () => {
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-medium text-foreground">
             Upcoming sessions
-            <span className="ml-2 font-normal text-fg-subtle">{todayLabel}</span>
+            <span className="ml-2 font-normal text-fg-subtle">
+              {todayLabel}
+            </span>
           </h3>
           <button
             type="button"
@@ -151,30 +176,41 @@ const QuickActions = () => {
             No upcoming recordings scheduled
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {upcoming.map((space) => (
-              <button
-                key={space.id}
-                type="button"
-                onClick={() => navigate("/dashboard/calendar")}
-                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-muted cursor-pointer"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-foreground">
-                    <CalendarClock size={18} />
+          <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
+            {upcoming.map((space) => {
+              const date = new Date(space.scheduledFor!);
+              const inviteeCount = space.invitees?.length ?? 0;
+              return (
+                <button
+                  key={space.id}
+                  type="button"
+                  onClick={() => navigate("/dashboard/calendar")}
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 cursor-pointer"
+                >
+                  <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border/50 bg-muted leading-none">
+                    <span className="translate-y-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-red-500">
+                      {date.toLocaleDateString("en-US", { month: "short" })}
+                    </span>
+                    <span className="mt-px text-sm font-semibold tabular-nums text-foreground">
+                      {date.getDate()}
+                    </span>
                   </span>
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-foreground">
                       {space.title || "Untitled recording"}
                     </span>
                     <span className="block truncate text-xs text-fg-subtle">
                       {formatWhen(space.scheduledFor!)}
+                      {inviteeCount > 0 && ` · ${inviteeCount} invited`}
                     </span>
                   </span>
-                </span>
-                <ChevronRight size={16} className="shrink-0 text-fg-subtle" />
-              </button>
-            ))}
+                  <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs font-medium text-fg-muted">
+                    {formatRelative(space.scheduledFor!)}
+                  </span>
+                  <ChevronRight size={16} className="shrink-0 text-fg-subtle" />
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
