@@ -28,7 +28,14 @@ const App = () => {
       <Route path="/" element={<LandingPage />} />
       <Route
         path="/sso-callback"
-        element={<AuthenticateWithRedirectCallback />}
+        element={
+          // Google sign-ups (new accounts) take the sign-up branch, which
+          // otherwise falls back to Clerk's default "/".
+          <AuthenticateWithRedirectCallback
+            signInFallbackRedirectUrl="/dashboard/home"
+            signUpFallbackRedirectUrl="/dashboard/home"
+          />
+        }
       />
       <Route path="/dashboard" element={<Navigate to="/dashboard/home" replace />} />
       <Route

@@ -27,7 +27,12 @@ VITE_API_SOCKET_URL=http://localhost:4000`}
   }
 
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
+    <ClerkProvider
+      publishableKey={clerkPublishableKey}
+      afterSignOutUrl="/"
+      signInFallbackRedirectUrl="/dashboard/home"
+      signUpFallbackRedirectUrl="/dashboard/home"
+    >
       <ThemeProvider
         attribute="class"
         defaultTheme="system"
