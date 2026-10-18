@@ -45,7 +45,6 @@ import { RiMicLine } from "react-icons/ri";
 
 import PageTitle from "@/components/shared/PageTitle";
 import SpaceBlueprint from "@/components/landing/SpaceBlueprint";
-import GithubSponsorButton from "@/components/landing/GithubSponsorButton";
 import GithubStarButton from "@/components/landing/GithubStarButton";
 import {
   HeaderAuthCTA,
@@ -1137,9 +1136,6 @@ const LandingPage = () => {
             </nav>
 
             <div className="col-start-3 flex items-center justify-self-end gap-1.5 sm:gap-2">
-              <span className="hidden md:inline-flex">
-                <GithubSponsorButton />
-              </span>
               <span className="hidden sm:inline-flex">
                 <GithubStarButton />
               </span>
@@ -1216,9 +1212,6 @@ const LandingPage = () => {
                     Pricing
                   </a>
                   <div className="mt-1 flex items-center gap-2 border-t border-white/15 pt-3">
-                    <span className="md:hidden">
-                      <GithubSponsorButton />
-                    </span>
                     <span className="sm:hidden">
                       <GithubStarButton />
                     </span>
