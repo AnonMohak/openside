@@ -10,6 +10,7 @@ import {
   FiFolder,
   FiLink,
   FiLoader,
+  FiMonitor,
   FiMoreHorizontal,
   FiMoreVertical,
   FiShare2,
@@ -52,7 +53,6 @@ import type {
 import OutputCard from "./OutputCard";
 import ProjectCard from "./ProjectCard";
 import ScreenRecordingsSection from "./ScreenRecordingsSection";
-import PageLoader from "./PageLoader";
 
 const PROJECTS_PER_PAGE = 8;
 const shareUrlFor = (token: string) =>
@@ -827,6 +827,86 @@ const SpaceOutputs = ({
   );
 };
 
+const SkeletonCard = () => (
+  <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-primary p-3">
+    <div className="aspect-video animate-pulse rounded-lg bg-muted" />
+    <div className="space-y-2 px-1 pb-1">
+      <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
+      <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+    </div>
+  </div>
+);
+
+// Mirrors the projects page: heading + filter button, then one section of
+// cards (labelled for the active filter).
+const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
+  <div
+    aria-label="Loading projects"
+    className="flex flex-col gap-6 px-2 pb-2 pt-0"
+  >
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="space-y-2">
+        <div className="h-6 w-28 animate-pulse rounded-md bg-muted" />
+        <div className="h-3.5 w-64 animate-pulse rounded-md bg-muted" />
+      </div>
+      <div className="h-9 w-40 animate-pulse rounded-lg bg-muted" />
+    </div>
+    <section className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-foreground">
+          {filter === "screen" ? "Screen Recordings" : "Space Recordings"}
+        </h2>
+        <div className="h-5 w-7 animate-pulse rounded-full bg-muted" />
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <SkeletonCard key={index} />
+        ))}
+      </div>
+    </section>
+  </div>
+);
+
+const ProjectDetailSkeleton = () => (
+  <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
+    <div className="-mx-6 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="size-8 shrink-0 animate-pulse rounded-lg bg-muted" />
+        <div className="h-8 w-px bg-border" />
+        <div className="min-w-0 space-y-2">
+          <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
+          <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
+        </div>
+      </div>
+      <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
+    </div>
+    <section className="flex flex-col gap-4">
+      <div className="flex w-full max-w-4xl flex-col gap-3 rounded-2xl border border-border bg-primary p-3">
+        <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
+        <div className="flex items-center justify-between gap-2 px-0.5 pb-0.5">
+          <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
+          <div className="size-8 shrink-0 animate-pulse rounded-full bg-muted" />
+        </div>
+      </div>
+      <div className="h-4 w-16 animate-pulse rounded-md bg-muted" />
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div
+            key={index}
+            className="flex items-center gap-3 rounded-xl border border-border bg-primary px-2.5 py-1.5"
+          >
+            <div className="aspect-[4/3] h-14 shrink-0 animate-pulse rounded-md bg-muted" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="h-4 w-1/3 animate-pulse rounded-md bg-muted" />
+              <div className="h-3 w-1/4 animate-pulse rounded-md bg-muted" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  </div>
+);
+
 export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -913,7 +993,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
     return () => cancelAnimationFrame(frame);
   }, [focusedRecordingSessionId, isInitialLoading, space]);
 
-  if (isInitialLoading) return <PageLoader />;
+  if (isInitialLoading) return <ProjectDetailSkeleton />;
 
   if (!space) {
     return (
@@ -1288,10 +1368,14 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
 
 type ProjectFilter = "all" | "space" | "screen";
 
-const PROJECT_FILTERS: { value: ProjectFilter; label: string }[] = [
-  { value: "all", label: "All projects" },
-  { value: "space", label: "Space recordings" },
-  { value: "screen", label: "Screen recordings" },
+const PROJECT_FILTERS: {
+  value: ProjectFilter;
+  label: string;
+  icon: typeof FiFolder;
+}[] = [
+  { value: "all", label: "All projects", icon: FiFolder },
+  { value: "space", label: "Space recordings", icon: FiVideo },
+  { value: "screen", label: "Screen recordings", icon: FiMonitor },
 ];
 
 const RecordingsLibrary = () => {
@@ -1329,7 +1413,8 @@ const RecordingsLibrary = () => {
     spacesWithRecordings.length - visibleSpaces.length,
   );
 
-  if (isLoading || areScreenRecordingsLoading) return <PageLoader />;
+  if (isLoading || areScreenRecordingsLoading)
+    return <ProjectsListSkeleton filter={filter} />;
 
   if (spacesWithRecordings.length === 0 && screenRecs.length === 0) {
     return (
@@ -1373,7 +1458,7 @@ const RecordingsLibrary = () => {
           <DropdownMenuContent
             align="end"
             sideOffset={6}
-            className="w-48 rounded-xl border-border/50 p-1.5"
+            className="w-52 rounded-xl border-border/50 bg-primary p-1"
           >
             <DropdownMenuRadioGroup
               value={filter}
@@ -1383,9 +1468,14 @@ const RecordingsLibrary = () => {
                 <DropdownMenuRadioItem
                   key={item.value}
                   value={item.value}
-                  className="cursor-pointer rounded-lg py-2 text-sm"
+                  // Hide the stock radio dot; the check on the right marks it.
+                  className="cursor-pointer gap-2.5 rounded-lg px-2.5 py-2 text-sm text-fg-muted focus:bg-muted focus:text-foreground data-[state=checked]:text-foreground [&>span:first-child]:hidden"
                 >
-                  {item.label}
+                  <item.icon size={15} />
+                  <span className="flex-1">{item.label}</span>
+                  {item.value === filter && (
+                    <FiCheck size={14} className="text-foreground" />
+                  )}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
