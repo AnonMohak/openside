@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Mail, Plus, Trash2 } from "lucide-react";
 import { MdOutlineVideoLabel } from "react-icons/md";
 import { BsFillRecordCircleFill } from "react-icons/bs";
 import { useNavigate } from "react-router-dom";
@@ -19,6 +19,8 @@ interface CalendarEvent {
   joinCode: string;
   status: string;
   hostId: string;
+  /** Host's name when someone else scheduled this and invited you. */
+  invitedBy?: string;
   date: Date;
 }
 
@@ -90,10 +92,14 @@ const EventPill = ({
     <button
       type="button"
       onClick={onClick}
-      title={`${formatTime(event.date)} - ${event.title}`}
+      title={`${formatTime(event.date)} - ${event.title}${
+        event.invitedBy ? ` (invited by ${event.invitedBy})` : ""
+      }`}
       className={`flex w-full items-center gap-1.5 truncate rounded border px-1.5 py-2 text-left text-xs leading-tight transition-colors hover:bg-muted cursor-pointer ${statusStyles()}`}
     >
-      {event.status === "SCHEDULED" ? (
+      {event.invitedBy ? (
+        <Mail size={12} className="shrink-0 text-brand dark:text-blue-300" />
+      ) : event.status === "SCHEDULED" ? (
         <BsFillRecordCircleFill size={12} className="shrink-0 text-danger" />
       ) : (
         <MdOutlineVideoLabel size={13} className="shrink-0 opacity-70" />
@@ -157,6 +163,10 @@ const DashboardCalendarPage = () => {
         joinCode: space.joinCode,
         status: space.status,
         hostId: space.hostId,
+        invitedBy:
+          space.userRole === "INVITED"
+            ? (space.host?.name ?? "the host")
+            : undefined,
         date,
       };
       const key = dayKey(date);
@@ -195,7 +205,9 @@ const DashboardCalendarPage = () => {
         >
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-foreground">
-              {event.status === "SCHEDULED" ? (
+              {event.invitedBy ? (
+                <Mail size={16} className="text-brand dark:text-blue-300" />
+              ) : event.status === "SCHEDULED" ? (
                 <BsFillRecordCircleFill size={16} />
               ) : (
                 <MdOutlineVideoLabel size={18} />
@@ -213,13 +225,22 @@ const DashboardCalendarPage = () => {
                   hour: "numeric",
                   minute: "2-digit",
                 }).format(event.date)}
+                {event.invitedBy && ` · Invited by ${event.invitedBy}`}
               </p>
             </div>
           </div>
           <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${statusStyles()}`}
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${
+              event.invitedBy
+                ? "border-brand/30 bg-brand/15 text-brand dark:text-blue-300"
+                : statusStyles()
+            }`}
           >
-            {event.status === "SCHEDULED" ? "Upcoming" : "Recorded"}
+            {event.invitedBy
+              ? "Invited"
+              : event.status === "SCHEDULED"
+                ? "Upcoming"
+                : "Recorded"}
           </span>
         </button>
         {onDelete && (
@@ -288,6 +309,10 @@ const DashboardCalendarPage = () => {
         joinCode: space.joinCode,
         status: space.status,
         hostId: space.hostId,
+        invitedBy:
+          space.userRole === "INVITED"
+            ? (space.host?.name ?? "the host")
+            : undefined,
         date,
       };
     };

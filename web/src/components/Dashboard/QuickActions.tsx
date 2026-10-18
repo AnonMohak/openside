@@ -10,6 +10,7 @@ import ActionCard from "./ActionCard";
 import ScheduleModal from "./ScheduleModal";
 import { useNavigate } from "react-router-dom";
 import { useDeleteSpace, useGetUserSpaces } from "@/hooks/useSpace";
+import { useGetMe } from "@/hooks/useUserQuery";
 import { toast } from "@/lib/toast";
 import type { Space } from "@/types/spaceTypes";
 import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
@@ -59,7 +60,9 @@ const QuickActions = () => {
     day: "numeric",
   });
 
-  const { data: spaces = [], isLoading } = useGetUserSpaces("hosted");
+  // "all" also brings in scheduled sessions other hosts invited you to.
+  const { data: spaces = [], isLoading } = useGetUserSpaces("all");
+  const { data: me } = useGetMe();
   const now = Date.now();
   const upcoming = spaces
     .filter(
@@ -194,6 +197,7 @@ const QuickActions = () => {
             {upcoming.map((space) => {
               const date = new Date(space.scheduledFor!);
               const inviteeCount = space.invitees?.length ?? 0;
+              const isHost = !!me && space.hostId === me.id;
               return (
                 <div
                   key={space.id}
@@ -205,7 +209,11 @@ const QuickActions = () => {
                     className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-3 text-left cursor-pointer"
                   >
                     <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border/50 bg-muted leading-none">
-                      <span className="translate-y-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-red-500">
+                      <span
+                        className={`translate-y-0.5 text-[0.6rem] font-semibold uppercase tracking-wide ${
+                          isHost ? "text-red-500" : "text-brand"
+                        }`}
+                      >
                         {date.toLocaleDateString("en-US", { month: "short" })}
                       </span>
                       <span className="mt-px text-sm font-semibold tabular-nums text-foreground">
@@ -218,22 +226,38 @@ const QuickActions = () => {
                       </span>
                       <span className="block truncate text-xs text-fg-subtle">
                         {formatWhen(space.scheduledFor!)}
-                        {inviteeCount > 0 && ` · ${inviteeCount} invited`}
+                        {isHost
+                          ? inviteeCount > 0 && ` · ${inviteeCount} invited`
+                          : ` · Invited by ${space.host?.name ?? "the host"}`}
                       </span>
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium max-sm:hidden ${
+                        isHost
+                          ? "bg-muted text-fg-muted"
+                          : "bg-brand/15 text-brand dark:text-blue-300"
+                      }`}
+                    >
+                      {isHost ? "Hosting" : "Invited"}
                     </span>
                     <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs font-medium text-fg-muted">
                       {formatRelative(space.scheduledFor!)}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingDelete(space)}
-                    aria-label={`Delete ${space.title || "session"}`}
-                    title="Delete session"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-fg-subtle opacity-0 transition-all hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer max-md:opacity-100"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {isHost ? (
+                    <button
+                      type="button"
+                      onClick={() => setPendingDelete(space)}
+                      aria-label={`Delete ${space.title || "session"}`}
+                      title="Delete session"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-fg-subtle opacity-0 transition-all hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer max-md:opacity-100"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  ) : (
+                    // Keeps the chevron aligned with host rows.
+                    <span className="size-8 shrink-0" />
+                  )}
                   <ChevronRight size={16} className="shrink-0 text-fg-subtle" />
                 </div>
               );

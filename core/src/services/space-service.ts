@@ -892,8 +892,12 @@ export async function getUserSpaces(
 		}));
 	}
 
-	// All spaces (hosted + participated)
-	const [hostedSpaces, participatedSpaces] = await Promise.all([
+	// All spaces (hosted + participated + scheduled ones you're invited to)
+	const user = await prisma.user.findUnique({
+		where: { id: userId },
+		select: { email: true },
+	});
+	const [hostedSpaces, participatedSpaces, invitedSpaces] = await Promise.all([
 		prisma.space.findMany({
 			where: { hostId: userId },
 			select: userSpaceSelect,
@@ -913,6 +917,18 @@ export async function getUserSpaces(
 				},
 			},
 		}),
+		// Invitees are stored lowercased at schedule time. Only upcoming
+		// sessions - once it's run, it shows up via participation if they joined.
+		user
+			? prisma.space.findMany({
+					where: {
+						status: "SCHEDULED",
+						hostId: { not: userId },
+						invitees: { has: user.email.toLowerCase() },
+					},
+					select: userSpaceSelect,
+				})
+			: Promise.resolve([]),
 	]);
 
 	const hosted = hostedSpaces.map((s) => ({
@@ -926,8 +942,13 @@ export async function getUserSpaces(
 		participantJoinedAt: p.joinedAt,
 	}));
 
+	const seen = new Set([...hosted, ...participated].map((s) => s.id));
+	const invited = invitedSpaces
+		.filter((s) => !seen.has(s.id))
+		.map((s) => ({ ...s, userRole: "INVITED" as const }));
+
 	// Combine and sort by createdAt
-	return [...hosted, ...participated].sort(
+	return [...hosted, ...participated, ...invited].sort(
 		(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
 	);
 }
