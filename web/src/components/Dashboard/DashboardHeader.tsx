@@ -4,6 +4,7 @@ import { Heart, Star } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { GoSidebarCollapse, GoSidebarExpand } from "react-icons/go";
 import { FaGithub } from "react-icons/fa";
+import CommandMenu from "./CommandMenu";
 
 const GITHUB_REPO_URL = "https://github.com/rinkitadhana/openside";
 const GITHUB_REPO_API_URL =
@@ -62,6 +63,10 @@ const DashboardHeader = ({
           <GoSidebarCollapse size={20} />
         )}
       </button>
+
+      <div className="absolute left-1/2 -translate-x-1/2 max-md:static max-md:ml-auto max-md:mr-2 max-md:translate-x-0">
+        <CommandMenu />
+      </div>
 
       <div className="flex items-center gap-2">
         <a
