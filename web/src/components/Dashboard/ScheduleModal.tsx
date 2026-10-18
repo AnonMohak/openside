@@ -156,7 +156,7 @@ const ScheduleModal = ({ open, onClose }: ScheduleModalProps) => {
       />
       <div className="fixed left-1/2 top-1/2 z-[110] w-[min(520px,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2">
         <div
-          className={`rounded-2xl border border-border/50 bg-[#f9f9fb] shadow-2xl dark:bg-[#0f0f11] shadow-black/30 duration-150 ${
+          className={`rounded-2xl border border-border/50 bg-[#f9f9fb] dark:bg-[#0f0f11] duration-150 ${
             isClosing
               ? "animate-out fade-out-0 zoom-out-95"
               : "animate-in fade-in-0 zoom-in-95"

@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Mail, Plus, Trash2 } from "lucide-react";
-import { MdOutlineVideoLabel } from "react-icons/md";
-import { BsFillRecordCircleFill } from "react-icons/bs";
+import {
+  CalendarClock,
+  CalendarX,
+  ChevronLeft,
+  ChevronRight,
+  Mail,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import { RiMovie2Line } from "react-icons/ri";
 import { useNavigate } from "react-router-dom";
 import PageTitle from "@/components/shared/PageTitle";
 import ScheduleModal from "@/components/Dashboard/ScheduleModal";
@@ -78,6 +85,27 @@ const isRecordingSession = (space: Space): boolean =>
 
 const statusStyles = () => "border-border/50 bg-primary text-foreground";
 
+type EventKind = "upcoming" | "missed" | "invited" | "recorded";
+
+const eventKind = (event: CalendarEvent): EventKind => {
+  if (event.status !== "SCHEDULED") return "recorded";
+  // Scheduled but its time already passed without the host starting it.
+  if (event.date.getTime() < Date.now()) return "missed";
+  return event.invitedBy ? "invited" : "upcoming";
+};
+
+// One icon per kind so upcoming, missed, invited and recorded read apart.
+const EventIcon = ({ kind, size = 12 }: { kind: EventKind; size?: number }) =>
+  kind === "upcoming" ? (
+    <CalendarClock size={size} className="shrink-0 text-danger" />
+  ) : kind === "missed" ? (
+    <CalendarX size={size} className="shrink-0 text-fg-subtle" />
+  ) : kind === "invited" ? (
+    <Mail size={size} className="shrink-0 text-brand dark:text-blue-300" />
+  ) : (
+    <RiMovie2Line size={size + 1} className="shrink-0 opacity-70" />
+  );
+
 const EventPill = ({
   event,
   onClick,
@@ -95,15 +123,9 @@ const EventPill = ({
       title={`${formatTime(event.date)} - ${event.title}${
         event.invitedBy ? ` (invited by ${event.invitedBy})` : ""
       }`}
-      className={`flex w-full items-center gap-1.5 truncate rounded border px-1.5 py-2 text-left text-xs leading-tight transition-colors hover:bg-muted cursor-pointer ${statusStyles()}`}
+      className={`flex w-full items-center gap-1.5 truncate rounded-lg border px-2 py-2 text-left text-xs leading-tight transition-colors hover:bg-muted cursor-pointer ${statusStyles()}`}
     >
-      {event.invitedBy ? (
-        <Mail size={12} className="shrink-0 text-brand dark:text-blue-300" />
-      ) : event.status === "SCHEDULED" ? (
-        <BsFillRecordCircleFill size={12} className="shrink-0 text-danger" />
-      ) : (
-        <MdOutlineVideoLabel size={13} className="shrink-0 opacity-70" />
-      )}
+      <EventIcon kind={eventKind(event)} />
       <span className="shrink-0 font-normal tabular-nums opacity-60">
         {formatTime(event.date)}
       </span>
@@ -115,11 +137,20 @@ const EventPill = ({
         onClick={onDelete}
         aria-label={`Delete ${event.title}`}
         title="Delete session"
-        className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded bg-primary text-fg-subtle opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
+        className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md bg-primary text-fg-subtle opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
       >
         <Trash2 size={13} />
       </button>
     )}
+  </div>
+);
+
+const ListHeading = ({ label, count }: { label: string; count: number }) => (
+  <div className="flex items-center gap-2 px-1">
+    <h2 className="text-sm font-semibold text-foreground">{label}</h2>
+    <span className="rounded-full bg-muted px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted">
+      {count}
+    </span>
   </div>
 );
 
@@ -193,57 +224,73 @@ const DashboardCalendarPage = () => {
 
   const renderRow = (event: CalendarEvent) => {
     const onDelete = deleteHandler(event);
+    const isScheduled = event.status === "SCHEDULED";
+    // Scheduled but its time already passed without the host starting it.
+    const isMissed = isScheduled && event.date.getTime() < Date.now();
+    const isUpcoming = isScheduled && !isMissed;
+    const isInvited = !!event.invitedBy && !isMissed;
+    const time = new Intl.DateTimeFormat("en", {
+      weekday: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(event.date);
     return (
       <div
         key={event.id}
-        className="group flex items-center gap-2 rounded-lg border border-border bg-background pr-2 transition-colors hover:bg-muted"
+        className="group flex items-center gap-1 pr-2 transition-colors hover:bg-muted/50"
       >
         <button
           type="button"
           onClick={() => openEvent(event)}
-          className="flex min-w-0 flex-1 items-center justify-between gap-3 py-2 pl-3 text-left cursor-pointer"
+          className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-3 text-left cursor-pointer"
         >
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-foreground">
-              {event.invitedBy ? (
-                <Mail size={16} className="text-brand dark:text-blue-300" />
-              ) : event.status === "SCHEDULED" ? (
-                <BsFillRecordCircleFill size={16} />
-              ) : (
-                <MdOutlineVideoLabel size={18} />
-              )}
+          <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border/50 bg-muted leading-none">
+            <span
+              className={`translate-y-0.5 text-[0.6rem] font-semibold uppercase tracking-wide ${
+                isInvited
+                  ? "text-brand dark:text-blue-300"
+                  : isUpcoming
+                    ? "text-red-500"
+                    : "text-fg-subtle"
+              }`}
+            >
+              {event.date.toLocaleDateString("en-US", { month: "short" })}
             </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-foreground">
-                {event.title}
-              </p>
-              <p className="truncate text-xs text-foreground">
-                {new Intl.DateTimeFormat("en", {
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                }).format(event.date)}
+            <span className="mt-px text-sm font-semibold tabular-nums text-foreground">
+              {event.date.getDate()}
+            </span>
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-foreground">
+              {event.title}
+            </span>
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-fg-subtle">
+              <EventIcon kind={eventKind(event)} />
+              <span className="truncate">
+                {time}
                 {event.invitedBy && ` · Invited by ${event.invitedBy}`}
-              </p>
-            </div>
-          </div>
+              </span>
+            </span>
+          </span>
           <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${
-              event.invitedBy
-                ? "border-brand/30 bg-brand/15 text-brand dark:text-blue-300"
-                : statusStyles()
+            className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium ${
+              isInvited
+                ? "bg-brand/15 text-brand dark:text-blue-300"
+                : isUpcoming
+                  ? "bg-danger/10 text-danger"
+                  : "bg-muted text-fg-muted"
             }`}
           >
-            {event.invitedBy
-              ? "Invited"
-              : event.status === "SCHEDULED"
-                ? "Upcoming"
-                : "Recorded"}
+            {isMissed
+              ? "Missed"
+              : isInvited
+                ? "Invited"
+                : isUpcoming
+                  ? "Upcoming"
+                  : "Recorded"}
           </span>
         </button>
-        {onDelete && (
+        {onDelete ? (
           <button
             type="button"
             onClick={onDelete}
@@ -253,6 +300,9 @@ const DashboardCalendarPage = () => {
           >
             <Trash2 size={15} />
           </button>
+        ) : (
+          // Keeps badges aligned with deletable rows.
+          <span className="size-8 shrink-0" />
         )}
       </div>
     );
@@ -299,7 +349,7 @@ const DashboardCalendarPage = () => {
   // The list view shows two stacked sections: scheduled sessions under
   // "Upcoming", then everything that has actually recorded under "Recordings",
   // grouped by the month it happened in. Months with no recordings are skipped.
-  const { upcomingEvents, pastMonths } = useMemo(() => {
+  const { upcomingEvents, missedEvents, pastMonths } = useMemo(() => {
     const toEvent = (space: Space): CalendarEvent | null => {
       const date = eventDate(space);
       if (!date) return null;
@@ -317,12 +367,19 @@ const DashboardCalendarPage = () => {
       };
     };
 
-    // Upcoming = sessions that are still scheduled (planned recordings).
-    const upcoming = spaces
+    // Still-scheduled sessions: upcoming if their time hasn't come yet,
+    // missed if it passed without the host ever starting them.
+    const now = Date.now();
+    const scheduled = spaces
       .filter((space) => space.status === "SCHEDULED")
       .map(toEvent)
-      .filter((e): e is CalendarEvent => e !== null)
+      .filter((e): e is CalendarEvent => e !== null);
+    const upcoming = scheduled
+      .filter((event) => event.date.getTime() >= now)
       .sort((a, b) => a.date.getTime() - b.date.getTime());
+    const missed = scheduled
+      .filter((event) => event.date.getTime() < now)
+      .sort((a, b) => b.date.getTime() - a.date.getTime());
 
     // Recordings = sessions that produced a recording, regardless of date.
     const recordings = spaces
@@ -349,7 +406,11 @@ const DashboardCalendarPage = () => {
       }))
       .sort((a, b) => b.events[0].date.getTime() - a.events[0].date.getTime());
 
-    return { upcomingEvents: upcoming, pastMonths: months };
+    return {
+      upcomingEvents: upcoming,
+      missedEvents: missed,
+      pastMonths: months,
+    };
   }, [spaces]);
 
   return (
@@ -425,57 +486,75 @@ const DashboardCalendarPage = () => {
 
         {/* Views */}
         {view === "list" ? (
-          <div className="mx-4 flex min-h-0 flex-1 flex-col gap-6 overflow-auto pb-4">
+          <div className="mx-4 flex min-h-0 flex-1 flex-col gap-8 overflow-auto pb-6 pt-2">
             {isLoading ? (
-              <div className="flex flex-col gap-1.5">
+              <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="size-9 shrink-0 rounded-md bg-muted animate-pulse" />
-                      <div className="flex flex-col gap-1.5">
-                        <div className="h-3.5 w-32 rounded bg-muted animate-pulse" />
-                        <div className="h-3 w-24 rounded bg-muted animate-pulse" />
-                      </div>
+                  <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                    <div className="size-10 shrink-0 animate-pulse rounded-lg bg-muted" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3.5 w-40 animate-pulse rounded bg-muted" />
+                      <div className="h-3 w-24 animate-pulse rounded bg-muted" />
                     </div>
-                    <div className="h-5 w-16 shrink-0 rounded-full bg-muted animate-pulse" />
+                    <div className="h-6 w-16 shrink-0 animate-pulse rounded-md bg-muted" />
                   </div>
                 ))}
               </div>
-            ) : upcomingEvents.length === 0 && pastMonths.length === 0 ? (
-              <p className="px-1 py-8 text-center text-sm text-foreground">
-                No recording sessions yet.
-              </p>
+            ) : upcomingEvents.length === 0 &&
+              missedEvents.length === 0 &&
+              pastMonths.length === 0 ? (
+              <div className="flex h-40 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border/50 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No recording sessions yet
+                </p>
+                <p className="text-xs text-fg-subtle">
+                  Schedule one or start a recording to see it here.
+                </p>
+              </div>
             ) : (
               <>
                 {/* Upcoming */}
-                <section className="flex flex-col gap-1.5">
-                  <h2 className="px-1 text-sm font-semibold text-foreground">
-                    Upcoming
-                  </h2>
+                <section className="flex flex-col gap-3">
+                  <ListHeading label="Upcoming" count={upcomingEvents.length} />
                   {upcomingEvents.length === 0 ? (
-                    <p className="px-1 py-2 text-sm text-fg-subtle">
-                      No upcoming recording sessions.
-                    </p>
+                    <div className="flex h-20 items-center justify-center rounded-xl border border-dashed border-border/50 text-sm text-fg-subtle">
+                      No upcoming recording sessions
+                    </div>
                   ) : (
-                    upcomingEvents.map(renderRow)
+                    <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
+                      {upcomingEvents.map(renderRow)}
+                    </div>
                   )}
                 </section>
+
+                {/* Scheduled sessions whose time passed without starting */}
+                {missedEvents.length > 0 && (
+                  <section className="flex flex-col gap-3">
+                    <ListHeading label="Missed" count={missedEvents.length} />
+                    <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
+                      {missedEvents.map(renderRow)}
+                    </div>
+                  </section>
+                )}
 
                 {/* Past recordings, grouped by month */}
                 {pastMonths.length > 0 && (
                   <section className="flex flex-col gap-3">
-                    <h2 className="px-1 text-sm font-semibold text-foreground">
-                      Recordings
-                    </h2>
+                    <ListHeading
+                      label="Recordings"
+                      count={pastMonths.reduce(
+                        (total, month) => total + month.events.length,
+                        0
+                      )}
+                    />
                     {pastMonths.map((month) => (
-                      <div key={month.key} className="flex flex-col gap-1.5">
+                      <div key={month.key} className="flex flex-col gap-2">
                         <h3 className="px-1 text-xs font-medium text-fg-subtle">
                           {month.label}
                         </h3>
-                        {month.events.map(renderRow)}
+                        <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
+                          {month.events.map(renderRow)}
+                        </div>
                       </div>
                     ))}
                   </section>
