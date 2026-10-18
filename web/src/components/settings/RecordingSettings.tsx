@@ -52,18 +52,20 @@ const RecordingSettings = ({
   // In the call dialog sections sit flat (no card), like the other tabs.
   const cardClassName = isCall
     ? ""
-    : "rounded-lg border border-border bg-background p-5";
+    : "rounded-xl border border-border/50 bg-primary p-4";
   const headingClassName = isCall
     ? "text-sm font-semibold text-foreground"
-    : "text-base font-semibold text-foreground";
+    : "text-sm font-medium text-foreground";
   // Unselected option tiles: call surfaces in the dialog, page surfaces elsewhere.
-  const optionClassName = isCall ? "border-call-border" : "border-border";
+  const optionClassName = isCall
+    ? "border-call-border"
+    : "border-border/50 bg-background";
   const selectedOptionClassName = isCall
     ? "border-brand bg-brand/5 ring-1 ring-brand"
     : "border-brand ring-1 ring-brand";
   const descriptionClassName = isCall
     ? "mt-0.5 pr-10 text-xs leading-5 text-foreground/55"
-    : "mt-1 max-w-md text-sm text-fg-muted";
+    : "mt-0.5 max-w-md text-xs leading-5 text-fg-subtle";
   const { data: user, isLoading } = useGetMe();
   const { data: usage } = useUsage();
   const updateRecording = useUpdateRecordingSettings();
@@ -86,7 +88,7 @@ const RecordingSettings = ({
   }
 
   return (
-    <div className={cn("flex flex-col", isCall ? "gap-7" : "gap-6")}>
+    <div className={cn("flex flex-col", isCall ? "gap-7" : "gap-4")}>
       {note && (
         <p
           className={cn(

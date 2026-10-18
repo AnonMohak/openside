@@ -13,6 +13,7 @@ import {
   Check,
   CreditCard,
   Loader2,
+  Lock,
   Monitor,
   Moon,
   Palette,
@@ -93,14 +94,18 @@ const Avatar = ({
 
   return (
     <span
-      className="flex items-center justify-center overflow-hidden rounded-full bg-muted text-lg font-semibold text-foreground ring-2 ring-brand"
+      className="flex items-center justify-center overflow-hidden rounded-full bg-muted text-lg font-semibold text-foreground ring-1 ring-border/50"
       style={{
         width: size,
         height: size,
       }}
     >
       {src ? (
-        <img src={src} alt={name || "Avatar"} className="size-full object-cover" />
+        <img
+          src={src}
+          alt={name || "Avatar"}
+          className="size-full object-cover"
+        />
       ) : (
         <span>{initials}</span>
       )}
@@ -154,98 +159,130 @@ const ProfileSection = () => {
   };
 
   if (isLoading) {
-    return <div className="h-64 animate-pulse rounded-lg bg-muted" />;
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="h-28 animate-pulse rounded-xl bg-muted" />
+        <div className="h-40 animate-pulse rounded-xl bg-muted" />
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Profile</h2>
+        <p className="mt-0.5 text-sm text-fg-muted">
+          How you appear to others in calls and shared recordings.
+        </p>
+      </div>
+
       {/* Avatar */}
-      <div className="flex items-center gap-4">
-        <Avatar
-          src={user?.avatar}
-          name={user?.name}
-          size={72}
-        />
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border/50 bg-primary p-4">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploadAvatar.isPending}
+          aria-label="Change avatar"
+          className="group relative shrink-0 cursor-pointer rounded-full disabled:cursor-wait"
+        >
+          <Avatar src={user?.avatar} name={user?.name} size={64} />
+          <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100 group-disabled:opacity-100">
+            {uploadAvatar.isPending ? (
+              <Loader2 className="size-5 animate-spin" />
+            ) : (
+              <Upload className="size-5" />
+            )}
+          </span>
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-foreground">
+            {user?.name || "Your name"}
+          </p>
+          <p className="truncate text-xs text-fg-subtle">{user?.email}</p>
+          <p className="mt-1.5 text-xs text-fg-subtle">
+            PNG, JPEG, WebP, or GIF. Up to 5 MB.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {user?.avatar && (
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadAvatar.isPending}
-              className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              onClick={() =>
+                removeAvatar.mutate(undefined, {
+                  onError: () => toast.error("Couldn't remove your avatar."),
+                })
+              }
+              disabled={removeAvatar.isPending}
+              className="h-9 cursor-pointer rounded-lg bg-danger/10 px-3 text-sm font-medium text-danger transition-colors hover:bg-danger/15 disabled:opacity-50"
             >
-              {uploadAvatar.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Upload className="size-4" />
-              )}
-              {uploadAvatar.isPending ? "Uploading…" : "Change"}
+              Remove
             </button>
-            {user?.avatar && (
+          )}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadAvatar.isPending}
+            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-3 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+          >
+            {uploadAvatar.isPending ? "Uploading…" : "Upload new"}
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={onFilePicked}
+          className="hidden"
+        />
+      </div>
+
+      {/* Details */}
+      <div className="divide-y divide-border/50 rounded-xl border border-border/50 bg-primary">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Name</p>
+            <p className="mt-0.5 text-xs text-fg-subtle">
+              Shown on your calls and recordings.
+            </p>
+          </div>
+          <div className="flex gap-2 sm:w-80">
+            <input
+              type="text"
+              value={name}
+              maxLength={60}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") saveName();
+              }}
+              aria-label="Name"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border/50 bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-fg-faint"
+            />
+            {nameDirty && (
               <button
                 type="button"
-                onClick={() =>
-                  removeAvatar.mutate(undefined, {
-                    onError: () => toast.error("Couldn't remove your avatar."),
-                  })
-                }
-                disabled={removeAvatar.isPending}
-                className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                onClick={saveName}
+                disabled={updateProfile.isPending || !name.trim()}
+                className="h-9 cursor-pointer rounded-lg bg-brand px-3.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
-                Remove
+                Save
               </button>
             )}
           </div>
-          <p className="text-xs text-fg-subtle">
-            PNG, JPEG, WebP, or GIF. Up to 5 MB.
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={onFilePicked}
-            className="hidden"
-          />
+        </div>
+
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Email</p>
+            <p className="mt-0.5 text-xs text-fg-subtle">
+              Your sign-in email. It can't be changed here.
+            </p>
+          </div>
+          <div className="flex h-9 items-center gap-2 rounded-lg border border-border/50 bg-muted/50 px-3 text-sm text-fg-muted sm:w-80">
+            <Lock className="size-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{user?.email}</span>
+          </div>
         </div>
       </div>
-
-      {/* Name */}
-      <label className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium text-foreground">Name</span>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={name}
-            maxLength={60}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") saveName();
-            }}
-            className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-fg-faint"
-          />
-          {nameDirty && (
-            <button
-              type="button"
-              onClick={saveName}
-              disabled={updateProfile.isPending || !name.trim()}
-              className="cursor-pointer rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              Save
-            </button>
-          )}
-        </div>
-      </label>
-
-      {/* Email (read-only) */}
-      <label className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium text-foreground">Email</span>
-        <input
-          type="email"
-          value={user?.email ?? ""}
-          readOnly
-          className="cursor-not-allowed rounded-md border border-border bg-muted px-3 py-2 text-sm text-fg-muted outline-none"
-        />
-      </label>
     </div>
   );
 };
@@ -256,7 +293,7 @@ const ProfileSection = () => {
 const ThemePreview = ({ id }: { id: string }) => {
   if (id === "system") {
     return (
-      <div className="relative h-16 overflow-hidden rounded-md border border-border">
+      <div className="relative h-24 overflow-hidden rounded-md border border-border">
         <div className="absolute inset-0 flex">
           <div className="flex-1 bg-white" />
           <div className="flex-1 bg-neutral-900" />
@@ -273,8 +310,10 @@ const ThemePreview = ({ id }: { id: string }) => {
   return (
     <div
       className={cn(
-        "relative h-16 overflow-hidden rounded-md border",
-        dark ? "border-neutral-700 bg-neutral-900" : "border-neutral-200 bg-white",
+        "relative h-24 overflow-hidden rounded-md border",
+        dark
+          ? "border-neutral-700 bg-neutral-900"
+          : "border-neutral-200 bg-white",
       )}
     >
       <div
@@ -306,13 +345,17 @@ const AppearanceSection = () => {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Theme */}
-      <div className="rounded-lg border border-border bg-background p-5">
-        <h3 className="text-base font-semibold text-foreground">Theme</h3>
-        <p className="mt-1 max-w-md text-sm text-fg-muted">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Appearance</h2>
+        <p className="mt-0.5 text-sm text-fg-muted">
           Choose how Openside looks. System follows your device setting.
         </p>
-        <div className="mt-4 grid grid-cols-3 gap-3 sm:max-w-lg">
+      </div>
+
+      {/* Theme */}
+      <div className="rounded-xl border border-border/50 bg-primary p-4">
+        <p className="text-sm font-medium text-foreground">Theme</p>
+        <div className="mt-3 grid grid-cols-3 gap-3">
           {themeOptions.map(({ id, label, icon: Icon }) => {
             const selected = activeTheme === id;
             return (
@@ -322,10 +365,10 @@ const AppearanceSection = () => {
                 onClick={() => setTheme(id)}
                 aria-pressed={selected}
                 className={cn(
-                  "flex cursor-pointer flex-col gap-2.5 rounded-lg border p-2 text-left transition-colors",
+                  "flex cursor-pointer flex-col gap-2.5 rounded-lg border bg-background p-2 text-left transition-colors",
                   selected
                     ? "border-brand ring-1 ring-brand"
-                    : "border-border hover:border-fg-faint",
+                    : "border-border/50 hover:border-fg-faint",
                 )}
               >
                 <ThemePreview id={id} />
@@ -362,12 +405,36 @@ const SELFHOST_FIELDS: {
   placeholder: string;
   secret?: boolean;
 }[] = [
-  { key: "livekitUrl", label: "LiveKit URL", placeholder: "wss://your-app.livekit.cloud" },
-  { key: "livekitApiKey", label: "LiveKit API key", placeholder: "APIxxxxxxxx", secret: true },
-  { key: "livekitApiSecret", label: "LiveKit API secret", placeholder: "••••••••", secret: true },
+  {
+    key: "livekitUrl",
+    label: "LiveKit URL",
+    placeholder: "wss://your-app.livekit.cloud",
+  },
+  {
+    key: "livekitApiKey",
+    label: "LiveKit API key",
+    placeholder: "APIxxxxxxxx",
+    secret: true,
+  },
+  {
+    key: "livekitApiSecret",
+    label: "LiveKit API secret",
+    placeholder: "••••••••",
+    secret: true,
+  },
   { key: "r2AccountId", label: "R2 account ID", placeholder: "1a2b3c…" },
-  { key: "r2AccessKeyId", label: "R2 access key ID", placeholder: "••••••••", secret: true },
-  { key: "r2SecretAccessKey", label: "R2 secret access key", placeholder: "••••••••", secret: true },
+  {
+    key: "r2AccessKeyId",
+    label: "R2 access key ID",
+    placeholder: "••••••••",
+    secret: true,
+  },
+  {
+    key: "r2SecretAccessKey",
+    label: "R2 secret access key",
+    placeholder: "••••••••",
+    secret: true,
+  },
   { key: "r2Bucket", label: "R2 bucket", placeholder: "openside-recordings" },
 ];
 
@@ -405,7 +472,8 @@ const PlanBillingSection = () => {
       onSuccess: (url) => {
         window.location.href = url;
       },
-      onError: () => toast.error("Couldn't start checkout. Try again in a moment."),
+      onError: () =>
+        toast.error("Couldn't start checkout. Try again in a moment."),
     });
 
   const handlePortal = () =>
@@ -413,14 +481,17 @@ const PlanBillingSection = () => {
       onSuccess: (url) => {
         window.open(url, "_blank", "noopener,noreferrer");
       },
-      onError: () => toast.error("Couldn't open the billing portal. Try again."),
+      onError: () =>
+        toast.error("Couldn't open the billing portal. Try again."),
     });
 
   const handleSaveSelfHost = (event: FormEvent) => {
     event.preventDefault();
     saveSelfHost.mutate(form, {
       onSuccess: () => {
-        toast.success("Keys validated and saved - you're on the self-host plan.");
+        toast.success(
+          "Keys validated and saved - you're on the self-host plan.",
+        );
         setForm(EMPTY_SELFHOST);
         setShowForm(false);
       },
@@ -439,7 +510,7 @@ const PlanBillingSection = () => {
   if (usageLoading) {
     return (
       <div className="flex flex-col gap-6">
-        <div className="rounded-lg border border-border bg-background p-5">
+        <div className="rounded-xl border border-border/50 bg-primary p-4">
           <div className="flex flex-col gap-3">
             <div className="h-6 w-40 animate-pulse rounded bg-muted" />
             <div className="h-4 w-64 animate-pulse rounded bg-muted" />
@@ -452,12 +523,21 @@ const PlanBillingSection = () => {
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">
+          Plan & billing
+        </h2>
+        <p className="mt-0.5 text-sm text-fg-muted">
+          Your plan, usage, and how recordings are hosted.
+        </p>
+      </div>
+
       {/* Plan + usage */}
-      <div className="rounded-lg border border-border bg-background p-5">
+      <div className="rounded-xl border border-border/50 bg-primary p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-semibold text-foreground">Plan</h3>
+              <h3 className="text-sm font-medium text-foreground">Plan</h3>
               <span
                 className={cn(
                   "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1",
@@ -471,7 +551,7 @@ const PlanBillingSection = () => {
                 {PLAN_LABELS[plan]}
               </span>
             </div>
-            <p className="mt-1 max-w-md text-sm text-fg-muted">
+            <p className="mt-0.5 max-w-md text-xs leading-5 text-fg-subtle">
               {PLAN_NOTES[plan]}
             </p>
           </div>
@@ -481,7 +561,7 @@ const PlanBillingSection = () => {
                 type="button"
                 onClick={handleUpgrade}
                 disabled={checkout.isPending}
-                className="cursor-pointer rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {checkout.isPending ? "Opening…" : "Upgrade to Pro - $8.99/mo"}
               </button>
@@ -491,7 +571,7 @@ const PlanBillingSection = () => {
                 type="button"
                 onClick={handlePortal}
                 disabled={portal.isPending}
-                className="cursor-pointer rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                className="h-9 cursor-pointer rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
               >
                 {portal.isPending ? "Opening…" : "Manage billing"}
               </button>
@@ -503,7 +583,8 @@ const PlanBillingSection = () => {
           <div className="mt-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-fg-muted">
-                {formatDuration(usage.used)} of {formatDuration(usage.limit)} used
+                {formatDuration(usage.used)} of {formatDuration(usage.limit)}{" "}
+                used
               </span>
               <span
                 className={cn(
@@ -518,7 +599,7 @@ const PlanBillingSection = () => {
                 {formatDuration(usage.remaining ?? 0)} left
               </span>
             </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-background">
               <div
                 className={cn(
                   "h-full rounded-full transition-all",
@@ -548,135 +629,146 @@ const PlanBillingSection = () => {
 
       {/* Self-host - not offered to Pro subscribers (they're on our infra). */}
       {plan !== "pro" && (
-      <div className="rounded-lg border border-border bg-background p-5">
-        <h3 className="text-base font-semibold text-foreground">
-          Self-host (bring your own keys)
-        </h3>
-        <p className="mt-1 max-w-md text-sm text-fg-muted">
-          Run recordings on your own LiveKit and Cloudflare R2. Free and
-          unlimited - your keys, your bill. Keys are validated on save and stored
-          encrypted; they're never shown again.
-        </p>
+        <div className="rounded-xl border border-border/50 bg-primary p-4">
+          <h3 className="text-sm font-medium text-foreground">
+            Self-host (bring your own keys)
+          </h3>
+          <p className="mt-0.5 max-w-md text-xs leading-5 text-fg-subtle">
+            Run recordings on your own LiveKit and Cloudflare R2. Free and
+            unlimited - your keys, your bill. Keys are validated on save and
+            stored encrypted; they're never shown again.
+          </p>
 
-        {selfHostLoading ? (
-          <div className="mt-4 h-24 animate-pulse rounded-md bg-muted" />
-        ) : selfHost && !showForm ? (
-          <div className="mt-4 flex flex-col gap-3">
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              <div className="flex justify-between gap-2 sm:block">
-                <dt className="text-fg-subtle">LiveKit URL</dt>
-                <dd className="truncate font-mono text-foreground">
-                  {selfHost.livekitUrl}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2 sm:block">
-                <dt className="text-fg-subtle">LiveKit API key</dt>
-                <dd className="font-mono text-foreground">
-                  {selfHost.livekitApiKey}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2 sm:block">
-                <dt className="text-fg-subtle">R2 bucket</dt>
-                <dd className="truncate font-mono text-foreground">
-                  {selfHost.r2Bucket}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2 sm:block">
-                <dt className="text-fg-subtle">R2 access key</dt>
-                <dd className="font-mono text-foreground">
-                  {selfHost.r2AccessKeyId}
-                </dd>
-              </div>
-            </dl>
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1",
-                  selfHost.enabled
-                    ? "bg-success/10 text-success ring-success/30"
-                    : "bg-muted text-fg-muted ring-border",
-                )}
-              >
-                {selfHost.enabled ? "Active" : "Disabled"}
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  toggleSelfHost.mutate(!selfHost.enabled, {
-                    onError: () => toast.error("Couldn't update self-host settings."),
-                  })
-                }
-                disabled={toggleSelfHost.isPending}
-                className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                {selfHost.enabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(true)}
-                className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-              >
-                Replace keys
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  deleteSelfHost.mutate(undefined, {
-                    onSuccess: () => toast.success("Self-host config removed."),
-                    onError: () => toast.error("Couldn't remove self-host config."),
-                  })
-                }
-                disabled={deleteSelfHost.isPending}
-                className="cursor-pointer rounded-md border border-danger/30 px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSaveSelfHost} className="mt-4 flex flex-col gap-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {SELFHOST_FIELDS.map(({ key, label, placeholder, secret }) => (
-                <label key={key} className="flex flex-col gap-1 text-sm">
-                  <span className="text-fg-muted">{label}</span>
-                  <input
-                    type={secret ? "password" : "text"}
-                    value={form[key]}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, [key]: event.target.value }))
-                    }
-                    placeholder={placeholder}
-                    required
-                    autoComplete="off"
-                    className="rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground outline-none transition-colors focus:border-fg-faint"
-                  />
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={saveSelfHost.isPending}
-                className="cursor-pointer rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {saveSelfHost.isPending ? "Validating keys…" : "Validate & save"}
-              </button>
-              {selfHost && (
+          {selfHostLoading ? (
+            <div className="mt-4 h-24 animate-pulse rounded-lg bg-muted" />
+          ) : selfHost && !showForm ? (
+            <div className="mt-4 flex flex-col gap-3">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                <div className="flex justify-between gap-2 sm:block">
+                  <dt className="text-fg-subtle">LiveKit URL</dt>
+                  <dd className="truncate font-mono text-foreground">
+                    {selfHost.livekitUrl}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-2 sm:block">
+                  <dt className="text-fg-subtle">LiveKit API key</dt>
+                  <dd className="font-mono text-foreground">
+                    {selfHost.livekitApiKey}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-2 sm:block">
+                  <dt className="text-fg-subtle">R2 bucket</dt>
+                  <dd className="truncate font-mono text-foreground">
+                    {selfHost.r2Bucket}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-2 sm:block">
+                  <dt className="text-fg-subtle">R2 access key</dt>
+                  <dd className="font-mono text-foreground">
+                    {selfHost.r2AccessKeyId}
+                  </dd>
+                </div>
+              </dl>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={cn(
+                    "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1",
+                    selfHost.enabled
+                      ? "bg-success/10 text-success ring-success/30"
+                      : "bg-muted text-fg-muted ring-border",
+                  )}
+                >
+                  {selfHost.enabled ? "Active" : "Disabled"}
+                </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setForm(EMPTY_SELFHOST);
-                  }}
-                  className="cursor-pointer rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  onClick={() =>
+                    toggleSelfHost.mutate(!selfHost.enabled, {
+                      onError: () =>
+                        toast.error("Couldn't update self-host settings."),
+                    })
+                  }
+                  disabled={toggleSelfHost.isPending}
+                  className="h-8 cursor-pointer rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:opacity-50"
                 >
-                  Cancel
+                  {selfHost.enabled ? "Disable" : "Enable"}
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setShowForm(true)}
+                  className="h-8 cursor-pointer rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80"
+                >
+                  Replace keys
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    deleteSelfHost.mutate(undefined, {
+                      onSuccess: () =>
+                        toast.success("Self-host config removed."),
+                      onError: () =>
+                        toast.error("Couldn't remove self-host config."),
+                    })
+                  }
+                  disabled={deleteSelfHost.isPending}
+                  className="h-8 cursor-pointer rounded-lg bg-danger/10 px-3 text-xs font-medium text-danger transition-colors hover:bg-danger/15 disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
-          </form>
-        )}
-      </div>
+          ) : (
+            <form
+              onSubmit={handleSaveSelfHost}
+              className="mt-4 flex flex-col gap-3"
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {SELFHOST_FIELDS.map(({ key, label, placeholder, secret }) => (
+                  <label key={key} className="flex flex-col gap-1 text-sm">
+                    <span className="text-fg-muted">{label}</span>
+                    <input
+                      type={secret ? "password" : "text"}
+                      value={form[key]}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          [key]: event.target.value,
+                        }))
+                      }
+                      placeholder={placeholder}
+                      required
+                      autoComplete="off"
+                      className="h-9 rounded-lg border border-border/50 bg-background px-3 font-mono text-sm text-foreground outline-none transition-colors focus:border-fg-faint"
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={saveSelfHost.isPending}
+                  className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {saveSelfHost.isPending
+                    ? "Validating keys…"
+                    : "Validate & save"}
+                </button>
+                {selfHost && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      setForm(EMPTY_SELFHOST);
+                    }}
+                    className="h-9 cursor-pointer rounded-lg bg-muted px-4 text-sm font-medium text-foreground transition-opacity hover:opacity-80"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+        </div>
       )}
     </div>
   );
@@ -690,7 +782,7 @@ const DashboardSettingsPage = () => {
   const [section, setSection] = useState<SectionId>("profile");
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pt-6 md:pt-8">
       <div>
         <h1 className="text-xl font-semibold text-foreground">Settings</h1>
         <p className="text-sm text-fg-muted">
@@ -724,7 +816,19 @@ const DashboardSettingsPage = () => {
           {section === "profile" && <ProfileSection />}
           {section === "appearance" && <AppearanceSection />}
           {section === "billing" && <PlanBillingSection />}
-          {section === "recording" && <RecordingSettings />}
+          {section === "recording" && (
+            <div className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">
+                  Recording
+                </h2>
+                <p className="mt-0.5 text-sm text-fg-muted">
+                  How your recordings are captured. Applies to calls you host.
+                </p>
+              </div>
+              <RecordingSettings />
+            </div>
+          )}
         </div>
       </div>
     </div>
