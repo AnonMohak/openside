@@ -2,14 +2,17 @@
 import { useState } from "react";
 import generateRoomId from "@/utils/GenerateRoomId";
 import { createIntentKey } from "@/pages/RoomPage";
-import { CalendarDays, ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronRight, Trash2 } from "lucide-react";
 import { BsFillRecordCircleFill } from "react-icons/bs";
 import { RiMovie2Line } from "react-icons/ri";
 import { FiMonitor } from "react-icons/fi";
 import ActionCard from "./ActionCard";
 import ScheduleModal from "./ScheduleModal";
 import { useNavigate } from "react-router-dom";
-import { useGetUserSpaces } from "@/hooks/useSpace";
+import { useDeleteSpace, useGetUserSpaces } from "@/hooks/useSpace";
+import { toast } from "@/lib/toast";
+import type { Space } from "@/types/spaceTypes";
+import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
 
 const UpcomingSessionsSkeleton = () => (
   <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
@@ -29,6 +32,17 @@ const UpcomingSessionsSkeleton = () => (
 const QuickActions = () => {
   const navigate = useNavigate();
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Space | null>(null);
+  const deleteSpace = useDeleteSpace();
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    // Optimistic: the row disappears right away and comes back on failure.
+    deleteSpace.mutate(pendingDelete.id, {
+      onError: () => toast.error("Couldn't delete the session."),
+    });
+    setPendingDelete(null);
+  };
 
   const handleNewMeeting = () => {
     const roomId = generateRoomId();
@@ -181,34 +195,47 @@ const QuickActions = () => {
               const date = new Date(space.scheduledFor!);
               const inviteeCount = space.invitees?.length ?? 0;
               return (
-                <button
+                <div
                   key={space.id}
-                  type="button"
-                  onClick={() => navigate("/dashboard/calendar")}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 cursor-pointer"
+                  className="group flex items-center gap-1 pr-2 transition-colors hover:bg-muted/50"
                 >
-                  <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border/50 bg-muted leading-none">
-                    <span className="translate-y-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-red-500">
-                      {date.toLocaleDateString("en-US", { month: "short" })}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/dashboard/calendar")}
+                    className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-3 text-left cursor-pointer"
+                  >
+                    <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border/50 bg-muted leading-none">
+                      <span className="translate-y-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-red-500">
+                        {date.toLocaleDateString("en-US", { month: "short" })}
+                      </span>
+                      <span className="mt-px text-sm font-semibold tabular-nums text-foreground">
+                        {date.getDate()}
+                      </span>
                     </span>
-                    <span className="mt-px text-sm font-semibold tabular-nums text-foreground">
-                      {date.getDate()}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {space.title || "Untitled recording"}
+                      </span>
+                      <span className="block truncate text-xs text-fg-subtle">
+                        {formatWhen(space.scheduledFor!)}
+                        {inviteeCount > 0 && ` · ${inviteeCount} invited`}
+                      </span>
                     </span>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">
-                      {space.title || "Untitled recording"}
+                    <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs font-medium text-fg-muted">
+                      {formatRelative(space.scheduledFor!)}
                     </span>
-                    <span className="block truncate text-xs text-fg-subtle">
-                      {formatWhen(space.scheduledFor!)}
-                      {inviteeCount > 0 && ` · ${inviteeCount} invited`}
-                    </span>
-                  </span>
-                  <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs font-medium text-fg-muted">
-                    {formatRelative(space.scheduledFor!)}
-                  </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(space)}
+                    aria-label={`Delete ${space.title || "session"}`}
+                    title="Delete session"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-fg-subtle opacity-0 transition-all hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer max-md:opacity-100"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                   <ChevronRight size={16} className="shrink-0 text-fg-subtle" />
-                </button>
+                </div>
               );
             })}
           </div>
@@ -219,6 +246,16 @@ const QuickActions = () => {
         open={isScheduleOpen}
         onClose={() => setIsScheduleOpen(false)}
       />
+
+      {pendingDelete && (
+        <CallWarningDialog
+          title="Delete this session?"
+          description={`"${pendingDelete.title || "Untitled recording"}" will be removed from your schedule. This can't be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
     </div>
   );
 };

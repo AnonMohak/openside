@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { MdOutlineVideoLabel } from "react-icons/md";
 import { BsFillRecordCircleFill } from "react-icons/bs";
 import { useNavigate } from "react-router-dom";
 import PageTitle from "@/components/shared/PageTitle";
 import ScheduleModal from "@/components/Dashboard/ScheduleModal";
-import { useGetUserSpaces } from "@/hooks/useSpace";
+import { useDeleteSpace, useGetUserSpaces } from "@/hooks/useSpace";
+import { useGetMe } from "@/hooks/useUserQuery";
+import { toast } from "@/lib/toast";
+import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
 import type { Space } from "@/types/spaceTypes";
 
 type CalendarView = "month" | "week" | "list";
@@ -15,6 +18,7 @@ interface CalendarEvent {
   title: string;
   joinCode: string;
   status: string;
+  hostId: string;
   date: Date;
 }
 
@@ -70,32 +74,47 @@ const eventDate = (space: Space): Date | null => {
 const isRecordingSession = (space: Space): boolean =>
   (space._count?.recordingSessions ?? 0) > 0 || space.status === "SCHEDULED";
 
-const statusStyles = () =>
-  "border-border/50 bg-primary text-foreground";
+const statusStyles = () => "border-border/50 bg-primary text-foreground";
 
 const EventPill = ({
   event,
   onClick,
+  onDelete,
 }: {
   event: CalendarEvent;
   onClick: () => void;
+  /** Shown as a hover trash button; only for sessions the user can delete. */
+  onDelete?: () => void;
 }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    title={`${formatTime(event.date)} - ${event.title}`}
-    className={`flex w-full items-center gap-1.5 truncate rounded border px-1.5 py-2 text-left text-xs leading-tight transition-colors hover:bg-muted cursor-pointer ${statusStyles()}`}
-  >
-    {event.status === "SCHEDULED" ? (
-      <BsFillRecordCircleFill size={12} className="shrink-0 text-danger" />
-    ) : (
-      <MdOutlineVideoLabel size={13} className="shrink-0 opacity-70" />
+  <div className="group relative">
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${formatTime(event.date)} - ${event.title}`}
+      className={`flex w-full items-center gap-1.5 truncate rounded border px-1.5 py-2 text-left text-xs leading-tight transition-colors hover:bg-muted cursor-pointer ${statusStyles()}`}
+    >
+      {event.status === "SCHEDULED" ? (
+        <BsFillRecordCircleFill size={12} className="shrink-0 text-danger" />
+      ) : (
+        <MdOutlineVideoLabel size={13} className="shrink-0 opacity-70" />
+      )}
+      <span className="shrink-0 font-normal tabular-nums opacity-60">
+        {formatTime(event.date)}
+      </span>
+      <span className="truncate opacity-90">{event.title}</span>
+    </button>
+    {onDelete && (
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete ${event.title}`}
+        title="Delete session"
+        className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded bg-primary text-fg-subtle opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
+      >
+        <Trash2 size={13} />
+      </button>
     )}
-    <span className="shrink-0 font-normal tabular-nums opacity-60">
-      {formatTime(event.date)}
-    </span>
-    <span className="truncate opacity-90">{event.title}</span>
-  </button>
+  </div>
 );
 
 const DashboardCalendarPage = () => {
@@ -104,6 +123,25 @@ const DashboardCalendarPage = () => {
   const [view, setView] = useState<CalendarView>("month");
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const { data: spaces = [], isLoading } = useGetUserSpaces("all");
+  const { data: user } = useGetMe();
+  const deleteSpace = useDeleteSpace();
+  const [pendingDelete, setPendingDelete] = useState<CalendarEvent | null>(
+    null
+  );
+  // Only the host can delete, and only sessions that haven't happened yet.
+  const deleteHandler = (event: CalendarEvent) =>
+    event.status === "SCHEDULED" && !!user && event.hostId === user.id
+      ? () => setPendingDelete(event)
+      : undefined;
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    // Optimistic: the event disappears right away and comes back on failure.
+    deleteSpace.mutate(pendingDelete.id, {
+      onError: () => toast.error("Couldn't delete the session."),
+    });
+    setPendingDelete(null);
+  };
 
   const today = startOfDay(new Date());
 
@@ -118,6 +156,7 @@ const DashboardCalendarPage = () => {
         title: space.title || "Untitled recording",
         joinCode: space.joinCode,
         status: space.status,
+        hostId: space.hostId,
         date,
       };
       const key = dayKey(date);
@@ -142,43 +181,61 @@ const DashboardCalendarPage = () => {
     }
   };
 
-  const renderRow = (event: CalendarEvent) => (
-    <button
-      key={event.id}
-      type="button"
-      onClick={() => openEvent(event)}
-      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:bg-muted cursor-pointer"
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-foreground">
-          {event.status === "SCHEDULED" ? (
-            <BsFillRecordCircleFill size={16} />
-          ) : (
-            <MdOutlineVideoLabel size={18} />
-          )}
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">
-            {event.title}
-          </p>
-          <p className="truncate text-xs text-foreground">
-            {new Intl.DateTimeFormat("en", {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            }).format(event.date)}
-          </p>
-        </div>
-      </div>
-      <span
-        className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${statusStyles()}`}
+  const renderRow = (event: CalendarEvent) => {
+    const onDelete = deleteHandler(event);
+    return (
+      <div
+        key={event.id}
+        className="group flex items-center gap-2 rounded-lg border border-border bg-background pr-2 transition-colors hover:bg-muted"
       >
-        {event.status === "SCHEDULED" ? "Upcoming" : "Recorded"}
-      </span>
-    </button>
-  );
+        <button
+          type="button"
+          onClick={() => openEvent(event)}
+          className="flex min-w-0 flex-1 items-center justify-between gap-3 py-2 pl-3 text-left cursor-pointer"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-foreground">
+              {event.status === "SCHEDULED" ? (
+                <BsFillRecordCircleFill size={16} />
+              ) : (
+                <MdOutlineVideoLabel size={18} />
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                {event.title}
+              </p>
+              <p className="truncate text-xs text-foreground">
+                {new Intl.DateTimeFormat("en", {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                }).format(event.date)}
+              </p>
+            </div>
+          </div>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${statusStyles()}`}
+          >
+            {event.status === "SCHEDULED" ? "Upcoming" : "Recorded"}
+          </span>
+        </button>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Delete ${event.title}`}
+            title="Delete session"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-fg-subtle opacity-0 transition-all hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer max-md:opacity-100"
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const goPrev = () =>
     setFocusDate((current) =>
@@ -230,6 +287,7 @@ const DashboardCalendarPage = () => {
         title: space.title || "Untitled recording",
         joinCode: space.joinCode,
         status: space.status,
+        hostId: space.hostId,
         date,
       };
     };
@@ -432,93 +490,103 @@ const DashboardCalendarPage = () => {
                       : "minmax(0, 1fr)",
                 }}
               >
-              {isLoading
-                ? (view === "month" ? monthGrid : weekGrid).map((day, index) => {
-                    const isLastColumn = (index + 1) % 7 === 0;
-                    const totalCells = view === "month" ? monthGrid.length : 7;
-                    const isLastRow = index >= totalCells - 7;
-                    return (
-                      <div
-                        key={day.toISOString()}
-                        className={`flex min-h-0 flex-col gap-1.5 border-border/70 p-1.5 px-2.5 ${
-                          isLastColumn ? "" : "border-r"
-                        } ${isLastRow ? "" : "border-b"}`}
-                      >
-                        <div className="flex items-center px-0.5">
-                          <div className="size-8 rounded-full bg-muted animate-pulse" />
-                        </div>
-                        <div className="flex flex-1 flex-col gap-1">
-                          {index % 3 === 0 && (
-                            <div className="h-6 w-full rounded bg-muted animate-pulse" />
-                          )}
-                          {index % 5 === 0 && (
-                            <div className="h-6 w-4/5 rounded bg-muted animate-pulse" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                : (view === "month" ? monthGrid : weekGrid).map((day, index) => {
-                const inMonth =
-                  view === "week" || day.getMonth() === focusDate.getMonth();
-                const isToday = isSameDay(day, today);
-                // Past days are de-emphasised; today and future stay full opacity.
-                const isPast = day < today;
-                const dayEvents = eventsByDay.get(dayKey(day)) ?? [];
-                // Month cells are short, so they cap at 3 and spill into a
-                // "+N more". Week columns are full-height, so they list every
-                // recording and scroll internally if they run out of room.
-                const maxEvents = view === "week" ? Infinity : 3;
-                // Drop the right border on the last column and the bottom border
-                // on the last row so cell borders don't double up with the
-                // container's own border.
-                const isLastColumn = (index + 1) % 7 === 0;
-                const totalCells = view === "month" ? monthGrid.length : 7;
-                const isLastRow = index >= totalCells - 7;
+                {isLoading
+                  ? (view === "month" ? monthGrid : weekGrid).map(
+                      (day, index) => {
+                        const isLastColumn = (index + 1) % 7 === 0;
+                        const totalCells =
+                          view === "month" ? monthGrid.length : 7;
+                        const isLastRow = index >= totalCells - 7;
+                        return (
+                          <div
+                            key={day.toISOString()}
+                            className={`flex min-h-0 flex-col gap-1.5 border-border/70 p-1.5 px-2.5 ${
+                              isLastColumn ? "" : "border-r"
+                            } ${isLastRow ? "" : "border-b"}`}
+                          >
+                            <div className="flex items-center px-0.5">
+                              <div className="size-8 rounded-full bg-muted animate-pulse" />
+                            </div>
+                            <div className="flex flex-1 flex-col gap-1">
+                              {index % 3 === 0 && (
+                                <div className="h-6 w-full rounded bg-muted animate-pulse" />
+                              )}
+                              {index % 5 === 0 && (
+                                <div className="h-6 w-4/5 rounded bg-muted animate-pulse" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                    )
+                  : (view === "month" ? monthGrid : weekGrid).map(
+                      (day, index) => {
+                        const inMonth =
+                          view === "week" ||
+                          day.getMonth() === focusDate.getMonth();
+                        const isToday = isSameDay(day, today);
+                        // Past days are de-emphasised; today and future stay full opacity.
+                        const isPast = day < today;
+                        const dayEvents = eventsByDay.get(dayKey(day)) ?? [];
+                        // Month cells are short, so they cap at 3 and spill into a
+                        // "+N more". Week columns are full-height, so they list every
+                        // recording and scroll internally if they run out of room.
+                        const maxEvents = view === "week" ? Infinity : 3;
+                        // Drop the right border on the last column and the bottom border
+                        // on the last row so cell borders don't double up with the
+                        // container's own border.
+                        const isLastColumn = (index + 1) % 7 === 0;
+                        const totalCells =
+                          view === "month" ? monthGrid.length : 7;
+                        const isLastRow = index >= totalCells - 7;
 
-                return (
-                  <div
-                    key={day.toISOString()}
-                    className={`flex min-h-0 flex-col gap-1.5 border-border/70 p-1.5 px-2.5 ${
-                      isLastColumn ? "" : "border-r"
-                    } ${isLastRow ? "" : "border-b"} ${
-                      !isToday && !inMonth ? "bg-primary/30" : ""
-                    }`}
-                  >
-                    <div className="flex items-center justify-between px-0.5">
-                      <span
-                        className={`flex size-8 items-center justify-center rounded-full text-sm font-semibold ${
-                          isToday
-                            ? "bg-brand text-white"
-                            : inMonth
-                            ? "text-foreground"
-                            : "text-fg-muted"
-                        } ${isPast && !isToday ? "opacity-40" : ""}`}
-                      >
-                        {day.getDate()}
-                      </span>
-                    </div>
-                    <div
-                      className={`flex flex-1 flex-col gap-1 ${
-                        view === "week" ? "overflow-y-auto" : "overflow-hidden"
-                      }`}
-                    >
-                      {dayEvents.slice(0, maxEvents).map((event) => (
-                        <EventPill
-                          key={event.id}
-                          event={event}
-                          onClick={() => openEvent(event)}
-                        />
-                      ))}
-                      {dayEvents.length > maxEvents && (
-                        <span className="px-1 text-xs text-foreground">
-                          +{dayEvents.length - maxEvents} more
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                        return (
+                          <div
+                            key={day.toISOString()}
+                            className={`flex min-h-0 flex-col gap-1.5 border-border/70 p-1.5 px-2.5 ${
+                              isLastColumn ? "" : "border-r"
+                            } ${isLastRow ? "" : "border-b"} ${
+                              !isToday && !inMonth ? "bg-primary/30" : ""
+                            }`}
+                          >
+                            <div className="flex items-center justify-between px-0.5">
+                              <span
+                                className={`flex size-8 items-center justify-center rounded-full text-sm font-semibold ${
+                                  isToday
+                                    ? "bg-brand text-white"
+                                    : inMonth
+                                      ? "text-foreground"
+                                      : "text-fg-muted"
+                                } ${isPast && !isToday ? "opacity-40" : ""}`}
+                              >
+                                {day.getDate()}
+                              </span>
+                            </div>
+                            <div
+                              className={`flex flex-1 flex-col gap-1 ${
+                                view === "week"
+                                  ? "overflow-y-auto"
+                                  : "overflow-hidden"
+                              }`}
+                            >
+                              {dayEvents.slice(0, maxEvents).map((event) => (
+                                <EventPill
+                                  key={event.id}
+                                  event={event}
+                                  onClick={() => openEvent(event)}
+                                  onDelete={deleteHandler(event)}
+                                />
+                              ))}
+                              {dayEvents.length > maxEvents && (
+                                <span className="px-1 text-xs text-foreground">
+                                  +{dayEvents.length - maxEvents} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                    )}
               </div>
             </div>
           </div>
@@ -529,6 +597,16 @@ const DashboardCalendarPage = () => {
         open={isScheduleOpen}
         onClose={() => setIsScheduleOpen(false)}
       />
+
+      {pendingDelete && (
+        <CallWarningDialog
+          title="Delete this session?"
+          description={`"${pendingDelete.title}" will be removed from your schedule. This can't be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
     </>
   );
 };
