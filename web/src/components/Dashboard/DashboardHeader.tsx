@@ -49,7 +49,7 @@ const DashboardHeader = ({
   });
 
   return (
-    <header className="relative flex h-14 shrink-0 items-center justify-between border-b border-border bg-background pl-2 pr-4">
+    <header className="relative flex h-14 shrink-0 items-center justify-between border-b border-border pl-2 pr-4">
       <button
         type="button"
         title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}

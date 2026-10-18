@@ -71,13 +71,15 @@ const DashboardWrapper = ({ children, noPadding }: DashboardWrapperProps) => {
       ) : (
         <DashboardSidebar isOpen={isSidebarOpen} />
       )}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Content side sits on its own tone, between the sidebar's canvas and
+          the raised bg-primary cards, so the two halves read apart. */}
+      <div className="flex min-w-0 flex-1 flex-col bg-[#f9f9fb] dark:bg-[#0f0f11]">
         <DashboardHeader
           onToggleSidebar={toggleSidebar}
           isSidebarOpen={isMobile ? isMobileSidebarOpen : isSidebarOpen}
         />
         <main
-          className={`relative flex-1 overflow-auto scrollbar-hide bg-background ${
+          className={`relative flex-1 overflow-auto scrollbar-hide ${
             noPadding ? "" : "p-4"
           }`}
         >

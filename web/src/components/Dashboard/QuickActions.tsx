@@ -9,7 +9,6 @@ import { FiMonitor } from "react-icons/fi";
 import ActionCard from "./ActionCard";
 import ScheduleModal from "./ScheduleModal";
 import { useNavigate } from "react-router-dom";
-import { DASHBOARD_IMAGE } from "@/constants/assets";
 import { useGetUserSpaces } from "@/hooks/useSpace";
 
 const UpcomingSessionsSkeleton = () => (
@@ -44,8 +43,6 @@ const QuickActions = () => {
     sessionStorage.setItem(createIntentKey(roomId), "1");
     navigate(`/${roomId}`);
   };
-
-  const compositeImage = DASHBOARD_IMAGE;
 
   const todayLabel = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -83,7 +80,6 @@ const QuickActions = () => {
       title: "Record",
       description: "Start a new recording",
       icon: <BsFillRecordCircleFill size={18} />,
-      positionX: "0%",
       accentHex: "#dc2626", // red
       onClick: handleNewMeeting,
     },
@@ -92,9 +88,6 @@ const QuickActions = () => {
       title: "Schedule",
       description: "Plan for later",
       icon: <CalendarDays size={18} />,
-      positionX: "50%",
-      accentHex: "#16a34a", // green
-      primaryIcon: true,
       onClick: () => setIsScheduleOpen(true),
     },
     {
@@ -102,8 +95,6 @@ const QuickActions = () => {
       title: "Screen Recorder",
       description: "Capture your screen",
       icon: <FiMonitor size={18} />,
-      positionX: "75%",
-      accentHex: "#2563eb", // blue
       onClick: () => navigate("/dashboard/screen-recorder"),
       // Phone/tablet browsers can't capture the screen, so the card is
       // desktop-only.
@@ -114,9 +105,6 @@ const QuickActions = () => {
       title: "Recordings",
       description: "Browse your library",
       icon: <RiMovie2Line size={18} />,
-      positionX: "100%",
-      accentHex: "#7c3aed", // purple
-      primaryIcon: true,
       onClick: () => navigate("/dashboard/project"),
       // With the screen recorder hidden, phones show 3 cards - the last one
       // spans the row so the 2-column grid doesn't leave a hole.
@@ -133,10 +121,7 @@ const QuickActions = () => {
             title={action.title}
             description={action.description}
             icon={action.icon}
-            image={compositeImage}
-            positionX={action.positionX}
             accentHex={action.accentHex}
-            primaryIcon={action.primaryIcon}
             onClick={action.onClick}
             className={action.className}
           />

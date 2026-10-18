@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { Crown } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { useCreateCheckout, useUsage } from "@/hooks/useUsage";
 
@@ -24,14 +24,16 @@ const UpgradeBanner = () => {
     });
 
   return (
-    <div className="flex w-full items-center justify-between gap-3 border-b border-border bg-brand/10 px-4 py-2 md:px-6">
+    <div className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
       <div className="flex min-w-0 items-center gap-2.5">
-        <Sparkles size={16} className="shrink-0 text-brand" />
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-500">
+          <Crown size={14} className="fill-current" />
+        </span>
         <p className="min-w-0 truncate text-sm text-foreground">
-          <span className="font-medium">Subscribe to Pro</span>
-          <span className="text-fg-subtle">
+          <span className="font-semibold">Subscribe to Pro</span>
+          <span className="text-fg-muted max-sm:hidden">
             {" "}
-            - 20 hrs/mo, no watermark, 4K, cloud backup, and 30-day retention.
+            · 20 hrs/mo, no watermark, 4K, cloud backup, and 30-day retention
           </span>
         </p>
       </div>
@@ -40,7 +42,7 @@ const UpgradeBanner = () => {
         type="button"
         onClick={handleUpgrade}
         disabled={checkout.isPending}
-        className="shrink-0 rounded-md bg-brand px-3.5 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
+        className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-3 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-60"
       >
         {checkout.isPending ? "Starting..." : "Upgrade"}
       </button>
