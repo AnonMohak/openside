@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../middlewares/auth-middleware";
 import { findOrCreateUser } from "../services/auth-service";
+import { SELF_HOST_UNAVAILABLE } from "../services/infra-service";
 import {
 	getParticipantById,
 	getSpaceParticipants,
@@ -109,6 +110,15 @@ export async function joinSpaceController(
 				res
 					.status(410)
 					.json({ success: false, data: null, message: "Space has expired!" });
+				return;
+			}
+			if (error.message === SELF_HOST_UNAVAILABLE) {
+				res.status(409).json({
+					success: false,
+					data: { code: SELF_HOST_UNAVAILABLE },
+					message:
+						"This call ran on the host's own servers, which are no longer connected. Start a new call.",
+				});
 				return;
 			}
 			if (error.message === "LIVEKIT_NOT_CONFIGURED") {

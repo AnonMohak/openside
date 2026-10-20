@@ -180,6 +180,28 @@ async function credentialsForStamp(
 	return (await getStoredSelfHost(stamp.ownerId))?.credentials ?? null;
 }
 
+/**
+ * Thrown when something stamped self-hosted is used after its owner removed
+ * their keys. Fails closed: it must never fall back to platform infra, or a
+ * self-host call would keep running on our LiveKit/R2 unmetered and uncapped.
+ */
+export const SELF_HOST_UNAVAILABLE = "SELF_HOST_UNAVAILABLE";
+
+export function isSelfHostUnavailable(error: unknown): boolean {
+	return error instanceof Error && error.message === SELF_HOST_UNAVAILABLE;
+}
+
+/** Like credentialsForStamp, but throws instead of falling back to platform. */
+async function requireCredentialsForStamp(
+	stamp: Stamp,
+): Promise<SelfHostCredentials | null> {
+	const creds = await credentialsForStamp(stamp);
+	if (stamp.selfHosted === true && !creds) {
+		throw new Error(SELF_HOST_UNAVAILABLE);
+	}
+	return creds;
+}
+
 function buildS3Client(creds: SelfHostCredentials): S3Client {
 	const cacheKey = `${creds.r2AccountId}:${creds.r2AccessKeyId}:${creds.r2Bucket}`;
 	const existing = s3ClientCache.get(cacheKey);
@@ -287,7 +309,7 @@ export async function resolveLiveKitForSpace(
 	spaceId: string,
 ): Promise<LiveKitInfra> {
 	return liveKitFromCredentials(
-		await credentialsForStamp(await getSpaceStamp(spaceId)),
+		await requireCredentialsForStamp(await getSpaceStamp(spaceId)),
 	);
 }
 
@@ -308,7 +330,7 @@ export interface R2RawCredentials {
 export async function resolveR2CredentialsForSpace(
 	spaceId: string,
 ): Promise<R2RawCredentials> {
-	const creds = await credentialsForStamp(await getSpaceStamp(spaceId));
+	const creds = await requireCredentialsForStamp(await getSpaceStamp(spaceId));
 
 	if (creds) {
 		return {
@@ -361,15 +383,10 @@ async function getKeyStamp(key: string): Promise<Stamp> {
 
 /** Where a key's object is written (and, for stamped sessions, read from). */
 export async function resolveR2ForKey(key: string): Promise<R2Infra> {
-	const stamp = await getKeyStamp(key);
-	const creds = await credentialsForStamp(stamp);
-
 	// Never let a self-host session spill onto platform R2 once its keys are gone.
-	if (stamp.selfHosted === true && !creds) {
-		throw new Error("SELF_HOST_UNAVAILABLE");
-	}
-
-	return r2FromCredentials(creds);
+	return r2FromCredentials(
+		await requireCredentialsForStamp(await getKeyStamp(key)),
+	);
 }
 
 /**

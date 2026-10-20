@@ -6,6 +6,7 @@ import {
 	sendScheduledInvites,
 	sendSpaceInvite,
 } from "../services/email-service";
+import { SELF_HOST_UNAVAILABLE } from "../services/infra-service";
 import { toPublicParticipant } from "../services/participant-service";
 import {
 	activateScheduledSpace,
@@ -158,6 +159,15 @@ export async function createSpaceController(
 				success: false,
 				data: null,
 				message: "A space with this join code already exists!",
+			});
+			return;
+		}
+		if (error instanceof Error && error.message === SELF_HOST_UNAVAILABLE) {
+			res.status(409).json({
+				success: false,
+				data: { code: SELF_HOST_UNAVAILABLE },
+				message:
+					"This call ran on the host's own servers, which are no longer connected. Start a new call.",
 			});
 			return;
 		}
@@ -418,6 +428,15 @@ export async function activateSpaceController(
 				});
 				return;
 			}
+			if (error.message === SELF_HOST_UNAVAILABLE) {
+				res.status(409).json({
+					success: false,
+					data: { code: SELF_HOST_UNAVAILABLE },
+					message:
+						"This call ran on the host's own servers, which are no longer connected. Start a new call.",
+				});
+				return;
+			}
 			if (error.message === "LIVEKIT_NOT_CONFIGURED") {
 				res.status(503).json({
 					success: false,
@@ -628,6 +647,15 @@ export async function endSpaceController(
 					success: false,
 					data: null,
 					message: "Space is not currently live!",
+				});
+				return;
+			}
+			if (error.message === SELF_HOST_UNAVAILABLE) {
+				res.status(409).json({
+					success: false,
+					data: { code: SELF_HOST_UNAVAILABLE },
+					message:
+						"This call ran on the host's own servers, which are no longer connected. Start a new call.",
 				});
 				return;
 			}

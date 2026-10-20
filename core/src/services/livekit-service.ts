@@ -8,6 +8,7 @@ import {
 } from "livekit-server-sdk";
 import {
 	type LiveKitInfra,
+	isSelfHostUnavailable,
 	resolveLiveKitForRoom,
 	resolveLiveKitForSpace,
 } from "./infra-service.ts";
@@ -180,12 +181,28 @@ export async function createLiveKitRoom(input: {
 	}
 }
 
+/**
+ * Room client for cleanup/management calls, or null when the room was
+ * self-hosted and its owner has since removed their keys - we can no longer
+ * reach that LiveKit, so there's nothing to manage and ending/leaving the
+ * space must still succeed.
+ */
+async function getManagedRoomClient(
+	roomName: string,
+): Promise<RoomServiceClient | null> {
+	try {
+		return getRoomServiceClient(await resolveLiveKitForRoom(roomName));
+	} catch (error) {
+		if (isSelfHostUnavailable(error)) return null;
+		throw error;
+	}
+}
+
 export async function deleteLiveKitRoom(roomName: string | null | undefined) {
 	if (!roomName) return;
 
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(roomName),
-	);
+	const roomClient = await getManagedRoomClient(roomName);
+	if (!roomClient) return;
 
 	try {
 		await roomClient.deleteRoom(roomName);
@@ -207,9 +224,8 @@ export async function removeLiveKitParticipant(input: {
 }) {
 	if (!input.roomName || !input.identity) return;
 
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(input.roomName),
-	);
+	const roomClient = await getManagedRoomClient(input.roomName);
+	if (!roomClient) return;
 
 	try {
 		await roomClient.removeParticipant(input.roomName, input.identity);
@@ -232,9 +248,8 @@ export async function updateLiveKitParticipantAttributes(input: {
 }) {
 	if (!input.roomName || !input.identity) return;
 
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(input.roomName),
-	);
+	const roomClient = await getManagedRoomClient(input.roomName);
+	if (!roomClient) return;
 
 	try {
 		await roomClient.updateParticipant(input.roomName, input.identity, {
@@ -259,9 +274,8 @@ export async function updateLiveKitParticipantName(input: {
 }) {
 	if (!input.roomName || !input.identity) return;
 
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(input.roomName),
-	);
+	const roomClient = await getManagedRoomClient(input.roomName);
+	if (!roomClient) return;
 
 	try {
 		await roomClient.updateParticipant(input.roomName, input.identity, {
@@ -287,9 +301,8 @@ export async function muteLiveKitParticipantTrack(input: {
 }) {
 	if (!input.roomName || !input.identity) return;
 
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(input.roomName),
-	);
+	const roomClient = await getManagedRoomClient(input.roomName);
+	if (!roomClient) return;
 
 	try {
 		const participant = await roomClient.getParticipant(
@@ -322,9 +335,9 @@ export async function muteLiveKitParticipantTrack(input: {
 
 /** Whether a room currently exists - checked on the room's own LiveKit. */
 export async function liveKitRoomExists(roomName: string): Promise<boolean> {
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(roomName),
-	);
+	// Keys removed -> report the room gone so the reconcile sweep ends the space.
+	const roomClient = await getManagedRoomClient(roomName);
+	if (!roomClient) return false;
 	const rooms = await roomClient.listRooms([roomName]);
 	return rooms.length > 0;
 }
@@ -332,9 +345,8 @@ export async function liveKitRoomExists(roomName: string): Promise<boolean> {
 export async function listLiveKitParticipantIdentities(
 	roomName: string,
 ): Promise<Set<string>> {
-	const roomClient = getRoomServiceClient(
-		await resolveLiveKitForRoom(roomName),
-	);
+	const roomClient = await getManagedRoomClient(roomName);
+	if (!roomClient) return new Set();
 
 	try {
 		const participants = await roomClient.listParticipants(roomName);
