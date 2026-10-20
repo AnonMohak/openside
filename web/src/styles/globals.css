@@ -1,7 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@100;200;300;400;500;600;700;800;900&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -95,45 +92,20 @@
 
   /* Legacy aliases - every old token collapses into one of the seven */
   --color-primary-text: var(--background);
-  --color-primary-foreground: var(--background);
   --color-primary-hover: var(--muted);
   --color-primary-border: var(--border);
-  --color-primary-shadow: var(--muted);
   --color-secondary: var(--background);
   --color-secondary-text: var(--foreground);
-  --color-secondary-foreground: var(--foreground);
-  --color-secondary-hover: var(--muted);
-  --color-secondary-border: var(--border);
-  --color-secondary-shadow: var(--foreground);
-  --color-auth-border: var(--border);
   --color-call-border: var(--border);
   --color-call-background: var(--background);
   --color-call-primary: var(--muted);
-  --color-selection-background: var(--foreground);
-  --color-selection-text: var(--background);
-  --color-card: var(--background);
-  --color-card-foreground: var(--foreground);
   --color-popover: var(--background);
   --color-popover-foreground: var(--foreground);
   --color-muted-foreground: var(--color-fg-muted);
   --color-accent: var(--muted);
-  --color-accent-foreground: var(--foreground);
   --color-destructive: var(--danger);
   --color-input: var(--border);
   --color-ring: var(--brand);
-  --color-chart-1: var(--brand);
-  --color-chart-2: var(--brand);
-  --color-chart-3: var(--brand);
-  --color-chart-4: var(--brand);
-  --color-chart-5: var(--brand);
-  --color-sidebar: var(--background);
-  --color-sidebar-foreground: var(--foreground);
-  --color-sidebar-primary: var(--primary);
-  --color-sidebar-primary-foreground: var(--background);
-  --color-sidebar-accent: var(--muted);
-  --color-sidebar-accent-foreground: var(--foreground);
-  --color-sidebar-border: var(--border);
-  --color-sidebar-ring: var(--border);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -185,21 +157,6 @@ html {
   scroll-behavior: smooth;
 }
 
-.btn {
-  @apply select-none px-3.5 py-2.5 border border-foreground shadow-inner shadow-secondary/40  cursor-pointer rounded-[14px] hover:bg-primary/80 duration-200 bg-primary/95 text-primary-text inline-flex items-center justify-center whitespace-nowrap  transition-all;
-}
-.btn-secondary {
-  @apply select-none px-3.5 py-2.5 cursor-pointer rounded-[14px] hover:bg-secondary-hover duration-200 bg-background border border-primary-border inline-flex items-center justify-center whitespace-nowrap  transition-all;
-}
-
-.font-poppins {
-  font-family: "Poppins", sans-serif;
-}
-
-.font-instrument-serif {
-  font-family: "Instrument Serif", serif;
-}
-
 .font-bricolage {
   font-family: "Bricolage Grotesque", sans-serif;
 }
@@ -241,16 +198,6 @@ html {
     transparent
   );
   animation: shimmer 1.5s infinite;
-}
-
-.sin-screen {
-  @apply flex items-center justify-center  w-[300px] mx-auto;
-}
-.trans-btn {
-  @apply select-none border px-3 py-2 cursor-pointer hover:bg-secondary-hover transition duration-200 border-auth-border rounded-[14px];
-}
-.trans-btn-n {
-  @apply select-none border px-3 py-2 cursor-not-allowed  border-auth-border/50 text-foreground/50 rounded-[14px];
 }
 
 /* Hide scrollbar utility */
