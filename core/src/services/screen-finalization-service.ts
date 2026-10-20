@@ -713,6 +713,24 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 			`[ScreenFinalize] Session ${sessionId} ready.`,
 			Object.keys(outputs),
 		);
+
+		// Without a composite, the screen/camera masters ARE the outputs, so their
+		// raw chunks are now dead weight. A READY session is never re-stitched;
+		// only fully uploaded tracks are dropped, mirroring the Space finalizer.
+		// (The "both" path above already deleted its chunks.)
+		if (!outputs.both) {
+			const chunkKeys = [recByRole.screen, recByRole.camera]
+				.filter((rec) => rec?.isComplete)
+				.flatMap((rec) => rec?.segments.map((s) => s.assetKey) ?? []);
+			if (chunkKeys.length > 0) {
+				await deleteObjects(chunkKeys).catch((error) => {
+					console.error(
+						`[ScreenFinalize] failed to delete chunk objects for ${sessionId} (outputs are safe, leaving chunks):`,
+						error,
+					);
+				});
+			}
+		}
 	} catch (error) {
 		const message = errorMessage(error);
 		console.error(`[ScreenFinalize] Session ${sessionId} failed:`, error);
