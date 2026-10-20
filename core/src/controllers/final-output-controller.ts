@@ -204,5 +204,3 @@ export async function getFinalOutputsBySpaceIdController(
 		});
 	}
 }
-
-// Rendition Controllers

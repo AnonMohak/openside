@@ -30,9 +30,6 @@ export async function getFinalOutputById(outputId: string) {
 					participantId: true,
 				},
 			},
-			renditions: {
-				orderBy: { width: "desc" },
-			},
 		},
 	});
 
@@ -77,19 +74,9 @@ export async function getFinalOutputsBySpaceId(spaceId: string) {
 					},
 				},
 			},
-			renditions: {
-				select: {
-					id: true,
-					width: true,
-					height: true,
-					status: true,
-				},
-			},
 		},
 		orderBy: { createdAt: "desc" },
 	});
 
 	return outputs;
 }
-
-// Rendition Operations

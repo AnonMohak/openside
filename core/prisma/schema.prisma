@@ -122,7 +122,6 @@ model Space {
   expiresAt           DateTime?
   endedReason         String?
   duration            Int? // milliseconds
-  totalRecordingHours Float?
   // Which infra the room runs on: true = host's own LiveKit + R2 (self-host),
   // false = platform. Stamped when the room goes live so the host flipping their
   // self-host switch mid-call can't move it. Null = legacy (follows the host's
@@ -303,8 +302,6 @@ model ParticipantRecording {
   hasVideo   Boolean @default(false)
 
   //quality (for UI)
-  videoQuality VideoQuality?
-  audioQuality AudioQuality?
   videoLabel   String? // "1080p • 30fps • 4.8 Mbps"
   audioLabel   String? // "48 kHz • Stereo • 192 kbps"
 
@@ -422,8 +419,6 @@ model FinalOutput {
   hasVideo   Boolean? // true if master contains video
 
   // derived convenience fields (set by worker when master ready)
-  videoQuality VideoQuality? // enum (P360..P2160)
-  audioQuality AudioQuality? // enum (SR_22050..SR_96000)
   videoLabel   String? // "1080p • 30fps • 4.8 Mbps"
   audioLabel   String? // "48 kHz • Stereo • 192 kbps"
 
@@ -446,8 +441,6 @@ model FinalOutput {
   errorMessage    String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
-
-  renditions FinalOutputRendition[]
 
   @@index([recordingSessionId])
   @@index([spaceId])
@@ -477,49 +470,4 @@ enum OutputStatus {
   PROCESSING
   READY
   FAILED
-}
-
-/// Cached / generated renditions (different resolutions / bitrates)
-model FinalOutputRendition {
-  id            String      @id @default(cuid())
-  finalOutputId String
-  finalOutput   FinalOutput @relation(fields: [finalOutputId], references: [id])
-
-  // rendition properties
-  width     Int?
-  height    Int?
-  bitrate   Int? // bits per second
-  codec     String?
-  container String?
-  assetKey  String? // s3 key for this rendition
-  sizeBytes BigInt?
-  status    RenditionStatus @default(GENERATING)
-  jobId     String? // worker job id
-  createdAt DateTime        @default(now())
-
-  @@unique([finalOutputId, width, height])
-  @@index([finalOutputId, width, height])
-  @@index([assetKey])
-}
-
-enum RenditionStatus {
-  READY
-  GENERATING
-  FAILED
-}
-
-enum VideoQuality {
-  P360
-  P480
-  P720
-  P1080
-  P1440
-  P2160 // 4K
-}
-
-enum AudioQuality {
-  SR_22050
-  SR_44100
-  SR_48000
-  SR_96000
 }

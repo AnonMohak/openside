@@ -13,14 +13,6 @@ export type RecordingFileStatus =
   | "READY"
   | "FAILED";
 type SegmentStatus = "UPLOADED" | "PROCESSING" | "PROCESSED" | "FAILED";
-export type VideoQuality =
-  | "P360"
-  | "P480"
-  | "P720"
-  | "P1080"
-  | "P1440"
-  | "P2160";
-export type AudioQuality = "SR_22050" | "SR_44100" | "SR_48000" | "SR_96000";
 
 // RecordingSession
 export interface RecordingSession {
@@ -67,8 +59,6 @@ export interface ParticipantRecording {
   channels?: number;
   hasAudio: boolean;
   hasVideo: boolean;
-  videoQuality?: VideoQuality;
-  audioQuality?: AudioQuality;
   videoLabel?: string;
   audioLabel?: string;
   startOffsetMs?: number;

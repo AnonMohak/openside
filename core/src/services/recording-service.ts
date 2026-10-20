@@ -125,9 +125,6 @@ function observedExpectedSegments(
 
 async function deleteSessionRows(sessionId: string) {
 	await prisma.$transaction([
-		prisma.finalOutputRendition.deleteMany({
-			where: { finalOutput: { recordingSessionId: sessionId } },
-		}),
 		prisma.finalOutput.deleteMany({ where: { recordingSessionId: sessionId } }),
 		prisma.recordingSegment.deleteMany({
 			where: { participantRecording: { recordingSessionId: sessionId } },
@@ -144,9 +141,9 @@ async function deleteSessionRows(sessionId: string) {
 
 /**
  * Delete a recording session, its DB rows, and every stored object it owns -
- * segments, merged files, thumbnails, final outputs, renditions, screen
- * outputs. No ownership check: callers (user-facing deletes do their own,
- * retention sweep is system-initiated) are responsible for authorization.
+ * segments, merged files, thumbnails, final outputs, screen outputs. No
+ * ownership check: callers (user-facing deletes do their own, retention sweep
+ * is system-initiated) are responsible for authorization.
  */
 export async function purgeRecordingSessionCascade(
 	sessionId: string,
@@ -168,7 +165,6 @@ export async function purgeRecordingSessionCascade(
 					masterKey: true,
 					audioWavKey: true,
 					thumbnailKey: true,
-					renditions: { select: { assetKey: true } },
 				},
 			},
 		},
@@ -187,7 +183,6 @@ export async function purgeRecordingSessionCascade(
 		addKey(keys, output.masterKey);
 		addKey(keys, output.audioWavKey);
 		addKey(keys, output.thumbnailKey);
-		for (const rendition of output.renditions) addKey(keys, rendition.assetKey);
 	}
 
 	await deleteSessionRows(sessionId);
@@ -1359,7 +1354,6 @@ export async function deleteSpaceRecordingSession(
 					masterKey: true,
 					audioWavKey: true,
 					thumbnailKey: true,
-					renditions: { select: { assetKey: true } },
 				},
 			},
 		},
@@ -1382,7 +1376,6 @@ export async function deleteSpaceRecordingSession(
 		addKey(keys, output.masterKey);
 		addKey(keys, output.audioWavKey);
 		addKey(keys, output.thumbnailKey);
-		for (const rendition of output.renditions) addKey(keys, rendition.assetKey);
 	}
 
 	await deleteSessionRows(sessionId);
@@ -2236,7 +2229,6 @@ export async function deleteScreenRecordingSession(
 					masterKey: true,
 					audioWavKey: true,
 					thumbnailKey: true,
-					renditions: { select: { assetKey: true } },
 				},
 			},
 		},
@@ -2260,7 +2252,6 @@ export async function deleteScreenRecordingSession(
 		addKey(keys, output.masterKey);
 		addKey(keys, output.audioWavKey);
 		addKey(keys, output.thumbnailKey);
-		for (const rendition of output.renditions) addKey(keys, rendition.assetKey);
 	}
 
 	await deleteSessionRows(sessionId);

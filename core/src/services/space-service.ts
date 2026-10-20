@@ -475,7 +475,6 @@ export async function deleteSpace(
 						select: {
 							masterKey: true,
 							thumbnailKey: true,
-							renditions: { select: { assetKey: true } },
 						},
 					},
 				},
@@ -502,14 +501,10 @@ export async function deleteSpace(
 		for (const output of session.finalOutputs) {
 			addKey(output.masterKey);
 			addKey(output.thumbnailKey);
-			for (const rendition of output.renditions) addKey(rendition.assetKey);
 		}
 	}
 
 	await prisma.$transaction([
-		prisma.finalOutputRendition.deleteMany({
-			where: { finalOutput: { spaceId } },
-		}),
 		prisma.finalOutput.deleteMany({ where: { spaceId } }),
 		prisma.recordingSegment.deleteMany({ where: { spaceId } }),
 		prisma.participantRecording.deleteMany({
