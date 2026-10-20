@@ -232,7 +232,7 @@ const ProfileSection = () => {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploadAvatar.isPending}
-            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-3 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 disabled:opacity-50"
           >
             {uploadAvatar.isPending ? "Uploading…" : "Upload new"}
           </button>
