@@ -172,28 +172,6 @@ export interface CreateParticipantRecordingPayload {
   startOffsetMs?: number;
 }
 
-export interface UpdateParticipantRecordingPayload {
-  participantSessionId?: string;
-  spaceId?: string;
-  container?: string;
-  codec?: string;
-  width?: number;
-  height?: number;
-  fps?: number;
-  bitrate?: number;
-  sampleRate?: number;
-  channels?: number;
-  hasAudio?: boolean;
-  hasVideo?: boolean;
-  videoQuality?: VideoQuality;
-  audioQuality?: AudioQuality;
-  videoLabel?: string;
-  audioLabel?: string;
-  startOffsetMs?: number;
-  durationMs?: number;
-  expectedSegments?: number;
-}
-
 export interface MarkRecordingCompletePayload {
   expectedSegments: number;
   participantSessionId?: string;
@@ -279,27 +257,6 @@ export interface CreateParticipantRecordingResponse {
   message: string;
 }
 
-export interface UpdateParticipantRecordingResponse {
-  success: boolean;
-  data: ParticipantRecording;
-  message: string;
-}
-
-export interface GetParticipantRecordingResponse {
-  success: boolean;
-  data: ParticipantRecording;
-  message: string;
-}
-
-export interface GetRecordingsListResponse {
-  success: boolean;
-  data: {
-    recordings: ParticipantRecording[];
-    count: number;
-  };
-  message: string;
-}
-
 export interface MarkRecordingCompleteResponse {
   success: boolean;
   data: ParticipantRecording;
@@ -309,14 +266,5 @@ export interface MarkRecordingCompleteResponse {
 export interface CreateSegmentResponse {
   success: boolean;
   data: RecordingSegment;
-  message: string;
-}
-
-export interface GetSegmentsListResponse {
-  success: boolean;
-  data: {
-    segments: RecordingSegment[];
-    count: number;
-  };
   message: string;
 }

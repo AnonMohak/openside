@@ -16,25 +16,6 @@ export interface JoinSpaceResponse {
   message: string;
 }
 
-export interface LeaveSpacePayload {
-  participantSessionId: string;
-}
-
-export interface LeaveSpaceResponse {
-  success: boolean;
-  data: Participant;
-  message: string;
-}
-
-export interface ParticipantsListResponse {
-  success: boolean;
-  data: {
-    participants: Participant[];
-    count: number;
-  };
-  message: string;
-}
-
 export interface UpdateRolePayload {
   role: "CO_HOST" | "GUEST";
 }

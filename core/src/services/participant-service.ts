@@ -25,12 +25,6 @@ interface JoinSpaceData {
 	isGuest: boolean;
 }
 
-interface LeaveSpaceData {
-	spaceId: string;
-	participantSessionId?: string;
-	userId?: string;
-}
-
 export async function getSpaceIfLive(spaceId: string) {
 	const space = await prisma.space.findUnique({
 		where: { id: spaceId },
@@ -288,80 +282,6 @@ export async function renameSelf(data: {
 	});
 
 	return updatedParticipant;
-}
-
-export async function leaveSpace(data: LeaveSpaceData) {
-	const { spaceId, participantSessionId, userId } = data;
-
-	// Find participant
-	const participant = await findExistingParticipant(
-		spaceId,
-		userId,
-		participantSessionId,
-	);
-
-	if (!participant) {
-		throw new Error("PARTICIPANT_NOT_FOUND");
-	}
-
-	if (!participant.isActive) {
-		throw new Error("PARTICIPANT_ALREADY_LEFT");
-	}
-
-	// Update participant to inactive
-	const updatedParticipant = await prisma.spaceParticipant.update({
-		where: { id: participant.id },
-		data: {
-			isActive: false,
-			leftAt: new Date(),
-			connectionState: "disconnected",
-		},
-	});
-
-	return updatedParticipant;
-}
-
-export async function getSpaceParticipants(spaceId: string, activeOnly = true) {
-	// Verify space exists
-	const space = await prisma.space.findUnique({
-		where: { id: spaceId },
-		select: { id: true },
-	});
-
-	if (!space) {
-		throw new Error("SPACE_NOT_FOUND");
-	}
-
-	const participants = await prisma.spaceParticipant.findMany({
-		where: {
-			spaceId,
-			...(activeOnly && { isActive: true }),
-		},
-		select: {
-			id: true,
-			displayName: true,
-			role: true,
-			isActive: true,
-			isGuest: true,
-			joinedAt: true,
-			leftAt: true,
-			participantSessionId: true,
-			livekitIdentity: true,
-			connectionState: true,
-			user: {
-				select: {
-					id: true,
-					name: true,
-					avatar: true,
-				},
-			},
-		},
-		orderBy: {
-			joinedAt: "asc",
-		},
-	});
-
-	return participants;
 }
 
 /** Fields that are safe to expose to other clients in a Space. */

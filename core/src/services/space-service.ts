@@ -1,8 +1,5 @@
 import { prisma } from "../db/index.ts";
-import {
-	invalidateSpaceInfraCache,
-	isSelfHostActive,
-} from "./infra-service.ts";
+import { isSelfHostActive } from "./infra-service.ts";
 import {
 	createLiveKitRoom,
 	deleteLiveKitRoom,
@@ -374,7 +371,7 @@ export async function resumeHostSpace(
 
 // Create a meeting that is planned for the future. Unlike createSpace, this does
 // NOT spin up a LiveKit room or mint a host token - the room is provisioned only
-// when the host actually starts the meeting (see activateScheduledSpace). The
+// when the first person joins (see joinSpace in participant-service). The
 // join code is still generated up front so an invite link works immediately.
 export async function scheduleSpace(data: ScheduleSpaceData) {
 	const {
@@ -439,119 +436,6 @@ export async function scheduleSpace(data: ScheduleSpaceData) {
 		});
 
 	return space;
-}
-
-// Transition a SCHEDULED space to LIVE: provision the LiveKit room, attach the
-// host as an active participant, and mint their token. Host-only. Idempotent -
-// if the space is already LIVE (double-clicked "Start", retried request), it
-// just re-issues a fresh host token via the existing resume path.
-export async function activateScheduledSpace(
-	spaceId: string,
-	userId: string,
-	participantSessionId: string,
-) {
-	const existing = await prisma.space.findUnique({
-		where: { id: spaceId },
-		select: {
-			id: true,
-			hostId: true,
-			status: true,
-			joinCode: true,
-			livekitRoomName: true,
-			selfHosted: true,
-		},
-	});
-
-	if (!existing) {
-		throw new Error("SPACE_NOT_FOUND");
-	}
-
-	if (existing.hostId !== userId) {
-		throw new Error("NOT_HOST");
-	}
-
-	// Already started: reuse the idempotent resume path to hand back a token.
-	if (existing.status === "LIVE") {
-		const resumed = await resumeHostSpace(
-			existing.joinCode,
-			userId,
-			participantSessionId,
-		);
-		if (resumed) return resumed;
-	}
-
-	if (existing.status !== "SCHEDULED" && existing.status !== "LIVE") {
-		throw new Error("SPACE_NOT_SCHEDULED");
-	}
-
-	const livekitRoomName =
-		existing.livekitRoomName || getLiveKitRoomName(existing.id);
-	const hostLiveKitIdentity = getLiveKitIdentity({
-		spaceId: existing.id,
-		participantSessionId,
-		userId,
-		isGuest: false,
-	});
-
-	await prisma.spaceParticipant.updateMany({
-		where: { spaceId: existing.id, role: "HOST" },
-		data: {
-			livekitIdentity: hostLiveKitIdentity,
-			isActive: true,
-			leftAt: null,
-			lastConnectedAt: new Date(),
-			connectionState: "connected",
-		},
-	});
-
-	const space = await prisma.space.update({
-		where: { id: existing.id },
-		data: {
-			livekitRoomName,
-			status: "LIVE",
-			startTime: new Date(),
-			// Pin the room to the host's infra as of now (see infra-service).
-			selfHosted: existing.selfHosted ?? (await isSelfHostActive(userId)),
-		},
-		include: {
-			host: {
-				select: { id: true, name: true, email: true, avatar: true },
-			},
-			participants: {
-				where: { isActive: true },
-				include: {
-					user: { select: { id: true, name: true, avatar: true } },
-				},
-			},
-		},
-	});
-
-	invalidateSpaceInfraCache(space.id);
-
-	// No-ops if the room already exists.
-	await createLiveKitRoom({
-		name: livekitRoomName,
-		metadata: {
-			spaceId: space.id,
-			joinCode: space.joinCode,
-			hostId: space.hostId,
-		},
-	});
-
-	const hostParticipant = space.participants.find(
-		(participant) => participant.role === "HOST",
-	);
-
-	if (!hostParticipant) {
-		return space;
-	}
-
-	const livekit = await generateLiveKitToken({
-		space,
-		participant: hostParticipant,
-	});
-
-	return { ...space, livekit };
 }
 
 export async function updateSpace(spaceId: string, data: UpdateSpaceData) {

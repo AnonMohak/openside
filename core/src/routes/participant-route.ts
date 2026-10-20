@@ -1,9 +1,7 @@
 import express from "express";
 import {
-	getParticipantsController,
 	joinSpaceController,
 	kickParticipantController,
-	leaveSpaceController,
 	renameSelfController,
 	stopParticipantTrackController,
 	updateRoleController,
@@ -22,9 +20,7 @@ router.post(
 	optionalAuthMiddleware,
 	joinSpaceController,
 );
-router.post("/:spaceId/leave", optionalAuthMiddleware, leaveSpaceController);
 router.patch("/:spaceId/name", optionalAuthMiddleware, renameSelfController);
-router.get("/:spaceId/list", optionalAuthMiddleware, getParticipantsController);
 router.patch(
 	"/:spaceId/participant/:participantId/role",
 	authMiddleware,

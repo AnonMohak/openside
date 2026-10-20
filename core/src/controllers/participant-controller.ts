@@ -4,12 +4,10 @@ import { findOrCreateUser } from "../services/auth-service";
 import { SELF_HOST_UNAVAILABLE } from "../services/infra-service";
 import {
 	getParticipantById,
-	getSpaceParticipants,
 	isUserHost,
 	isUserHostOrCoHost,
 	joinSpace,
 	kickParticipant,
-	leaveSpace,
 	renameSelf,
 	stopParticipantTrack,
 	toPublicParticipant,
@@ -222,127 +220,6 @@ export async function renameSelfController(
 			success: false,
 			data: null,
 			message: "Failed to update name!",
-		});
-	}
-}
-
-export async function leaveSpaceController(
-	req: AuthenticatedRequest,
-	res: Response,
-): Promise<void> {
-	try {
-		const spaceId = req.params.spaceId as string | undefined;
-		const { participantSessionId } = req.body;
-
-		if (!spaceId) {
-			res
-				.status(400)
-				.json({ success: false, data: null, message: "Space ID is required!" });
-			return;
-		}
-
-		let userId: string | undefined;
-
-		if (req.user) {
-			const user = await findOrCreateUser(req.user);
-			userId = user.id;
-		}
-
-		if (
-			!userId &&
-			(!participantSessionId || typeof participantSessionId !== "string")
-		) {
-			res.status(400).json({
-				success: false,
-				data: null,
-				message: "Participant session ID is required for guest users!",
-			});
-			return;
-		}
-
-		const participant = await leaveSpace({
-			spaceId,
-			participantSessionId: participantSessionId?.trim(),
-			userId,
-		});
-
-		res.status(200).json({
-			success: true,
-			data: toPublicParticipant(participant),
-			message: "Left space successfully!",
-		});
-	} catch (error: unknown) {
-		if (error instanceof Error) {
-			if (error.message === "PARTICIPANT_NOT_FOUND") {
-				res.status(404).json({
-					success: false,
-					data: null,
-					message: "Participant not found in this space!",
-				});
-				return;
-			}
-			if (error.message === "PARTICIPANT_ALREADY_LEFT") {
-				res.status(400).json({
-					success: false,
-					data: null,
-					message: "You have already left this space!",
-				});
-				return;
-			}
-		}
-
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
-		res.status(500).json({
-			success: false,
-			data: null,
-			message: `Failed to leave space: ${errorMessage}!`,
-		});
-	}
-}
-
-export async function getParticipantsController(
-	req: AuthenticatedRequest,
-	res: Response,
-): Promise<void> {
-	try {
-		const spaceId = req.params.spaceId as string | undefined;
-		const { active } = req.query;
-
-		if (!spaceId) {
-			res
-				.status(400)
-				.json({ success: false, data: null, message: "Space ID is required!" });
-			return;
-		}
-
-		// Parse active query param (defaults to true)
-		const activeOnly = active !== "false";
-
-		const participants = await getSpaceParticipants(spaceId, activeOnly);
-
-		res.status(200).json({
-			success: true,
-			data: {
-				participants: participants.map(toPublicParticipant),
-				count: participants.length,
-			},
-			message: "Participants retrieved successfully!",
-		});
-	} catch (error: unknown) {
-		if (error instanceof Error && error.message === "SPACE_NOT_FOUND") {
-			res
-				.status(404)
-				.json({ success: false, data: null, message: "Space not found!" });
-			return;
-		}
-
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
-		res.status(500).json({
-			success: false,
-			data: null,
-			message: `Failed to get participants: ${errorMessage}!`,
 		});
 	}
 }

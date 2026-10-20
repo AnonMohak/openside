@@ -21,11 +21,6 @@ export interface ScheduleSpacePayload {
   invitees?: string[];
 }
 
-export interface ActivateSpacePayload {
-  spaceId: string;
-  participantSessionId: string;
-}
-
 export interface Host {
   id: string;
   name: string;

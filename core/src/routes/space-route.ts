@@ -1,6 +1,5 @@
 import express from "express";
 import {
-	activateSpaceController,
 	createSpaceController,
 	deleteSpaceController,
 	endSpaceController,
@@ -23,7 +22,6 @@ router.post("/create", authMiddleware, createSpaceController);
 router.post("/schedule", authMiddleware, scheduleSpaceController);
 router.get("/user", authMiddleware, getUserSpacesController);
 router.get("/code/:joinCode", getSpaceByJoinCodeController);
-router.post("/:spaceId/activate", authMiddleware, activateSpaceController);
 router.post(
 	"/:spaceId/invite",
 	sensitiveLimiter,

@@ -9,7 +9,6 @@ import {
 import { SELF_HOST_UNAVAILABLE } from "../services/infra-service";
 import { toPublicParticipant } from "../services/participant-service";
 import {
-	activateScheduledSpace,
 	createSpace,
 	deleteSpace,
 	endSpace,
@@ -352,107 +351,6 @@ export async function scheduleSpaceController(
 			success: false,
 			data: null,
 			message: `Failed to schedule meeting: ${errorMessage}!`,
-		});
-	}
-}
-
-export async function activateSpaceController(
-	req: AuthenticatedRequest,
-	res: Response,
-): Promise<void> {
-	try {
-		if (!req.user) {
-			res
-				.status(401)
-				.json({ success: false, data: null, message: "No user context!" });
-			return;
-		}
-
-		const spaceId = req.params.spaceId as string | undefined;
-		const { participantSessionId } = req.body ?? {};
-
-		if (!spaceId) {
-			res
-				.status(400)
-				.json({ success: false, data: null, message: "Space ID is required!" });
-			return;
-		}
-
-		if (
-			!participantSessionId ||
-			typeof participantSessionId !== "string" ||
-			participantSessionId.trim().length === 0
-		) {
-			res.status(400).json({
-				success: false,
-				data: null,
-				message: "Participant session ID is required!",
-			});
-			return;
-		}
-
-		const user = await findOrCreateUser(req.user);
-
-		const space = await activateScheduledSpace(
-			spaceId,
-			user.id,
-			participantSessionId.trim(),
-		);
-
-		res.status(200).json({
-			success: true,
-			data: toPublicSpace(space),
-			message: "Meeting started successfully!",
-		});
-	} catch (error: unknown) {
-		if (error instanceof Error) {
-			if (error.message === "SPACE_NOT_FOUND") {
-				res
-					.status(404)
-					.json({ success: false, data: null, message: "Space not found!" });
-				return;
-			}
-			if (error.message === "NOT_HOST") {
-				res.status(403).json({
-					success: false,
-					data: null,
-					message: "Only the host can start this meeting!",
-				});
-				return;
-			}
-			if (error.message === "SPACE_NOT_SCHEDULED") {
-				res.status(400).json({
-					success: false,
-					data: null,
-					message: "This meeting can no longer be started!",
-				});
-				return;
-			}
-			if (error.message === SELF_HOST_UNAVAILABLE) {
-				res.status(409).json({
-					success: false,
-					data: { code: SELF_HOST_UNAVAILABLE },
-					message:
-						"This call ran on the host's own servers, which are no longer connected. Start a new call.",
-				});
-				return;
-			}
-			if (error.message === "LIVEKIT_NOT_CONFIGURED") {
-				res.status(503).json({
-					success: false,
-					data: null,
-					message: "LiveKit is not configured on the server!",
-				});
-				return;
-			}
-		}
-
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
-		res.status(500).json({
-			success: false,
-			data: null,
-			message: `Failed to start meeting: ${errorMessage}!`,
 		});
 	}
 }

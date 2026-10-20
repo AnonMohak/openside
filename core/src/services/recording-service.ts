@@ -50,26 +50,6 @@ interface CreateParticipantRecordingData {
 	startOffsetMs?: number;
 }
 
-interface UpdateParticipantRecordingData {
-	container?: string;
-	codec?: string;
-	width?: number;
-	height?: number;
-	fps?: number;
-	bitrate?: number;
-	sampleRate?: number;
-	channels?: number;
-	hasAudio?: boolean;
-	hasVideo?: boolean;
-	videoQuality?: "P360" | "P480" | "P720" | "P1080" | "P1440" | "P2160";
-	audioQuality?: "SR_22050" | "SR_44100" | "SR_48000" | "SR_96000";
-	videoLabel?: string;
-	audioLabel?: string;
-	startOffsetMs?: number;
-	durationMs?: number;
-	expectedSegments?: number;
-}
-
 interface CreateSegmentData {
 	participantRecordingId: string;
 	spaceRecordingSessionId: string;
@@ -967,113 +947,6 @@ async function startScreenShareCloudRecording(params: {
 	});
 }
 
-export async function updateParticipantRecording(
-	recordingId: string,
-	data: UpdateParticipantRecordingData,
-) {
-	const recording = await prisma.participantRecording.findUnique({
-		where: { id: recordingId },
-		select: { id: true },
-	});
-
-	if (!recording) {
-		throw new Error("RECORDING_NOT_FOUND");
-	}
-
-	const updatedRecording = await prisma.participantRecording.update({
-		where: { id: recordingId },
-		data: {
-			...data,
-			lastChunkAt: new Date(),
-		},
-		include: {
-			participant: {
-				select: {
-					id: true,
-					displayName: true,
-				},
-			},
-		},
-	});
-
-	return updatedRecording;
-}
-
-export async function getParticipantRecordingById(recordingId: string) {
-	const recording = await prisma.participantRecording.findUnique({
-		where: { id: recordingId },
-		include: {
-			participant: {
-				select: {
-					id: true,
-					displayName: true,
-					spaceId: true,
-					user: {
-						select: {
-							id: true,
-							name: true,
-							avatar: true,
-						},
-					},
-				},
-			},
-			recordingSession: {
-				select: {
-					id: true,
-					spaceRecordingSessionId: true,
-					spaceId: true,
-					status: true,
-				},
-			},
-			segments: {
-				select: {
-					id: true,
-					sequenceNumber: true,
-					status: true,
-				},
-				orderBy: { sequenceNumber: "asc" },
-			},
-		},
-	});
-
-	return recording;
-}
-
-export async function getRecordingsBySessionId(sessionId: string) {
-	// Verify session exists
-	const session = await prisma.recordingSession.findUnique({
-		where: { id: sessionId },
-		select: { id: true },
-	});
-
-	if (!session) {
-		throw new Error("SESSION_NOT_FOUND");
-	}
-
-	const recordings = await prisma.participantRecording.findMany({
-		where: { recordingSessionId: sessionId },
-		include: {
-			participant: {
-				select: {
-					id: true,
-					displayName: true,
-					role: true,
-					user: {
-						select: {
-							id: true,
-							name: true,
-							avatar: true,
-						},
-					},
-				},
-			},
-		},
-		orderBy: { createdAt: "asc" },
-	});
-
-	return recordings;
-}
-
 export async function markRecordingComplete(
 	recordingId: string,
 	expectedSegments: number,
@@ -1385,25 +1258,6 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 	for (const session of stuck) {
 		await maybeFinalizeSession(session.id);
 	}
-}
-
-export async function getSegmentsByRecordingId(recordingId: string) {
-	// Verify recording exists
-	const recording = await prisma.participantRecording.findUnique({
-		where: { id: recordingId },
-		select: { id: true },
-	});
-
-	if (!recording) {
-		throw new Error("RECORDING_NOT_FOUND");
-	}
-
-	const segments = await prisma.recordingSegment.findMany({
-		where: { participantRecordingId: recordingId },
-		orderBy: { sequenceNumber: "asc" },
-	});
-
-	return segments;
 }
 
 // Authorization Helpers

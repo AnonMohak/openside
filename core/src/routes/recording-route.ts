@@ -3,11 +3,7 @@ import {
 	createParticipantRecordingController,
 	createSegmentController,
 	deleteSessionController,
-	finalizeSessionController,
 	getActiveSessionBySpaceIdController,
-	getParticipantRecordingByIdController,
-	getRecordingsBySessionIdController,
-	getSegmentsByRecordingIdController,
 	getSessionByIdController,
 	getSessionsBySpaceIdController,
 	markRecordingCompleteController,
@@ -17,7 +13,6 @@ import {
 	startSessionController,
 	stopSessionController,
 	unshareSpaceSessionController,
-	updateParticipantRecordingController,
 } from "../controllers/recording-controller";
 import {
 	createScreenCommentController,
@@ -186,32 +181,12 @@ router.get(
 	authMiddleware,
 	getSessionsBySpaceIdController,
 );
-router.post(
-	"/session/:sessionId/finalize",
-	authMiddleware,
-	finalizeSessionController,
-);
 
 // ParticipantRecording Routes
 router.post(
 	"/participant",
 	optionalAuthMiddleware,
 	createParticipantRecordingController,
-);
-router.patch(
-	"/participant/:recordingId",
-	optionalAuthMiddleware,
-	updateParticipantRecordingController,
-);
-router.get(
-	"/participant/:recordingId",
-	authMiddleware,
-	getParticipantRecordingByIdController,
-);
-router.get(
-	"/session/:sessionId/recordings",
-	authMiddleware,
-	getRecordingsBySessionIdController,
 );
 router.post(
 	"/participant/:recordingId/complete",
@@ -226,10 +201,5 @@ router.post(
 	presignSegmentUploadController,
 );
 router.post("/segment", optionalAuthMiddleware, createSegmentController);
-router.get(
-	"/participant/:recordingId/segments",
-	authMiddleware,
-	getSegmentsByRecordingIdController,
-);
 
 export default router;
