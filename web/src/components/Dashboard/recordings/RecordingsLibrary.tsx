@@ -1393,16 +1393,21 @@ const RecordingsLibrary = () => {
               up here, ready to preview and download.
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate("/dashboard/home")}
+            className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          >
+            Start a call
+          </button>
         </div>
       )}
 
       {!hasNoRecordings &&
         filter === "space" &&
-        spacesWithRecordings.length === 0 && (
-          <FilterEmpty label="space recordings" />
-        )}
+        spacesWithRecordings.length === 0 && <FilterEmpty kind="space" />}
       {!hasNoRecordings && filter === "screen" && screenRecs.length === 0 && (
-        <FilterEmpty label="screen recordings" />
+        <FilterEmpty kind="screen" />
       )}
 
       {filter !== "screen" && spacesWithRecordings.length > 0 ? (
@@ -1455,10 +1460,56 @@ const RecordingsLibrary = () => {
   );
 };
 
-const FilterEmpty = ({ label }: { label: string }) => (
-  <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-border/50 text-sm text-fg-subtle">
-    No {label} yet
-  </div>
-);
+const FILTER_EMPTY: Record<
+  "space" | "screen",
+  {
+    icon: typeof FiFolder;
+    title: string;
+    description: string;
+    cta: string;
+    to: string;
+  }
+> = {
+  space: {
+    icon: FiVideo,
+    title: "No space recordings yet",
+    description:
+      "Start a call and hit record. Every participant's track lands here, ready to preview and download.",
+    cta: "Start a call",
+    to: "/dashboard/home",
+  },
+  screen: {
+    icon: FiMonitor,
+    title: "No screen recordings yet",
+    description:
+      "Capture your screen, camera, or both. Finished recordings show up here.",
+    cta: "Open screen recorder",
+    to: "/dashboard/screen-recorder",
+  },
+};
+
+const FilterEmpty = ({ kind }: { kind: "space" | "screen" }) => {
+  const navigate = useNavigate();
+  const { icon: Icon, title, description, cta, to } = FILTER_EMPTY[kind];
+
+  return (
+    <div className="flex flex-col items-center gap-4 pt-24 text-center">
+      <span className="flex size-12 items-center justify-center rounded-xl bg-muted ring-1 ring-border">
+        <Icon size={20} className="text-fg-subtle" />
+      </span>
+      <div className="space-y-1.5">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="max-w-sm text-sm text-fg-muted">{description}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => navigate(to)}
+        className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90"
+      >
+        {cta}
+      </button>
+    </div>
+  );
+};
 
 export default RecordingsLibrary;
