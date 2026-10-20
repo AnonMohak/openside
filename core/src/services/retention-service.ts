@@ -1,7 +1,11 @@
 /**
  * Retention sweep - recordings auto-delete once they outlive their owner's
  * plan window: DEMO 48h, PRO 30 days, SELF_HOST never (their bucket, their
- * data). Runs on an interval from the API process (see index.ts).
+ * data). The window follows the infra the session was stamped on, not the
+ * owner's current switch: a Pro user's cloud recordings still expire after 30
+ * days while they're self-hosting, and their self-hosted ones are never purged
+ * from their bucket after they switch back. Runs on an interval from the API
+ * process (see index.ts).
  *
  * Age is measured from when the recording stopped (fallback: startedAt).
  * ACTIVE sessions are never touched.
@@ -27,9 +31,16 @@ export async function sweepExpiredRecordings(): Promise<void> {
 	const candidates = await prisma.recordingSession.findMany({
 		where: {
 			status: { not: "ACTIVE" },
-			OR: [
-				{ stoppedAt: { lt: oldestPossible } },
-				{ stoppedAt: null, startedAt: { lt: oldestPossible } },
+			// Self-hosted sessions are kept forever - skip them here so they can't
+			// fill every batch and starve the ones that do expire.
+			AND: [
+				{
+					OR: [
+						{ stoppedAt: { lt: oldestPossible } },
+						{ stoppedAt: null, startedAt: { lt: oldestPossible } },
+					],
+				},
+				{ OR: [{ selfHosted: false }, { selfHosted: null }] },
 			],
 		},
 		select: {
@@ -38,6 +49,7 @@ export async function sweepExpiredRecordings(): Promise<void> {
 			userId: true,
 			startedAt: true,
 			stoppedAt: true,
+			selfHosted: true,
 		},
 		orderBy: { startedAt: "asc" },
 		take: SWEEP_BATCH_SIZE,
@@ -45,7 +57,7 @@ export async function sweepExpiredRecordings(): Promise<void> {
 
 	if (candidates.length === 0) return;
 
-	// Entitlements are per owner - look each owner up once per sweep.
+	// Entitlements are per owner + infra - look each pair up once per sweep.
 	const retentionByOwner = new Map<string, number | null>();
 
 	for (const session of candidates) {
@@ -53,12 +65,16 @@ export async function sweepExpiredRecordings(): Promise<void> {
 			const ownerUserId = await resolveSessionOwner(session);
 			if (!ownerUserId) continue;
 
-			if (!retentionByOwner.has(ownerUserId)) {
-				const entitlements = await getEntitlements(ownerUserId);
-				retentionByOwner.set(ownerUserId, entitlements.retentionHours);
+			const cacheKey = `${ownerUserId}:${session.selfHosted}`;
+			if (!retentionByOwner.has(cacheKey)) {
+				const entitlements = await getEntitlements(
+					ownerUserId,
+					session.selfHosted,
+				);
+				retentionByOwner.set(cacheKey, entitlements.retentionHours);
 			}
 
-			const retentionHours = retentionByOwner.get(ownerUserId) ?? null;
+			const retentionHours = retentionByOwner.get(cacheKey) ?? null;
 			if (retentionHours === null) continue; // self-host: keep forever
 
 			const endedAt = session.stoppedAt ?? session.startedAt;

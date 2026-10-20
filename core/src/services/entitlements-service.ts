@@ -76,9 +76,18 @@ function isProActive(user: UserForEntitlements): boolean {
 	return !user.currentPeriodEnd || user.currentPeriodEnd.getTime() > Date.now();
 }
 
-function buildEntitlements(user: UserForEntitlements): Entitlements {
+/**
+ * `selfHosted` pins the infra being judged: true = the user's own keys, false =
+ * platform (their paid plan, or DEMO). Omitted/null = the user's current
+ * self-host switch.
+ */
+function buildEntitlements(
+	user: UserForEntitlements,
+	selfHosted?: boolean | null,
+): Entitlements {
 	const selfHost =
-		!!user.selfHostConfig?.enabled && !!user.selfHostConfig.lastValidatedAt;
+		selfHosted ??
+		(!!user.selfHostConfig?.enabled && !!user.selfHostConfig.lastValidatedAt);
 
 	if (selfHost) {
 		return {
@@ -127,7 +136,16 @@ function buildEntitlements(user: UserForEntitlements): Entitlements {
 	};
 }
 
-export async function getEntitlements(userId: string): Promise<Entitlements> {
+/**
+ * What the user may do. Pass `selfHosted` to judge a specific space/recording
+ * by the infra it was stamped on (see infra-service) rather than the user's
+ * current switch - a Pro user can flip between their own keys and ours, and
+ * each recording keeps the limits of the side it actually ran on.
+ */
+export async function getEntitlements(
+	userId: string,
+	selfHosted?: boolean | null,
+): Promise<Entitlements> {
 	const user = await prisma.user.findUnique({
 		where: { id: userId },
 		select: USER_SELECT,
@@ -145,7 +163,16 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
 			.catch(() => undefined);
 	}
 
-	return buildEntitlements(user);
+	return buildEntitlements(user, selfHosted);
+}
+
+/** Whether the user has a live Pro subscription, regardless of self-host. */
+export async function hasActiveSubscription(userId: string): Promise<boolean> {
+	const user = await prisma.user.findUnique({
+		where: { id: userId },
+		select: USER_SELECT,
+	});
+	return !!user && isProActive(user);
 }
 
 /**
@@ -157,6 +184,7 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
 export async function sessionNeedsWatermark(owner: {
 	spaceId: string | null;
 	userId: string | null;
+	selfHosted?: boolean | null;
 }): Promise<boolean> {
 	try {
 		let ownerUserId = owner.userId;
@@ -170,7 +198,7 @@ export async function sessionNeedsWatermark(owner: {
 
 		if (!ownerUserId) return true;
 
-		const entitlements = await getEntitlements(ownerUserId);
+		const entitlements = await getEntitlements(ownerUserId, owner.selfHosted);
 		return entitlements.watermark;
 	} catch (error) {
 		console.error(

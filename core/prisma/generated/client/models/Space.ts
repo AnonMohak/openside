@@ -52,6 +52,7 @@ export type SpaceMinAggregateOutputType = {
   endedReason: string | null
   duration: number | null
   totalRecordingHours: number | null
+  selfHosted: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -72,6 +73,7 @@ export type SpaceMaxAggregateOutputType = {
   endedReason: string | null
   duration: number | null
   totalRecordingHours: number | null
+  selfHosted: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -93,6 +95,7 @@ export type SpaceCountAggregateOutputType = {
   endedReason: number
   duration: number
   totalRecordingHours: number
+  selfHosted: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -125,6 +128,7 @@ export type SpaceMinAggregateInputType = {
   endedReason?: true
   duration?: true
   totalRecordingHours?: true
+  selfHosted?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -145,6 +149,7 @@ export type SpaceMaxAggregateInputType = {
   endedReason?: true
   duration?: true
   totalRecordingHours?: true
+  selfHosted?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -166,6 +171,7 @@ export type SpaceCountAggregateInputType = {
   endedReason?: true
   duration?: true
   totalRecordingHours?: true
+  selfHosted?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -274,6 +280,7 @@ export type SpaceGroupByOutputType = {
   endedReason: string | null
   duration: number | null
   totalRecordingHours: number | null
+  selfHosted: boolean | null
   createdAt: Date
   updatedAt: Date
   _count: SpaceCountAggregateOutputType | null
@@ -318,6 +325,7 @@ export type SpaceWhereInput = {
   endedReason?: Prisma.StringNullableFilter<"Space"> | string | null
   duration?: Prisma.IntNullableFilter<"Space"> | number | null
   totalRecordingHours?: Prisma.FloatNullableFilter<"Space"> | number | null
+  selfHosted?: Prisma.BoolNullableFilter<"Space"> | boolean | null
   createdAt?: Prisma.DateTimeFilter<"Space"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Space"> | Date | string
   host?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
@@ -343,6 +351,7 @@ export type SpaceOrderByWithRelationInput = {
   endedReason?: Prisma.SortOrderInput | Prisma.SortOrder
   duration?: Prisma.SortOrderInput | Prisma.SortOrder
   totalRecordingHours?: Prisma.SortOrderInput | Prisma.SortOrder
+  selfHosted?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   host?: Prisma.UserOrderByWithRelationInput
@@ -371,6 +380,7 @@ export type SpaceWhereUniqueInput = Prisma.AtLeast<{
   endedReason?: Prisma.StringNullableFilter<"Space"> | string | null
   duration?: Prisma.IntNullableFilter<"Space"> | number | null
   totalRecordingHours?: Prisma.FloatNullableFilter<"Space"> | number | null
+  selfHosted?: Prisma.BoolNullableFilter<"Space"> | boolean | null
   createdAt?: Prisma.DateTimeFilter<"Space"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Space"> | Date | string
   host?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
@@ -396,6 +406,7 @@ export type SpaceOrderByWithAggregationInput = {
   endedReason?: Prisma.SortOrderInput | Prisma.SortOrder
   duration?: Prisma.SortOrderInput | Prisma.SortOrder
   totalRecordingHours?: Prisma.SortOrderInput | Prisma.SortOrder
+  selfHosted?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.SpaceCountOrderByAggregateInput
@@ -425,6 +436,7 @@ export type SpaceScalarWhereWithAggregatesInput = {
   endedReason?: Prisma.StringNullableWithAggregatesFilter<"Space"> | string | null
   duration?: Prisma.IntNullableWithAggregatesFilter<"Space"> | number | null
   totalRecordingHours?: Prisma.FloatNullableWithAggregatesFilter<"Space"> | number | null
+  selfHosted?: Prisma.BoolNullableWithAggregatesFilter<"Space"> | boolean | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Space"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"Space"> | Date | string
 }
@@ -445,6 +457,7 @@ export type SpaceCreateInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   host: Prisma.UserCreateNestedOneWithoutHostedSpacesInput
@@ -470,6 +483,7 @@ export type SpaceUncheckedCreateInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   participants?: Prisma.SpaceParticipantUncheckedCreateNestedManyWithoutSpaceInput
@@ -493,6 +507,7 @@ export type SpaceUpdateInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   host?: Prisma.UserUpdateOneRequiredWithoutHostedSpacesNestedInput
@@ -518,6 +533,7 @@ export type SpaceUncheckedUpdateInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participants?: Prisma.SpaceParticipantUncheckedUpdateManyWithoutSpaceNestedInput
@@ -542,6 +558,7 @@ export type SpaceCreateManyInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -562,6 +579,7 @@ export type SpaceUpdateManyMutationInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -583,6 +601,7 @@ export type SpaceUncheckedUpdateManyInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -622,6 +641,7 @@ export type SpaceCountOrderByAggregateInput = {
   endedReason?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   totalRecordingHours?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -647,6 +667,7 @@ export type SpaceMaxOrderByAggregateInput = {
   endedReason?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   totalRecordingHours?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -667,6 +688,7 @@ export type SpaceMinOrderByAggregateInput = {
   endedReason?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   totalRecordingHours?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -761,6 +783,10 @@ export type NullableFloatFieldUpdateOperationsInput = {
   divide?: number
 }
 
+export type NullableBoolFieldUpdateOperationsInput = {
+  set?: boolean | null
+}
+
 export type SpaceCreateNestedOneWithoutParticipantsInput = {
   create?: Prisma.XOR<Prisma.SpaceCreateWithoutParticipantsInput, Prisma.SpaceUncheckedCreateWithoutParticipantsInput>
   connectOrCreate?: Prisma.SpaceCreateOrConnectWithoutParticipantsInput
@@ -821,6 +847,7 @@ export type SpaceCreateWithoutHostInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   participants?: Prisma.SpaceParticipantCreateNestedManyWithoutSpaceInput
@@ -844,6 +871,7 @@ export type SpaceUncheckedCreateWithoutHostInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   participants?: Prisma.SpaceParticipantUncheckedCreateNestedManyWithoutSpaceInput
@@ -897,6 +925,7 @@ export type SpaceScalarWhereInput = {
   endedReason?: Prisma.StringNullableFilter<"Space"> | string | null
   duration?: Prisma.IntNullableFilter<"Space"> | number | null
   totalRecordingHours?: Prisma.FloatNullableFilter<"Space"> | number | null
+  selfHosted?: Prisma.BoolNullableFilter<"Space"> | boolean | null
   createdAt?: Prisma.DateTimeFilter<"Space"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Space"> | Date | string
 }
@@ -917,6 +946,7 @@ export type SpaceCreateWithoutParticipantsInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   host: Prisma.UserCreateNestedOneWithoutHostedSpacesInput
@@ -941,6 +971,7 @@ export type SpaceUncheckedCreateWithoutParticipantsInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   recordingSessions?: Prisma.RecordingSessionUncheckedCreateNestedManyWithoutSpaceInput
@@ -979,6 +1010,7 @@ export type SpaceUpdateWithoutParticipantsInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   host?: Prisma.UserUpdateOneRequiredWithoutHostedSpacesNestedInput
@@ -1003,6 +1035,7 @@ export type SpaceUncheckedUpdateWithoutParticipantsInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   recordingSessions?: Prisma.RecordingSessionUncheckedUpdateManyWithoutSpaceNestedInput
@@ -1025,6 +1058,7 @@ export type SpaceCreateWithoutRecordingSessionsInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   host: Prisma.UserCreateNestedOneWithoutHostedSpacesInput
@@ -1049,6 +1083,7 @@ export type SpaceUncheckedCreateWithoutRecordingSessionsInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   participants?: Prisma.SpaceParticipantUncheckedCreateNestedManyWithoutSpaceInput
@@ -1087,6 +1122,7 @@ export type SpaceUpdateWithoutRecordingSessionsInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   host?: Prisma.UserUpdateOneRequiredWithoutHostedSpacesNestedInput
@@ -1111,6 +1147,7 @@ export type SpaceUncheckedUpdateWithoutRecordingSessionsInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participants?: Prisma.SpaceParticipantUncheckedUpdateManyWithoutSpaceNestedInput
@@ -1133,6 +1170,7 @@ export type SpaceCreateWithoutFinalOutputsInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   host: Prisma.UserCreateNestedOneWithoutHostedSpacesInput
@@ -1157,6 +1195,7 @@ export type SpaceUncheckedCreateWithoutFinalOutputsInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
   participants?: Prisma.SpaceParticipantUncheckedCreateNestedManyWithoutSpaceInput
@@ -1195,6 +1234,7 @@ export type SpaceUpdateWithoutFinalOutputsInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   host?: Prisma.UserUpdateOneRequiredWithoutHostedSpacesNestedInput
@@ -1219,6 +1259,7 @@ export type SpaceUncheckedUpdateWithoutFinalOutputsInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participants?: Prisma.SpaceParticipantUncheckedUpdateManyWithoutSpaceNestedInput
@@ -1241,6 +1282,7 @@ export type SpaceCreateManyHostInput = {
   endedReason?: string | null
   duration?: number | null
   totalRecordingHours?: number | null
+  selfHosted?: boolean | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -1261,6 +1303,7 @@ export type SpaceUpdateWithoutHostInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participants?: Prisma.SpaceParticipantUpdateManyWithoutSpaceNestedInput
@@ -1284,6 +1327,7 @@ export type SpaceUncheckedUpdateWithoutHostInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participants?: Prisma.SpaceParticipantUncheckedUpdateManyWithoutSpaceNestedInput
@@ -1307,6 +1351,7 @@ export type SpaceUncheckedUpdateManyWithoutHostInput = {
   endedReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   duration?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   totalRecordingHours?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -1377,6 +1422,7 @@ export type SpaceSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   endedReason?: boolean
   duration?: boolean
   totalRecordingHours?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   host?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -1403,6 +1449,7 @@ export type SpaceSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensi
   endedReason?: boolean
   duration?: boolean
   totalRecordingHours?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   host?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -1425,6 +1472,7 @@ export type SpaceSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensi
   endedReason?: boolean
   duration?: boolean
   totalRecordingHours?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   host?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -1447,11 +1495,12 @@ export type SpaceSelectScalar = {
   endedReason?: boolean
   duration?: boolean
   totalRecordingHours?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type SpaceOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "hostId" | "title" | "description" | "joinCode" | "livekitRoomName" | "status" | "recordingStatus" | "scheduledFor" | "invitees" | "startTime" | "endTime" | "expiresAt" | "endedReason" | "duration" | "totalRecordingHours" | "createdAt" | "updatedAt", ExtArgs["result"]["space"]>
+export type SpaceOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "hostId" | "title" | "description" | "joinCode" | "livekitRoomName" | "status" | "recordingStatus" | "scheduledFor" | "invitees" | "startTime" | "endTime" | "expiresAt" | "endedReason" | "duration" | "totalRecordingHours" | "selfHosted" | "createdAt" | "updatedAt", ExtArgs["result"]["space"]>
 export type SpaceInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   host?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   participants?: boolean | Prisma.Space$participantsArgs<ExtArgs>
@@ -1491,6 +1540,7 @@ export type $SpacePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs 
     endedReason: string | null
     duration: number | null
     totalRecordingHours: number | null
+    selfHosted: boolean | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["space"]>
@@ -1936,6 +1986,7 @@ export interface SpaceFieldRefs {
   readonly endedReason: Prisma.FieldRef<"Space", 'String'>
   readonly duration: Prisma.FieldRef<"Space", 'Int'>
   readonly totalRecordingHours: Prisma.FieldRef<"Space", 'Float'>
+  readonly selfHosted: Prisma.FieldRef<"Space", 'Boolean'>
   readonly createdAt: Prisma.FieldRef<"Space", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"Space", 'DateTime'>
 }

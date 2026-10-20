@@ -536,6 +536,7 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 		const watermark = await sessionNeedsWatermark({
 			spaceId: null,
 			userId: session.userId,
+			selfHosted: session.selfHosted,
 		});
 
 		const masters: Partial<Record<Role, MasterInfo>> = {};

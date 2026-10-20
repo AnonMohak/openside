@@ -96,7 +96,7 @@ const PricingModal = ({ open, onClose }: PricingModalProps) => {
       });
     } else if (planId === "selfhost") {
       onClose();
-      navigate("/dashboard/settings?section=billing");
+      navigate("/dashboard/settings?section=selfhost");
     }
   };
 

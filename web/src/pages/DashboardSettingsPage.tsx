@@ -1,6 +1,6 @@
 /**
- * Settings - sectioned: Profile, Appearance, Plan & billing, Recording (the
- * last shared with the in-call settings dialog).
+ * Settings - sectioned: Profile, Appearance, Plan & billing, Self-host,
+ * Recording (the last shared with the in-call settings dialog).
  *
  * Everything shown comes from the server. Profile edits (name and avatar) and
  * the recording preference use optimistic updates so the UI reacts
@@ -17,6 +17,7 @@ import {
   Monitor,
   Moon,
   Palette,
+  Server,
   Sun,
   Upload,
   User as UserIcon,
@@ -29,6 +30,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useGetMe } from "@/hooks/useUserQuery";
 import RecordingSettings from "@/components/settings/RecordingSettings";
+import Switch from "@/components/shared/ui/switch";
 import {
   useRemoveAvatar,
   useUpdateProfile,
@@ -45,12 +47,18 @@ import {
   type SelfHostConfigInput,
 } from "@/hooks/useUsage";
 
-type SectionId = "profile" | "appearance" | "billing" | "recording";
+type SectionId =
+  | "profile"
+  | "appearance"
+  | "billing"
+  | "selfhost"
+  | "recording";
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof UserIcon }[] = [
   { id: "profile", label: "Profile", icon: UserIcon },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "billing", label: "Plan & billing", icon: CreditCard },
+  { id: "selfhost", label: "Self-host", icon: Server },
   { id: "recording", label: "Recording", icon: Video },
 ];
 
@@ -398,45 +406,59 @@ const AppearanceSection = () => {
   );
 };
 
-// PLAN & BILLING --------------------------------------------------------------
+// PLAN & BILLING / SELF-HOST --------------------------------------------------
 
-const SELFHOST_FIELDS: {
+type SelfHostField = {
   key: keyof SelfHostConfigInput;
   label: string;
   placeholder: string;
   secret?: boolean;
-}[] = [
+  /** Spans both columns. */
+  wide?: boolean;
+};
+
+// Grouped by provider so the form reads as two short blocks, not one long grid.
+const SELFHOST_GROUPS: { title: string; fields: SelfHostField[] }[] = [
   {
-    key: "livekitUrl",
-    label: "LiveKit URL",
-    placeholder: "wss://your-app.livekit.cloud",
+    title: "LiveKit",
+    fields: [
+      {
+        key: "livekitUrl",
+        label: "Server URL",
+        placeholder: "wss://your-app.livekit.cloud",
+        wide: true,
+      },
+      { key: "livekitApiKey", label: "API key", placeholder: "APIxxxxxxxx" },
+      {
+        key: "livekitApiSecret",
+        label: "API secret",
+        placeholder: "Your API secret",
+        secret: true,
+      },
+    ],
   },
   {
-    key: "livekitApiKey",
-    label: "LiveKit API key",
-    placeholder: "APIxxxxxxxx",
-    secret: true,
+    title: "Cloudflare R2",
+    fields: [
+      { key: "r2AccountId", label: "Account ID", placeholder: "1a2b3c4d…" },
+      {
+        key: "r2Bucket",
+        label: "Bucket",
+        placeholder: "openside-recordings",
+      },
+      {
+        key: "r2AccessKeyId",
+        label: "Access key ID",
+        placeholder: "Your access key ID",
+      },
+      {
+        key: "r2SecretAccessKey",
+        label: "Secret access key",
+        placeholder: "Your secret access key",
+        secret: true,
+      },
+    ],
   },
-  {
-    key: "livekitApiSecret",
-    label: "LiveKit API secret",
-    placeholder: "••••••••",
-    secret: true,
-  },
-  { key: "r2AccountId", label: "R2 account ID", placeholder: "1a2b3c…" },
-  {
-    key: "r2AccessKeyId",
-    label: "R2 access key ID",
-    placeholder: "••••••••",
-    secret: true,
-  },
-  {
-    key: "r2SecretAccessKey",
-    label: "R2 secret access key",
-    placeholder: "••••••••",
-    secret: true,
-  },
-  { key: "r2Bucket", label: "R2 bucket", placeholder: "openside-recordings" },
 ];
 
 const EMPTY_SELFHOST: SelfHostConfigInput = {
@@ -449,20 +471,21 @@ const EMPTY_SELFHOST: SelfHostConfigInput = {
   r2Bucket: "",
 };
 
-const PlanBillingSection = () => {
+const PlanBillingSection = ({
+  onOpenSelfHost,
+}: {
+  onOpenSelfHost: () => void;
+}) => {
   const { data: usage, isLoading: usageLoading } = useUsage();
-  const { data: selfHost, isLoading: selfHostLoading } = useSelfHostConfig();
 
   const checkout = useCreateCheckout();
   const portal = useBillingPortal();
-  const saveSelfHost = useSaveSelfHostConfig();
-  const toggleSelfHost = useToggleSelfHost();
-  const deleteSelfHost = useDeleteSelfHostConfig();
-
-  const [form, setForm] = useState<SelfHostConfigInput>(EMPTY_SELFHOST);
-  const [showForm, setShowForm] = useState(false);
 
   const plan = usage?.plan ?? "demo";
+  const subscribed = usage?.subscribed ?? false;
+  // A Pro subscriber recording on their own keys is still on the Pro plan -
+  // they can switch back to our servers anytime from Self-host.
+  const planKey = subscribed ? "pro" : plan;
   const percentUsed =
     usage?.limit && usage.limit > 0
       ? Math.min(100, Math.round((usage.used / usage.limit) * 100))
@@ -485,26 +508,6 @@ const PlanBillingSection = () => {
       onError: () =>
         toast.error("Couldn't open the billing portal. Try again."),
     });
-
-  const handleSaveSelfHost = (event: FormEvent) => {
-    event.preventDefault();
-    saveSelfHost.mutate(form, {
-      onSuccess: () => {
-        toast.success(
-          "Keys validated and saved - you're on the self-host plan.",
-        );
-        setForm(EMPTY_SELFHOST);
-        setShowForm(false);
-      },
-      onError: (error) => {
-        const message =
-          isAxiosError(error) && error.response?.data?.message
-            ? (error.response.data.message as string)
-            : "Failed to save keys.";
-        toast.error(message, 8000);
-      },
-    });
-  };
 
   // Hold the whole section until the plan is known - otherwise it renders the
   // default "demo" state first and visibly flips to the real plan on load.
@@ -529,7 +532,7 @@ const PlanBillingSection = () => {
           Plan & billing
         </h2>
         <p className="mt-0.5 text-sm text-fg-muted">
-          Your plan, usage, and how recordings are hosted.
+          Your plan, usage, and billing.
         </p>
       </div>
 
@@ -542,32 +545,22 @@ const PlanBillingSection = () => {
               <span
                 className={cn(
                   "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1",
-                  plan === "pro"
+                  planKey === "pro"
                     ? "bg-success/10 text-success ring-success/30"
-                    : plan === "selfhost"
+                    : planKey === "selfhost"
                       ? "bg-info/10 text-info ring-info/30"
                       : "bg-muted text-fg-muted ring-border",
                 )}
               >
-                {PLAN_LABELS[plan]}
+                {PLAN_LABELS[planKey]}
               </span>
             </div>
             <p className="mt-0.5 max-w-md text-xs leading-5 text-fg-subtle">
-              {PLAN_NOTES[plan]}
+              {PLAN_NOTES[planKey]}
             </p>
           </div>
           <div className="flex gap-2">
-            {plan !== "pro" && (
-              <button
-                type="button"
-                onClick={handleUpgrade}
-                disabled={checkout.isPending}
-                className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {checkout.isPending ? "Opening…" : "Upgrade to Pro - $8.99/mo"}
-              </button>
-            )}
-            {plan === "pro" && (
+            {subscribed ? (
               <button
                 type="button"
                 onClick={handlePortal}
@@ -575,6 +568,15 @@ const PlanBillingSection = () => {
                 className="h-9 cursor-pointer rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
               >
                 {portal.isPending ? "Opening…" : "Manage billing"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleUpgrade}
+                disabled={checkout.isPending}
+                className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {checkout.isPending ? "Opening…" : "Upgrade to Pro - $8.99/mo"}
               </button>
             )}
           </div>
@@ -622,154 +624,293 @@ const PlanBillingSection = () => {
         ) : null}
       </div>
 
-      {plan === "pro" && (
-        <p className="text-sm text-fg-subtle">
-          To switch to self-host, cancel your current subscription first.
-        </p>
-      )}
-
-      {/* Self-host - not offered to Pro subscribers (they're on our infra). */}
-      {plan !== "pro" && (
-        <div className="rounded-xl border border-border/50 bg-primary p-4">
+      {/* Where recordings run - the switch itself lives in Self-host. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/50 bg-primary p-4">
+        <div>
           <h3 className="text-sm font-medium text-foreground">
-            Self-host (bring your own keys)
+            {plan === "selfhost"
+              ? "You're self-hosting on your own servers."
+              : "Want to self-host on your own servers?"}
           </h3>
           <p className="mt-0.5 max-w-md text-xs leading-5 text-fg-subtle">
-            Run recordings on your own LiveKit and Cloudflare R2. Free and
-            unlimited - your keys, your bill. Keys are validated on save and
-            stored encrypted; they're never shown again.
+            {plan === "selfhost"
+              ? "Calls and recordings run on your LiveKit and R2. Switch back to Openside cloud anytime."
+              : "Use your own LiveKit and R2 keys to record free and unlimited."}
           </p>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenSelfHost}
+          className={cn(
+            "h-9 cursor-pointer rounded-lg px-4 text-sm font-medium transition-opacity",
+            plan === "selfhost"
+              ? "bg-muted text-foreground hover:opacity-80"
+              : "bg-brand text-white hover:opacity-90",
+          )}
+        >
+          {plan === "selfhost" ? "Manage" : "Set up"}
+        </button>
+      </div>
+    </div>
+  );
+};
 
-          {selfHostLoading ? (
-            <div className="mt-4 h-24 animate-pulse rounded-lg bg-muted" />
-          ) : selfHost && !showForm ? (
-            <div className="mt-4 flex flex-col gap-3">
-              <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-                <div className="flex justify-between gap-2 sm:block">
-                  <dt className="text-fg-subtle">LiveKit URL</dt>
-                  <dd className="truncate font-mono text-foreground">
-                    {selfHost.livekitUrl}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-2 sm:block">
-                  <dt className="text-fg-subtle">LiveKit API key</dt>
-                  <dd className="font-mono text-foreground">
-                    {selfHost.livekitApiKey}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-2 sm:block">
-                  <dt className="text-fg-subtle">R2 bucket</dt>
-                  <dd className="truncate font-mono text-foreground">
-                    {selfHost.r2Bucket}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-2 sm:block">
-                  <dt className="text-fg-subtle">R2 access key</dt>
-                  <dd className="font-mono text-foreground">
-                    {selfHost.r2AccessKeyId}
-                  </dd>
-                </div>
-              </dl>
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1",
-                    selfHost.enabled
-                      ? "bg-success/10 text-success ring-success/30"
-                      : "bg-muted text-fg-muted ring-border",
-                  )}
-                >
-                  {selfHost.enabled ? "Active" : "Disabled"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    toggleSelfHost.mutate(!selfHost.enabled, {
-                      onError: () =>
-                        toast.error("Couldn't update self-host settings."),
-                    })
-                  }
-                  disabled={toggleSelfHost.isPending}
-                  className="h-8 cursor-pointer rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:opacity-50"
-                >
-                  {selfHost.enabled ? "Disable" : "Enable"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(true)}
-                  className="h-8 cursor-pointer rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80"
-                >
-                  Replace keys
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    deleteSelfHost.mutate(undefined, {
-                      onSuccess: () =>
-                        toast.success("Self-host config removed."),
-                      onError: () =>
-                        toast.error("Couldn't remove self-host config."),
-                    })
-                  }
-                  disabled={deleteSelfHost.isPending}
-                  className="h-8 cursor-pointer rounded-lg bg-danger/10 px-3 text-xs font-medium text-danger transition-colors hover:bg-danger/15 disabled:opacity-50"
-                >
-                  Remove
-                </button>
+// SELF-HOST -------------------------------------------------------------------
+
+const SelfHostSection = () => {
+  const { data: usage } = useUsage();
+  const { data: selfHost, isLoading: selfHostLoading } = useSelfHostConfig();
+
+  const saveSelfHost = useSaveSelfHostConfig();
+  const toggleSelfHost = useToggleSelfHost();
+  const deleteSelfHost = useDeleteSelfHostConfig();
+
+  const [form, setForm] = useState<SelfHostConfigInput>(EMPTY_SELFHOST);
+  const [showForm, setShowForm] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  const subscribed = usage?.subscribed ?? false;
+  const cloudLabel = subscribed
+    ? "Openside cloud (Pro)"
+    : "Openside cloud (Demo)";
+
+  const handleSaveSelfHost = (event: FormEvent) => {
+    event.preventDefault();
+    saveSelfHost.mutate(form, {
+      onSuccess: () => {
+        toast.success(
+          "Keys validated and saved - new recordings go to your servers.",
+        );
+        setForm(EMPTY_SELFHOST);
+        setShowForm(false);
+      },
+      onError: (error) => {
+        const message =
+          isAxiosError(error) && error.response?.data?.message
+            ? (error.response.data.message as string)
+            : "Failed to save keys.";
+        toast.error(message, 8000);
+      },
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Self-host</h2>
+        <p className="mt-0.5 text-sm text-fg-muted">
+          Run calls and recordings on your own LiveKit and Cloudflare R2. Free
+          and unlimited - your keys, your bill.
+        </p>
+      </div>
+
+      {selfHostLoading ? (
+        <div className="h-24 animate-pulse rounded-xl bg-muted" />
+      ) : (
+        <>
+          {/* Upload target switch - only meaningful once keys are saved. */}
+          {selfHost && (
+            <div className="flex items-start justify-between gap-4 rounded-xl border border-border/50 bg-primary p-4">
+              <div>
+                <h3 className="text-sm font-medium text-foreground">
+                  Use my own servers
+                </h3>
+                <p className="mt-0.5 max-w-md text-xs leading-5 text-fg-subtle">
+                  {selfHost.enabled
+                    ? "New calls and recordings run on your LiveKit and upload to your R2 bucket."
+                    : `New calls and recordings run on ${cloudLabel}.`}{" "}
+                  Existing recordings stay where they were made and keep
+                  playing.
+                </p>
               </div>
+              <Switch
+                checked={selfHost.enabled}
+                onChange={(enabled) =>
+                  toggleSelfHost.mutate(enabled, {
+                    onSuccess: () =>
+                      toast.success(
+                        enabled
+                          ? "New recordings will upload to your servers."
+                          : `New recordings will upload to ${cloudLabel}.`,
+                      ),
+                    onError: () =>
+                      toast.error("Couldn't update self-host settings."),
+                  })
+                }
+                disabled={toggleSelfHost.isPending}
+                label="Use my own servers"
+              />
             </div>
-          ) : (
-            <form
-              onSubmit={handleSaveSelfHost}
-              className="mt-4 flex flex-col gap-3"
-            >
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {SELFHOST_FIELDS.map(({ key, label, placeholder, secret }) => (
-                  <label key={key} className="flex flex-col gap-1 text-sm">
-                    <span className="text-fg-muted">{label}</span>
-                    <input
-                      type={secret ? "password" : "text"}
-                      value={form[key]}
-                      onChange={(event) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          [key]: event.target.value,
-                        }))
-                      }
-                      placeholder={placeholder}
-                      required
-                      autoComplete="off"
-                      className="h-9 rounded-lg border border-border/50 bg-background px-3 font-mono text-sm text-foreground outline-none transition-colors focus:border-fg-faint"
-                    />
-                  </label>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={saveSelfHost.isPending}
-                  className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  {saveSelfHost.isPending
-                    ? "Validating keys…"
-                    : "Validate & save"}
-                </button>
-                {selfHost && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForm(false);
-                      setForm(EMPTY_SELFHOST);
-                    }}
-                    className="h-9 cursor-pointer rounded-lg bg-muted px-4 text-sm font-medium text-foreground transition-opacity hover:opacity-80"
-                  >
-                    Cancel
-                  </button>
+          )}
+
+          <div className="rounded-xl border border-border/50 bg-primary p-4">
+            <h3 className="text-sm font-medium text-foreground">Your keys</h3>
+            <p className="mt-0.5 max-w-md text-xs leading-5 text-fg-subtle">
+              Keys are validated on save and stored encrypted; they're never
+              shown again.
+            </p>
+
+            {selfHost && !showForm ? (
+              <div className="mt-4 flex flex-col gap-3">
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                  <div className="flex justify-between gap-2 sm:block">
+                    <dt className="text-fg-subtle">LiveKit URL</dt>
+                    <dd className="truncate font-mono text-foreground">
+                      {selfHost.livekitUrl}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2 sm:block">
+                    <dt className="text-fg-subtle">LiveKit API key</dt>
+                    <dd className="font-mono text-foreground">
+                      {selfHost.livekitApiKey}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2 sm:block">
+                    <dt className="text-fg-subtle">R2 bucket</dt>
+                    <dd className="truncate font-mono text-foreground">
+                      {selfHost.r2Bucket}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2 sm:block">
+                    <dt className="text-fg-subtle">R2 access key</dt>
+                    <dd className="font-mono text-foreground">
+                      {selfHost.r2AccessKeyId}
+                    </dd>
+                  </div>
+                </dl>
+
+                {confirmRemove ? (
+                  <div className="flex flex-col gap-2 rounded-lg bg-danger/10 p-3">
+                    <p className="text-xs leading-5 text-danger">
+                      Recordings stored on your servers won't be playable here
+                      anymore, and new recordings will go to {cloudLabel}.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          deleteSelfHost.mutate(undefined, {
+                            onSuccess: () => {
+                              setConfirmRemove(false);
+                              toast.success("Self-host keys removed.");
+                            },
+                            onError: () =>
+                              toast.error("Couldn't remove self-host keys."),
+                          })
+                        }
+                        disabled={deleteSelfHost.isPending}
+                        className="h-8 cursor-pointer rounded-lg bg-danger px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                      >
+                        {deleteSelfHost.isPending ? "Removing…" : "Remove keys"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRemove(false)}
+                        className="h-8 cursor-pointer rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForm(true)}
+                      className="h-8 cursor-pointer rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80"
+                    >
+                      Replace keys
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemove(true)}
+                      className="h-8 cursor-pointer rounded-lg bg-danger/10 px-3 text-xs font-medium text-danger transition-colors hover:bg-danger/15"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 )}
               </div>
-            </form>
-          )}
-        </div>
+            ) : (
+              <form
+                onSubmit={handleSaveSelfHost}
+                className="mt-5 flex flex-col gap-6"
+              >
+                {SELFHOST_GROUPS.map(({ title, fields }) => (
+                  <div key={title} className="flex flex-col gap-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                      {title}
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {fields.map(
+                        ({ key, label, placeholder, secret, wide }) => (
+                          <label
+                            key={key}
+                            className={cn(
+                              "flex flex-col gap-1.5",
+                              wide && "sm:col-span-2",
+                            )}
+                          >
+                            <span className="text-xs font-medium text-fg-muted">
+                              {label}
+                            </span>
+                            <input
+                              type={secret ? "password" : "text"}
+                              value={form[key]}
+                              onChange={(event) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  [key]: event.target.value,
+                                }))
+                              }
+                              placeholder={placeholder}
+                              required
+                              autoComplete="off"
+                              spellCheck={false}
+                              className="h-9 rounded-lg border border-border/50 bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-fg-faint focus:border-fg-faint"
+                            />
+                          </label>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <div className="flex flex-col gap-3 border-t border-border/50 pt-4">
+                  {subscribed && !selfHost && (
+                    <p className="text-xs leading-5 text-fg-subtle">
+                      Saving switches new recordings to your servers. Your Pro
+                      plan stays active - turn the switch off anytime to go
+                      back.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={saveSelfHost.isPending}
+                      className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      {saveSelfHost.isPending
+                        ? "Validating keys…"
+                        : "Validate & save"}
+                    </button>
+                    {selfHost && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowForm(false);
+                          setForm(EMPTY_SELFHOST);
+                        }}
+                        className="h-9 cursor-pointer rounded-lg bg-muted px-4 text-sm font-medium text-foreground transition-opacity hover:opacity-80"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -825,7 +966,10 @@ const DashboardSettingsPage = () => {
         <div className="min-w-0 flex-1">
           {section === "profile" && <ProfileSection />}
           {section === "appearance" && <AppearanceSection />}
-          {section === "billing" && <PlanBillingSection />}
+          {section === "billing" && (
+            <PlanBillingSection onOpenSelfHost={() => setSection("selfhost")} />
+          )}
+          {section === "selfhost" && <SelfHostSection />}
           {section === "recording" && (
             <div className="flex flex-col gap-6">
               <div>

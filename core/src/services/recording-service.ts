@@ -17,6 +17,10 @@ import {
 	generateEarlyThumbnailFromChunk,
 	maybeFinalizeSession,
 } from "./finalization-service.ts";
+import {
+	invalidateSpaceInfraCache,
+	isSelfHostActive,
+} from "./infra-service.ts";
 import { maybeFinalizeScreenSession } from "./screen-finalization-service.ts";
 import { deleteObjects } from "./storage-service.ts";
 import { assertCanRecord, meterSessionById } from "./usage-service.ts";
@@ -296,6 +300,7 @@ export async function startRecordingSession(data: StartSessionData) {
 			recordingStatus: true,
 			livekitRoomName: true,
 			hostId: true,
+			selfHosted: true,
 			host: {
 				select: {
 					cloudBackupEnabled: true,
@@ -328,7 +333,19 @@ export async function startRecordingSession(data: StartSessionData) {
 	// preference (Settings → Recording), can be overridden per session by the
 	// client, and is only ever honored when the host's plan allows it (never on
 	// DEMO). If backup is off, no cloud egress recording is started.
-	const entitlements = await assertCanRecord(space.hostId);
+	//
+	// The session runs on the same infra as the room (its files, egress and
+	// LiveKit must agree), so it inherits the space's stamp. Legacy spaces from
+	// before stamping get pinned to the host's current setting here.
+	const selfHosted = space.selfHosted ?? (await isSelfHostActive(space.hostId));
+	if (space.selfHosted === null) {
+		await prisma.space.update({
+			where: { id: spaceId },
+			data: { selfHosted },
+		});
+		invalidateSpaceInfraCache(spaceId);
+	}
+	const entitlements = await assertCanRecord(space.hostId, selfHosted);
 	const wantsBackup =
 		data.cloudBackup === undefined
 			? space.host.cloudBackupEnabled
@@ -385,6 +402,7 @@ export async function startRecordingSession(data: StartSessionData) {
 				title: `Recording ${existingSessionCount + 1}`,
 				status: "ACTIVE",
 				startedAt: new Date(),
+				selfHosted,
 				cloudBackup,
 				targetFps,
 				videoResolution,
@@ -2060,13 +2078,16 @@ export async function startScreenRecordingSession(
 	const { userId, spaceRecordingSessionId, title, description, composition } =
 		data;
 
-	// Throws USAGE_EXHAUSTED when the user's metered credit is spent.
-	await assertCanRecord(userId);
+	// Pinned to the user's infra as of now (see infra-service). Throws
+	// USAGE_EXHAUSTED when that side's metered credit is spent.
+	const selfHosted = await isSelfHostActive(userId);
+	await assertCanRecord(userId, selfHosted);
 
 	return await prisma.recordingSession.create({
 		data: {
 			source: "SCREEN_RECORDER",
 			userId,
+			selfHosted,
 			spaceRecordingSessionId,
 			title: title?.trim() || null,
 			description: description?.trim() || null,

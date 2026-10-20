@@ -64,6 +64,7 @@ export type RecordingSessionMinAggregateOutputType = {
   autoGainControl: boolean | null
   echoCancellation: boolean | null
   recordingMode: string | null
+  selfHosted: boolean | null
   createdAt: Date | null
 }
 
@@ -91,6 +92,7 @@ export type RecordingSessionMaxAggregateOutputType = {
   autoGainControl: boolean | null
   echoCancellation: boolean | null
   recordingMode: string | null
+  selfHosted: boolean | null
   createdAt: Date | null
 }
 
@@ -120,6 +122,7 @@ export type RecordingSessionCountAggregateOutputType = {
   autoGainControl: number
   echoCancellation: number
   recordingMode: number
+  selfHosted: number
   createdAt: number
   _all: number
 }
@@ -163,6 +166,7 @@ export type RecordingSessionMinAggregateInputType = {
   autoGainControl?: true
   echoCancellation?: true
   recordingMode?: true
+  selfHosted?: true
   createdAt?: true
 }
 
@@ -190,6 +194,7 @@ export type RecordingSessionMaxAggregateInputType = {
   autoGainControl?: true
   echoCancellation?: true
   recordingMode?: true
+  selfHosted?: true
   createdAt?: true
 }
 
@@ -219,6 +224,7 @@ export type RecordingSessionCountAggregateInputType = {
   autoGainControl?: true
   echoCancellation?: true
   recordingMode?: true
+  selfHosted?: true
   createdAt?: true
   _all?: true
 }
@@ -335,6 +341,7 @@ export type RecordingSessionGroupByOutputType = {
   autoGainControl: boolean
   echoCancellation: boolean
   recordingMode: string
+  selfHosted: boolean | null
   createdAt: Date
   _count: RecordingSessionCountAggregateOutputType | null
   _avg: RecordingSessionAvgAggregateOutputType | null
@@ -387,6 +394,7 @@ export type RecordingSessionWhereInput = {
   autoGainControl?: Prisma.BoolFilter<"RecordingSession"> | boolean
   echoCancellation?: Prisma.BoolFilter<"RecordingSession"> | boolean
   recordingMode?: Prisma.StringFilter<"RecordingSession"> | string
+  selfHosted?: Prisma.BoolNullableFilter<"RecordingSession"> | boolean | null
   createdAt?: Prisma.DateTimeFilter<"RecordingSession"> | Date | string
   space?: Prisma.XOR<Prisma.SpaceNullableScalarRelationFilter, Prisma.SpaceWhereInput> | null
   user?: Prisma.XOR<Prisma.UserNullableScalarRelationFilter, Prisma.UserWhereInput> | null
@@ -421,6 +429,7 @@ export type RecordingSessionOrderByWithRelationInput = {
   autoGainControl?: Prisma.SortOrder
   echoCancellation?: Prisma.SortOrder
   recordingMode?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   space?: Prisma.SpaceOrderByWithRelationInput
   user?: Prisma.UserOrderByWithRelationInput
@@ -458,6 +467,7 @@ export type RecordingSessionWhereUniqueInput = Prisma.AtLeast<{
   autoGainControl?: Prisma.BoolFilter<"RecordingSession"> | boolean
   echoCancellation?: Prisma.BoolFilter<"RecordingSession"> | boolean
   recordingMode?: Prisma.StringFilter<"RecordingSession"> | string
+  selfHosted?: Prisma.BoolNullableFilter<"RecordingSession"> | boolean | null
   createdAt?: Prisma.DateTimeFilter<"RecordingSession"> | Date | string
   space?: Prisma.XOR<Prisma.SpaceNullableScalarRelationFilter, Prisma.SpaceWhereInput> | null
   user?: Prisma.XOR<Prisma.UserNullableScalarRelationFilter, Prisma.UserWhereInput> | null
@@ -492,6 +502,7 @@ export type RecordingSessionOrderByWithAggregationInput = {
   autoGainControl?: Prisma.SortOrder
   echoCancellation?: Prisma.SortOrder
   recordingMode?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   _count?: Prisma.RecordingSessionCountOrderByAggregateInput
   _avg?: Prisma.RecordingSessionAvgOrderByAggregateInput
@@ -529,6 +540,7 @@ export type RecordingSessionScalarWhereWithAggregatesInput = {
   autoGainControl?: Prisma.BoolWithAggregatesFilter<"RecordingSession"> | boolean
   echoCancellation?: Prisma.BoolWithAggregatesFilter<"RecordingSession"> | boolean
   recordingMode?: Prisma.StringWithAggregatesFilter<"RecordingSession"> | string
+  selfHosted?: Prisma.BoolNullableWithAggregatesFilter<"RecordingSession"> | boolean | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"RecordingSession"> | Date | string
 }
 
@@ -556,6 +568,7 @@ export type RecordingSessionCreateInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   space?: Prisma.SpaceCreateNestedOneWithoutRecordingSessionsInput
   user?: Prisma.UserCreateNestedOneWithoutRecordingSessionsInput
@@ -590,6 +603,7 @@ export type RecordingSessionUncheckedCreateInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedCreateNestedManyWithoutRecordingSessionInput
   finalOutputs?: Prisma.FinalOutputUncheckedCreateNestedManyWithoutRecordingSessionInput
@@ -620,6 +634,7 @@ export type RecordingSessionUpdateInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   space?: Prisma.SpaceUpdateOneWithoutRecordingSessionsNestedInput
   user?: Prisma.UserUpdateOneWithoutRecordingSessionsNestedInput
@@ -654,6 +669,7 @@ export type RecordingSessionUncheckedUpdateInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedUpdateManyWithoutRecordingSessionNestedInput
   finalOutputs?: Prisma.FinalOutputUncheckedUpdateManyWithoutRecordingSessionNestedInput
@@ -686,6 +702,7 @@ export type RecordingSessionCreateManyInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
 }
 
@@ -713,6 +730,7 @@ export type RecordingSessionUpdateManyMutationInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -742,6 +760,7 @@ export type RecordingSessionUncheckedUpdateManyInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -781,6 +800,7 @@ export type RecordingSessionCountOrderByAggregateInput = {
   autoGainControl?: Prisma.SortOrder
   echoCancellation?: Prisma.SortOrder
   recordingMode?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -815,6 +835,7 @@ export type RecordingSessionMaxOrderByAggregateInput = {
   autoGainControl?: Prisma.SortOrder
   echoCancellation?: Prisma.SortOrder
   recordingMode?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -842,6 +863,7 @@ export type RecordingSessionMinOrderByAggregateInput = {
   autoGainControl?: Prisma.SortOrder
   echoCancellation?: Prisma.SortOrder
   recordingMode?: Prisma.SortOrder
+  selfHosted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -1015,6 +1037,7 @@ export type RecordingSessionCreateWithoutUserInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   space?: Prisma.SpaceCreateNestedOneWithoutRecordingSessionsInput
   participantRecordings?: Prisma.ParticipantRecordingCreateNestedManyWithoutRecordingSessionInput
@@ -1047,6 +1070,7 @@ export type RecordingSessionUncheckedCreateWithoutUserInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedCreateNestedManyWithoutRecordingSessionInput
   finalOutputs?: Prisma.FinalOutputUncheckedCreateNestedManyWithoutRecordingSessionInput
@@ -1108,6 +1132,7 @@ export type RecordingSessionScalarWhereInput = {
   autoGainControl?: Prisma.BoolFilter<"RecordingSession"> | boolean
   echoCancellation?: Prisma.BoolFilter<"RecordingSession"> | boolean
   recordingMode?: Prisma.StringFilter<"RecordingSession"> | string
+  selfHosted?: Prisma.BoolNullableFilter<"RecordingSession"> | boolean | null
   createdAt?: Prisma.DateTimeFilter<"RecordingSession"> | Date | string
 }
 
@@ -1135,6 +1160,7 @@ export type RecordingSessionCreateWithoutSpaceInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   user?: Prisma.UserCreateNestedOneWithoutRecordingSessionsInput
   participantRecordings?: Prisma.ParticipantRecordingCreateNestedManyWithoutRecordingSessionInput
@@ -1167,6 +1193,7 @@ export type RecordingSessionUncheckedCreateWithoutSpaceInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedCreateNestedManyWithoutRecordingSessionInput
   finalOutputs?: Prisma.FinalOutputUncheckedCreateNestedManyWithoutRecordingSessionInput
@@ -1223,6 +1250,7 @@ export type RecordingSessionCreateWithoutCommentsInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   space?: Prisma.SpaceCreateNestedOneWithoutRecordingSessionsInput
   user?: Prisma.UserCreateNestedOneWithoutRecordingSessionsInput
@@ -1256,6 +1284,7 @@ export type RecordingSessionUncheckedCreateWithoutCommentsInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedCreateNestedManyWithoutRecordingSessionInput
   finalOutputs?: Prisma.FinalOutputUncheckedCreateNestedManyWithoutRecordingSessionInput
@@ -1301,6 +1330,7 @@ export type RecordingSessionUpdateWithoutCommentsInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   space?: Prisma.SpaceUpdateOneWithoutRecordingSessionsNestedInput
   user?: Prisma.UserUpdateOneWithoutRecordingSessionsNestedInput
@@ -1334,6 +1364,7 @@ export type RecordingSessionUncheckedUpdateWithoutCommentsInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedUpdateManyWithoutRecordingSessionNestedInput
   finalOutputs?: Prisma.FinalOutputUncheckedUpdateManyWithoutRecordingSessionNestedInput
@@ -1363,6 +1394,7 @@ export type RecordingSessionCreateWithoutParticipantRecordingsInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   space?: Prisma.SpaceCreateNestedOneWithoutRecordingSessionsInput
   user?: Prisma.UserCreateNestedOneWithoutRecordingSessionsInput
@@ -1396,6 +1428,7 @@ export type RecordingSessionUncheckedCreateWithoutParticipantRecordingsInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   finalOutputs?: Prisma.FinalOutputUncheckedCreateNestedManyWithoutRecordingSessionInput
   comments?: Prisma.RecordingCommentUncheckedCreateNestedManyWithoutRecordingSessionInput
@@ -1441,6 +1474,7 @@ export type RecordingSessionUpdateWithoutParticipantRecordingsInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   space?: Prisma.SpaceUpdateOneWithoutRecordingSessionsNestedInput
   user?: Prisma.UserUpdateOneWithoutRecordingSessionsNestedInput
@@ -1474,6 +1508,7 @@ export type RecordingSessionUncheckedUpdateWithoutParticipantRecordingsInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   finalOutputs?: Prisma.FinalOutputUncheckedUpdateManyWithoutRecordingSessionNestedInput
   comments?: Prisma.RecordingCommentUncheckedUpdateManyWithoutRecordingSessionNestedInput
@@ -1503,6 +1538,7 @@ export type RecordingSessionCreateWithoutFinalOutputsInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   space?: Prisma.SpaceCreateNestedOneWithoutRecordingSessionsInput
   user?: Prisma.UserCreateNestedOneWithoutRecordingSessionsInput
@@ -1536,6 +1572,7 @@ export type RecordingSessionUncheckedCreateWithoutFinalOutputsInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedCreateNestedManyWithoutRecordingSessionInput
   comments?: Prisma.RecordingCommentUncheckedCreateNestedManyWithoutRecordingSessionInput
@@ -1581,6 +1618,7 @@ export type RecordingSessionUpdateWithoutFinalOutputsInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   space?: Prisma.SpaceUpdateOneWithoutRecordingSessionsNestedInput
   user?: Prisma.UserUpdateOneWithoutRecordingSessionsNestedInput
@@ -1614,6 +1652,7 @@ export type RecordingSessionUncheckedUpdateWithoutFinalOutputsInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedUpdateManyWithoutRecordingSessionNestedInput
   comments?: Prisma.RecordingCommentUncheckedUpdateManyWithoutRecordingSessionNestedInput
@@ -1644,6 +1683,7 @@ export type RecordingSessionCreateManyUserInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
 }
 
@@ -1671,6 +1711,7 @@ export type RecordingSessionUpdateWithoutUserInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   space?: Prisma.SpaceUpdateOneWithoutRecordingSessionsNestedInput
   participantRecordings?: Prisma.ParticipantRecordingUpdateManyWithoutRecordingSessionNestedInput
@@ -1703,6 +1744,7 @@ export type RecordingSessionUncheckedUpdateWithoutUserInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedUpdateManyWithoutRecordingSessionNestedInput
   finalOutputs?: Prisma.FinalOutputUncheckedUpdateManyWithoutRecordingSessionNestedInput
@@ -1734,6 +1776,7 @@ export type RecordingSessionUncheckedUpdateManyWithoutUserInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -1762,6 +1805,7 @@ export type RecordingSessionCreateManySpaceInput = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: string
+  selfHosted?: boolean | null
   createdAt?: Date | string
 }
 
@@ -1789,6 +1833,7 @@ export type RecordingSessionUpdateWithoutSpaceInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneWithoutRecordingSessionsNestedInput
   participantRecordings?: Prisma.ParticipantRecordingUpdateManyWithoutRecordingSessionNestedInput
@@ -1821,6 +1866,7 @@ export type RecordingSessionUncheckedUpdateWithoutSpaceInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   participantRecordings?: Prisma.ParticipantRecordingUncheckedUpdateManyWithoutRecordingSessionNestedInput
   finalOutputs?: Prisma.FinalOutputUncheckedUpdateManyWithoutRecordingSessionNestedInput
@@ -1852,6 +1898,7 @@ export type RecordingSessionUncheckedUpdateManyWithoutSpaceInput = {
   autoGainControl?: Prisma.BoolFieldUpdateOperationsInput | boolean
   echoCancellation?: Prisma.BoolFieldUpdateOperationsInput | boolean
   recordingMode?: Prisma.StringFieldUpdateOperationsInput | string
+  selfHosted?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -1930,6 +1977,7 @@ export type RecordingSessionSelect<ExtArgs extends runtime.Types.Extensions.Inte
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   space?: boolean | Prisma.RecordingSession$spaceArgs<ExtArgs>
   user?: boolean | Prisma.RecordingSession$userArgs<ExtArgs>
@@ -1965,6 +2013,7 @@ export type RecordingSessionSelectCreateManyAndReturn<ExtArgs extends runtime.Ty
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   space?: boolean | Prisma.RecordingSession$spaceArgs<ExtArgs>
   user?: boolean | Prisma.RecordingSession$userArgs<ExtArgs>
@@ -1996,6 +2045,7 @@ export type RecordingSessionSelectUpdateManyAndReturn<ExtArgs extends runtime.Ty
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
   space?: boolean | Prisma.RecordingSession$spaceArgs<ExtArgs>
   user?: boolean | Prisma.RecordingSession$userArgs<ExtArgs>
@@ -2027,10 +2077,11 @@ export type RecordingSessionSelectScalar = {
   autoGainControl?: boolean
   echoCancellation?: boolean
   recordingMode?: boolean
+  selfHosted?: boolean
   createdAt?: boolean
 }
 
-export type RecordingSessionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "source" | "spaceId" | "userId" | "title" | "description" | "composition" | "outputs" | "spaceRecordingSessionId" | "shareToken" | "sharedAt" | "startedAt" | "stoppedAt" | "status" | "egressId" | "lastMeteredAt" | "meteredSeconds" | "cloudBackup" | "targetFps" | "videoResolution" | "audioSampleRate" | "noiseSuppression" | "autoGainControl" | "echoCancellation" | "recordingMode" | "createdAt", ExtArgs["result"]["recordingSession"]>
+export type RecordingSessionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "source" | "spaceId" | "userId" | "title" | "description" | "composition" | "outputs" | "spaceRecordingSessionId" | "shareToken" | "sharedAt" | "startedAt" | "stoppedAt" | "status" | "egressId" | "lastMeteredAt" | "meteredSeconds" | "cloudBackup" | "targetFps" | "videoResolution" | "audioSampleRate" | "noiseSuppression" | "autoGainControl" | "echoCancellation" | "recordingMode" | "selfHosted" | "createdAt", ExtArgs["result"]["recordingSession"]>
 export type RecordingSessionInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   space?: boolean | Prisma.RecordingSession$spaceArgs<ExtArgs>
   user?: boolean | Prisma.RecordingSession$userArgs<ExtArgs>
@@ -2083,6 +2134,7 @@ export type $RecordingSessionPayload<ExtArgs extends runtime.Types.Extensions.In
     autoGainControl: boolean
     echoCancellation: boolean
     recordingMode: string
+    selfHosted: boolean | null
     createdAt: Date
   }, ExtArgs["result"]["recordingSession"]>
   composites: {}
@@ -2537,6 +2589,7 @@ export interface RecordingSessionFieldRefs {
   readonly autoGainControl: Prisma.FieldRef<"RecordingSession", 'Boolean'>
   readonly echoCancellation: Prisma.FieldRef<"RecordingSession", 'Boolean'>
   readonly recordingMode: Prisma.FieldRef<"RecordingSession", 'String'>
+  readonly selfHosted: Prisma.FieldRef<"RecordingSession", 'Boolean'>
   readonly createdAt: Prisma.FieldRef<"RecordingSession", 'DateTime'>
 }
     

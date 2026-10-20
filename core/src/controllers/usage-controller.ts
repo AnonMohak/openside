@@ -5,6 +5,7 @@ import { findOrCreateUser } from "../services/auth-service.ts";
 import {
 	LOW_CREDIT_WARNING_SECONDS,
 	getEntitlements,
+	hasActiveSubscription,
 } from "../services/entitlements-service.ts";
 import {
 	type UsageSnapshot,
@@ -13,9 +14,12 @@ import {
 	resolveSessionOwner,
 } from "../services/usage-service.ts";
 
-function serializeUsage(usage: UsageSnapshot) {
+function serializeUsage(usage: UsageSnapshot, subscribed = false) {
 	return {
 		plan: usage.plan,
+		// Paying for Pro - true even while recording on their own keys
+		// (plan "selfhost"), so the client can still offer billing management.
+		subscribed,
 		used: usage.used,
 		limit: usage.limit,
 		remaining: usage.remaining,
@@ -42,11 +46,14 @@ export async function getUsageController(
 		}
 
 		const user = await findOrCreateUser(req.user);
-		const usage = await getUsage(user.id);
+		const [usage, subscribed] = await Promise.all([
+			getUsage(user.id),
+			hasActiveSubscription(user.id),
+		]);
 
 		res.status(200).json({
 			success: true,
-			data: serializeUsage(usage),
+			data: serializeUsage(usage, subscribed),
 			message: "Usage retrieved successfully!",
 		});
 	} catch (error: unknown) {

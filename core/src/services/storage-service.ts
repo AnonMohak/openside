@@ -17,7 +17,12 @@ import {
 	PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { resolveR2ForKey } from "./infra-service.ts";
+import {
+	type R2Infra,
+	resolveR2CandidatesForKey,
+	resolveR2ForKey,
+	resolveR2ForRead,
+} from "./infra-service.ts";
 
 /** Local recording track kinds (per participant). "pcm" is a headerless raw
  *  24-bit PCM mic capture uploaded alongside the combined video master; its
@@ -90,8 +95,8 @@ export async function presignPut(
 	key: string,
 	contentType: string,
 ): Promise<string> {
-	// Keys are owner-scoped, so this presigns against the owner's own R2 when
-	// they self-host, and platform R2 otherwise.
+	// Resolves from the recording session's infra stamp: the owner's own R2 for
+	// self-hosted sessions, platform R2 otherwise.
 	const r2 = await resolveR2ForKey(key);
 	const command = new PutObjectCommand({
 		Bucket: r2.bucket,
@@ -113,7 +118,7 @@ export async function presignGet(
 	key: string,
 	opts?: { downloadName?: string },
 ): Promise<string> {
-	const r2 = await resolveR2ForKey(key);
+	const r2 = await resolveR2ForRead(key);
 	const command = new GetObjectCommand({
 		Bucket: r2.bucket,
 		Key: key,
@@ -130,7 +135,7 @@ export async function presignGet(
 /** Whether an object exists in the bucket (used to cache transcodes). */
 export async function objectExists(key: string): Promise<boolean> {
 	try {
-		const r2 = await resolveR2ForKey(key);
+		const r2 = await resolveR2ForRead(key);
 		await r2.client.send(
 			new HeadObjectCommand({ Bucket: r2.bucket, Key: key }),
 		);
@@ -142,7 +147,7 @@ export async function objectExists(key: string): Promise<boolean> {
 
 /** Download an object into a Buffer (used by finalization). */
 export async function getObjectBuffer(key: string): Promise<Buffer> {
-	const r2 = await resolveR2ForKey(key);
+	const r2 = await resolveR2ForRead(key);
 	const res = await r2.client.send(
 		new GetObjectCommand({ Bucket: r2.bucket, Key: key }),
 	);
@@ -178,17 +183,17 @@ export async function putFileObject(
 export async function deleteObjects(keys: string[]): Promise<void> {
 	if (keys.length === 0) return;
 
-	// A batch can span owners (in principle) - group keys by resolved bucket.
-	const groups = new Map<
-		string,
-		{ r2: Awaited<ReturnType<typeof resolveR2ForKey>>; keys: string[] }
-	>();
+	// A batch can span owners and infra - group keys by bucket. Legacy keys
+	// (made before infra stamping) are deleted from every bucket they could be
+	// in; deleting a missing key is a no-op.
+	const groups = new Map<string, { r2: R2Infra; keys: string[] }>();
 	for (const key of keys) {
-		const r2 = await resolveR2ForKey(key);
-		const groupKey = `${r2.bucket}:${r2.selfHost}`;
-		const group = groups.get(groupKey) ?? { r2, keys: [] };
-		group.keys.push(key);
-		groups.set(groupKey, group);
+		for (const r2 of await resolveR2CandidatesForKey(key)) {
+			const groupKey = `${r2.bucket}:${r2.selfHost}`;
+			const group = groups.get(groupKey) ?? { r2, keys: [] };
+			group.keys.push(key);
+			groups.set(groupKey, group);
+		}
 	}
 
 	for (const { r2, keys: groupKeys } of groups.values()) {

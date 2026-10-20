@@ -8,6 +8,8 @@ import api from "@/lib/axiosInstance";
 
 export interface Usage {
   plan: "demo" | "pro" | "selfhost";
+  /** Paying for Pro - stays true while recording on their own keys. */
+  subscribed: boolean;
   used: number;
   limit: number | null;
   remaining: number | null;

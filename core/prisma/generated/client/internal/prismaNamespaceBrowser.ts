@@ -169,6 +169,7 @@ export const SpaceScalarFieldEnum = {
   endedReason: 'endedReason',
   duration: 'duration',
   totalRecordingHours: 'totalRecordingHours',
+  selfHosted: 'selfHosted',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -222,6 +223,7 @@ export const RecordingSessionScalarFieldEnum = {
   autoGainControl: 'autoGainControl',
   echoCancellation: 'echoCancellation',
   recordingMode: 'recordingMode',
+  selfHosted: 'selfHosted',
   createdAt: 'createdAt'
 } as const
 

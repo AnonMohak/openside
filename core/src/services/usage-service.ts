@@ -130,8 +130,9 @@ export async function resolveSessionOwner(session: {
  */
 export async function assertCanRecord(
 	ownerUserId: string,
+	selfHosted?: boolean | null,
 ): Promise<Entitlements> {
-	const entitlements = await getEntitlements(ownerUserId);
+	const entitlements = await getEntitlements(ownerUserId, selfHosted);
 	if (!entitlements.metered) return entitlements;
 
 	const usage = await getUsage(ownerUserId);
@@ -150,6 +151,7 @@ type MeterableSession = {
 	status: string;
 	startedAt: Date;
 	lastMeteredAt: Date | null;
+	selfHosted: boolean | null;
 };
 
 const METER_SESSION_SELECT = {
@@ -160,6 +162,7 @@ const METER_SESSION_SELECT = {
 	status: true,
 	startedAt: true,
 	lastMeteredAt: true,
+	selfHosted: true,
 } as const;
 
 /**
@@ -188,7 +191,9 @@ export async function meterSession(
 	}
 	if (!ownerUserId) return null;
 
-	const entitlements = await getEntitlements(ownerUserId);
+	// Metered by the side the session actually runs on, not the owner's
+	// current switch - flipping to self-host mid-recording can't dodge the cap.
+	const entitlements = await getEntitlements(ownerUserId, session.selfHosted);
 	if (!entitlements.metered) return null;
 
 	const from = session.lastMeteredAt ?? session.startedAt;

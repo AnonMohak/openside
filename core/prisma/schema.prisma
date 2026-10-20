@@ -123,6 +123,11 @@ model Space {
   endedReason         String?
   duration            Int? // milliseconds
   totalRecordingHours Float?
+  // Which infra the room runs on: true = host's own LiveKit + R2 (self-host),
+  // false = platform. Stamped when the room goes live so the host flipping their
+  // self-host switch mid-call can't move it. Null = legacy (follows the host's
+  // current setting).
+  selfHosted          Boolean?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
@@ -227,6 +232,12 @@ model RecordingSession {
   autoGainControl         Boolean                @default(false)
   echoCancellation        Boolean                @default(false)
   recordingMode           String                 @default("VIDEO_AND_AUDIO")
+  // Where this session's files live: true = owner's own R2 (self-host), false =
+  // platform R2. Stamped at start and never changed, so old recordings stay
+  // reachable after the owner switches. Also decides metering, watermark and
+  // retention. Null = legacy (resolved from the owner's current setting, with a
+  // read fallback to the other bucket).
+  selfHosted              Boolean?
   createdAt               DateTime               @default(now())
 
   participantRecordings ParticipantRecording[]

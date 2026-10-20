@@ -347,7 +347,12 @@ export async function finalizeSession(
 	try {
 		const session = await prisma.recordingSession.findUnique({
 			where: { id: recordingSessionId },
-			select: { status: true, spaceId: true, targetFps: true },
+			select: {
+				status: true,
+				spaceId: true,
+				targetFps: true,
+				selfHosted: true,
+			},
 		});
 
 		if (!session) return;
@@ -359,7 +364,11 @@ export async function finalizeSession(
 
 		// Watermark is an owner entitlement (DEMO plan), resolved server-side once
 		// per session and burned into every master below.
-		const watermark = await sessionNeedsWatermark({ spaceId, userId: null });
+		const watermark = await sessionNeedsWatermark({
+			spaceId,
+			userId: null,
+			selfHosted: session.selfHosted,
+		});
 		// Only flip to PROCESSING on the very first run (session still STOPPED).
 		// Re-runs for late-completing tracks must not downgrade an already-READY
 		// session back to PROCESSING and flicker the UI.

@@ -1,5 +1,9 @@
 import { prisma } from "../db/index.ts";
 import {
+	invalidateSpaceInfraCache,
+	isSelfHostActive,
+} from "./infra-service.ts";
+import {
 	createLiveKitRoom,
 	deleteLiveKitRoom,
 	generateLiveKitToken,
@@ -161,6 +165,8 @@ export async function createSpace(data: CreateSpaceData) {
 	}
 
 	const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+	// Pin the room to the host's infra as of now (see infra-service).
+	const selfHosted = await isSelfHostActive(hostId);
 	const createdSpace = await prisma.space
 		.create({
 			data: {
@@ -168,6 +174,7 @@ export async function createSpace(data: CreateSpaceData) {
 				description,
 				joinCode,
 				hostId,
+				selfHosted,
 				status: "LIVE",
 				startTime: new Date(),
 				expiresAt,
@@ -451,6 +458,7 @@ export async function activateScheduledSpace(
 			status: true,
 			joinCode: true,
 			livekitRoomName: true,
+			selfHosted: true,
 		},
 	});
 
@@ -502,6 +510,8 @@ export async function activateScheduledSpace(
 			livekitRoomName,
 			status: "LIVE",
 			startTime: new Date(),
+			// Pin the room to the host's infra as of now (see infra-service).
+			selfHosted: existing.selfHosted ?? (await isSelfHostActive(userId)),
 		},
 		include: {
 			host: {
@@ -515,6 +525,8 @@ export async function activateScheduledSpace(
 			},
 		},
 	});
+
+	invalidateSpaceInfraCache(space.id);
 
 	// No-ops if the room already exists.
 	await createLiveKitRoom({

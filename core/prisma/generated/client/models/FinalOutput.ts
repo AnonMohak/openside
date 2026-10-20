@@ -1151,10 +1151,6 @@ export type EnumFinalOutputVariantFieldUpdateOperationsInput = {
   set?: $Enums.FinalOutputVariant
 }
 
-export type NullableBoolFieldUpdateOperationsInput = {
-  set?: boolean | null
-}
-
 export type EnumOutputStatusFieldUpdateOperationsInput = {
   set?: $Enums.OutputStatus
 }

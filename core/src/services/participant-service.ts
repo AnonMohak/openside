@@ -2,6 +2,10 @@ import { TrackSource } from "livekit-server-sdk";
 import { prisma } from "../db/index.ts";
 import { getEntitlements } from "./entitlements-service.ts";
 import {
+	invalidateSpaceInfraCache,
+	isSelfHostActive,
+} from "./infra-service.ts";
+import {
 	createLiveKitRoom,
 	generateLiveKitToken,
 	getLiveKitIdentity,
@@ -38,6 +42,7 @@ export async function getSpaceIfLive(spaceId: string) {
 			description: true,
 			joinCode: true,
 			livekitRoomName: true,
+			selfHosted: true,
 			expiresAt: true,
 			host: {
 				select: {
@@ -102,10 +107,19 @@ export async function joinSpace(data: JoinSpaceData) {
 	if (space.status === "SCHEDULED") {
 		const livekitRoomName =
 			space.livekitRoomName || getLiveKitRoomName(spaceId);
+		// Pin the room to the host's infra as of now (see infra-service).
+		const selfHosted =
+			space.selfHosted ?? (await isSelfHostActive(space.hostId));
 		await prisma.space.update({
 			where: { id: spaceId },
-			data: { status: "LIVE", startTime: new Date(), livekitRoomName },
+			data: {
+				status: "LIVE",
+				startTime: new Date(),
+				livekitRoomName,
+				selfHosted,
+			},
 		});
+		invalidateSpaceInfraCache(spaceId);
 		// No-op if the room already exists.
 		await createLiveKitRoom({
 			name: livekitRoomName,
@@ -115,7 +129,7 @@ export async function joinSpace(data: JoinSpaceData) {
 				hostId: space.hostId,
 			},
 		});
-		space = { ...space, status: "LIVE", livekitRoomName };
+		space = { ...space, status: "LIVE", livekitRoomName, selfHosted };
 	}
 
 	if (space.status !== "LIVE") {
@@ -131,9 +145,14 @@ export async function joinSpace(data: JoinSpaceData) {
 	// Enforce the host plan's concurrent-participant cap. Only gate joins that
 	// would occupy a NEW active slot - a currently-active participant reconnecting
 	// (reload/second tab) already holds their slot and must not be locked out.
-	const wouldTakeNewSlot = !existingParticipant || !existingParticipant.isActive;
+	const wouldTakeNewSlot =
+		!existingParticipant || !existingParticipant.isActive;
 	if (wouldTakeNewSlot) {
-		const { maxParticipants } = await getEntitlements(space.hostId);
+		// Capped by the infra the room actually runs on, not the host's switch.
+		const { maxParticipants } = await getEntitlements(
+			space.hostId,
+			space.selfHosted,
+		);
 		if (maxParticipants !== null) {
 			const activeCount = await prisma.spaceParticipant.count({
 				where: { spaceId, isActive: true },
