@@ -1,14 +1,15 @@
 import { verifyToken } from "@clerk/backend";
-import type { JwtPayload } from "jsonwebtoken";
 
-export interface AuthUserClaims extends JwtPayload {
+type ClerkJwtPayload = Awaited<ReturnType<typeof verifyToken>>;
+
+export type AuthUserClaims = ClerkJwtPayload & {
 	sub: string;
 	email?: string;
 	given_name?: string;
 	family_name?: string;
 	name?: string;
 	image_url?: string;
-}
+};
 
 const getAuthorizedParties = (): string[] => {
 	const raw = process.env.CLERK_AUTHORIZED_PARTIES;

@@ -128,7 +128,6 @@ services should keep their values in Railway's Variables settings.
 cd core
 pnpm db:generate     # generate Prisma client
 pnpm db:migrate      # apply migrations
-pnpm db:seed         # optional: seed data
 ```
 
 ### 4. Run everything

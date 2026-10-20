@@ -16,7 +16,6 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import axios from "axios";
 import { prisma } from "../db/index.ts";
 
 function getPolarApiBase(): string {
@@ -31,12 +30,26 @@ function getPolarAccessToken(): string {
 	return token;
 }
 
-const polarApi = () =>
-	axios.create({
-		baseURL: `${getPolarApiBase()}/v1`,
-		headers: { Authorization: `Bearer ${getPolarAccessToken()}` },
-		timeout: 10_000,
+async function polarPost(
+	path: string,
+	body: unknown,
+): Promise<Record<string, unknown>> {
+	const res = await fetch(`${getPolarApiBase()}/v1${path}`, {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${getPolarAccessToken()}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(body),
+		signal: AbortSignal.timeout(10_000),
 	});
+	if (!res.ok) {
+		throw new Error(
+			`Polar POST ${path} failed (${res.status}): ${await res.text()}`,
+		);
+	}
+	return (await res.json()) as Record<string, unknown>;
+}
 
 // Webhook signature verification (Standard Webhooks spec)
 
@@ -282,7 +295,7 @@ export async function createProCheckout(user: {
 
 	// Trailing slash is required - Polar 307-redirects /checkouts to /checkouts/,
 	// and the redirect drops the authed POST body.
-	const { data } = await polarApi().post("/checkouts/", {
+	const data = await polarPost("/checkouts/", {
 		products: [productId],
 		external_customer_id: user.id,
 		customer_email: user.email,
@@ -302,7 +315,7 @@ export async function createCustomerPortal(userId: string): Promise<string> {
 	});
 
 	// Trailing slash required (see checkout note) - avoids Polar's 307 redirect.
-	const { data } = await polarApi().post("/customer-sessions/", {
+	const data = await polarPost("/customer-sessions/", {
 		...(user.polarCustomerId
 			? { customer_id: user.polarCustomerId }
 			: { external_customer_id: user.id }),
