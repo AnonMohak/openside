@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   CalendarDays,
   ChevronDown,
@@ -20,8 +21,8 @@ import {
 } from "@/components/shared/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
 import { useGetMe } from "@/hooks/useUserQuery";
-import { useCreateCheckout, useUsage } from "@/hooks/useUsage";
-import { toast } from "@/lib/toast";
+import { useUsage } from "@/hooks/useUsage";
+import PricingModal from "./PricingModal";
 
 const GITHUB_NEW_ISSUE_URL =
   "https://github.com/rinkitadhana/openside/issues/new";
@@ -43,18 +44,9 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
   const { data: user, isLoading } = useGetMe();
   const { logout } = useAuth();
   const { data: usage } = useUsage();
-  const checkout = useCreateCheckout();
+  const [pricingOpen, setPricingOpen] = useState(false);
   // Free (demo) users only - pro and self-host already have everything.
   const showUpgrade = usage?.plan === "demo";
-
-  const handleUpgrade = () =>
-    checkout.mutate(undefined, {
-      onSuccess: (url) => {
-        window.location.href = url;
-      },
-      onError: () =>
-        toast.error("Couldn't start checkout. Try again in a moment."),
-    });
 
   const navLinkClass = (isActive: boolean) =>
     `flex h-10 items-center overflow-hidden rounded-md text-sm font-medium transition-colors ${
@@ -110,10 +102,9 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
         {showUpgrade && (
           <button
             type="button"
-            onClick={handleUpgrade}
-            disabled={checkout.isPending}
+            onClick={() => setPricingOpen(true)}
             title="Upgrade to Pro"
-            className="mb-1 flex h-10 items-center overflow-hidden rounded-md bg-brand text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
+            className="mb-1 flex h-10 items-center overflow-hidden rounded-md bg-brand text-sm font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer"
           >
             <span
               className={`flex shrink-0 items-center justify-center ${
@@ -124,7 +115,7 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
             </span>
             {isOpen && (
               <span className="min-w-0 flex-1 truncate text-left">
-                {checkout.isPending ? "Starting..." : "Upgrade to Pro"}
+                Upgrade to Pro
               </span>
             )}
           </button>
@@ -214,6 +205,8 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <PricingModal open={pricingOpen} onClose={() => setPricingOpen(false)} />
     </aside>
   );
 };

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useGetMe } from "@/hooks/useUserQuery";
@@ -779,7 +780,16 @@ const PlanBillingSection = () => {
 // PAGE ------------------------------------------------------------------------
 
 const DashboardSettingsPage = () => {
+  // `?section=billing` deep-links straight to a section (e.g. from the pricing modal).
+  const [searchParams] = useSearchParams();
+  const requestedSection = searchParams.get("section");
   const [section, setSection] = useState<SectionId>("profile");
+
+  useEffect(() => {
+    if (SECTIONS.some(({ id }) => id === requestedSection)) {
+      setSection(requestedSection as SectionId);
+    }
+  }, [requestedSection]);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pt-6 md:pt-8">

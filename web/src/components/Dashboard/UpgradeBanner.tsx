@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Crown } from "lucide-react";
-import { toast } from "@/lib/toast";
-import { useCreateCheckout, useUsage } from "@/hooks/useUsage";
+import { useUsage } from "@/hooks/useUsage";
+import PricingModal from "./PricingModal";
 
 /**
  * Nudge to upgrade, shown on the dashboard home. Free (demo) users only -
@@ -9,19 +10,10 @@ import { useCreateCheckout, useUsage } from "@/hooks/useUsage";
  */
 const UpgradeBanner = () => {
   const { data: usage } = useUsage();
-  const checkout = useCreateCheckout();
+  const [pricingOpen, setPricingOpen] = useState(false);
 
   // Only free users get the nudge; pro/self-host already have what this offers.
   if (usage?.plan !== "demo") return null;
-
-  const handleUpgrade = () =>
-    checkout.mutate(undefined, {
-      onSuccess: (url) => {
-        window.location.href = url;
-      },
-      onError: () =>
-        toast.error("Couldn't start checkout. Try again in a moment."),
-    });
 
   return (
     <div className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
@@ -40,12 +32,13 @@ const UpgradeBanner = () => {
 
       <button
         type="button"
-        onClick={handleUpgrade}
-        disabled={checkout.isPending}
-        className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-brand px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+        onClick={() => setPricingOpen(true)}
+        className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-brand px-3 text-sm font-medium text-white transition-opacity hover:opacity-90"
       >
-        {checkout.isPending ? "Starting..." : "Upgrade"}
+        Upgrade
       </button>
+
+      <PricingModal open={pricingOpen} onClose={() => setPricingOpen(false)} />
     </div>
   );
 };
