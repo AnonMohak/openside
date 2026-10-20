@@ -42,7 +42,7 @@ const plans: {
     features: [
       "Up to 4K recording",
       "48kHz audio",
-      "20 hours of recording per month",
+      "20 hrs recording/month",
       "Up to 5 participants",
       "30-day recording retention",
       "No watermark",
