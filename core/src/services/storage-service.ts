@@ -7,9 +7,10 @@
  * the recording bandwidth path.
  */
 
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
 	DeleteObjectsCommand,
 	GetObjectCommand,
@@ -158,6 +159,18 @@ export async function getObjectBuffer(key: string): Promise<Buffer> {
 		chunks.push(chunk as Buffer);
 	}
 	return Buffer.concat(chunks);
+}
+
+/** Download an object straight to a local file without buffering it in memory. */
+export async function downloadObjectToFile(
+	key: string,
+	filePath: string,
+): Promise<void> {
+	const r2 = await resolveR2ForRead(key);
+	const res = await r2.client.send(
+		new GetObjectCommand({ Bucket: r2.bucket, Key: key }),
+	);
+	await pipeline(res.Body as Readable, createWriteStream(filePath));
 }
 
 /** Upload a local file stream to R2 without loading the whole file in memory. */

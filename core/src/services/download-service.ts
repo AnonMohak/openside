@@ -9,13 +9,13 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ffmpegPath } from "../lib/ffmpeg-path.ts";
+import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
 import { enqueueTranscode, isQueueConfigured } from "../lib/queue.ts";
 import {
-	getObjectBuffer,
+	downloadObjectToFile,
 	objectExists,
 	presignGet,
 	putFileObject,
@@ -116,7 +116,7 @@ function ffmpegArgs(
 
 function runFfmpeg(args: string[]): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpegPath, args, {
+		const proc = spawn(ffmpegPath, withThreadLimit(args), {
 			stdio: ["ignore", "ignore", "pipe"],
 		});
 		let stderr = "";
@@ -142,7 +142,7 @@ export async function transcodeToR2(
 		const inPath = path.join(tmp, "in.webm");
 		const outPath = path.join(tmp, `out.${format}`);
 
-		await writeFile(inPath, await getObjectBuffer(masterKey));
+		await downloadObjectToFile(masterKey, inPath);
 		await runFfmpeg(ffmpegArgs(inPath, outPath, format));
 
 		// Sanity check the output exists / is non-empty before uploading.

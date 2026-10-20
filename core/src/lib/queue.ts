@@ -14,12 +14,19 @@
 
 import { type JobsOptions, Queue } from "bullmq";
 import IORedis from "ioredis";
-import { wakeMediaWorker } from "./worker-wake.ts";
+import type { WorkerRole } from "./worker-role.ts";
+import { wakeWorker } from "./worker-wake.ts";
 
 const redisUrl = process.env.REDIS_URL;
 
 export const FINALIZE_QUEUE = "finalize";
 export const TRANSCODE_QUEUE = "transcode";
+
+/** Which worker role consumes each queue. New queues go to `general`. */
+export const QUEUE_ROLES = {
+	[FINALIZE_QUEUE]: "finalize",
+	[TRANSCODE_QUEUE]: "general",
+} as const satisfies Record<string, WorkerRole>;
 
 export interface FinalizeJob {
 	recordingSessionId: string;
@@ -175,7 +182,7 @@ export async function enqueueFinalize(
 				removeOnComplete: true,
 			},
 		);
-		await wakeMediaWorker();
+		await wakeWorker(QUEUE_ROLES[FINALIZE_QUEUE]);
 		return true;
 	} finally {
 		endProducerOperation();
@@ -195,7 +202,7 @@ export async function enqueueTranscode(job: TranscodeJob): Promise<boolean> {
 			jobId: safeJobId("transcode", job.targetKey),
 			...DEFAULT_JOB_OPTS,
 		});
-		await wakeMediaWorker();
+		await wakeWorker(QUEUE_ROLES[TRANSCODE_QUEUE]);
 		return true;
 	} finally {
 		endProducerOperation();

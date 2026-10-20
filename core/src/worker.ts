@@ -1,9 +1,13 @@
 /**
  * Media worker process.
  *
+ * WORKER_ROLE (or `--role=`) picks which queues this process consumes:
+ * `finalize` runs session finalization only, `general` runs every other queue, and
+ * no role runs everything (see `lib/worker-role.ts`).
+ *
  * In the default mode this is a traditional always-on BullMQ consumer. With
- * WORKER_SERVERLESS=true it exposes POST /wake, drains both media queues, then
- * closes every Redis/database connection so Railway can scale it to zero.
+ * WORKER_SERVERLESS=true it exposes POST /wake, drains its queues, then closes
+ * every Redis/database connection so Railway can scale it to zero.
  */
 
 import "./lib/load-env.ts";
@@ -15,6 +19,7 @@ import { logFfmpegAvailability } from "./lib/ffmpeg-check.ts";
 import {
 	FINALIZE_QUEUE,
 	type FinalizeJob,
+	QUEUE_ROLES,
 	TRANSCODE_QUEUE,
 	type TranscodeJob,
 	closeQueueConnections,
@@ -23,6 +28,7 @@ import {
 	getTranscodeQueue,
 	isQueueConfigured,
 } from "./lib/queue.ts";
+import { resolveWorkerRole } from "./lib/worker-role.ts";
 import {
 	type DownloadFormat,
 	transcodeToR2,
@@ -38,6 +44,8 @@ if (!isQueueConfigured()) {
 	process.exit(1);
 }
 
+const role = resolveWorkerRole();
+const roleLabel = role ?? "all";
 const concurrency = Number(process.env.WORKER_CONCURRENCY) || 2;
 const serverless = process.env.WORKER_SERVERLESS === "true";
 const idleGraceMs = Number(process.env.WORKER_IDLE_GRACE_MS) || 30_000;
@@ -112,15 +120,37 @@ async function processTranscodeJob(job: Job<TranscodeJob>): Promise<void> {
 	await transcodeToR2(masterKey, targetKey, format as DownloadFormat);
 }
 
+interface QueueDefinition {
+	name: keyof typeof QUEUE_ROLES;
+	process: (job: Job) => Promise<void>;
+	getQueue: () => Queue;
+}
+
+// Every queue this codebase consumes. Add new ones here and in QUEUE_ROLES.
+const QUEUE_DEFINITIONS: QueueDefinition[] = [
+	{
+		name: FINALIZE_QUEUE,
+		process: processFinalizeJob,
+		getQueue: getFinalizeQueue,
+	},
+	{
+		name: TRANSCODE_QUEUE,
+		process: processTranscodeJob,
+		getQueue: getTranscodeQueue,
+	},
+];
+
+const ownedQueues = QUEUE_DEFINITIONS.filter(
+	(definition) => !role || QUEUE_ROLES[definition.name] === role,
+);
+const ownedQueueNames = ownedQueues.map((definition) => definition.name);
+
 interface Consumers {
-	workers: Array<Worker<FinalizeJob> | Worker<TranscodeJob>>;
+	workers: Worker[];
 	connections: IORedis[];
 }
 
-function attachWorkerLogs(
-	name: "finalize" | "transcode",
-	worker: Worker<FinalizeJob> | Worker<TranscodeJob>,
-): void {
+function attachWorkerLogs(name: string, worker: Worker): void {
 	worker.on("completed", (job) =>
 		console.log(`[Worker:${name}] completed ${job.id}`, job.data),
 	);
@@ -136,26 +166,18 @@ function attachWorkerLogs(
 }
 
 function createConsumers(): Consumers {
-	const finalizeConnection = createConnection();
-	const transcodeConnection = createConnection();
-	const finalizeWorker = new Worker<FinalizeJob>(
-		FINALIZE_QUEUE,
-		processFinalizeJob,
-		{ connection: finalizeConnection, concurrency },
-	);
-	const transcodeWorker = new Worker<TranscodeJob>(
-		TRANSCODE_QUEUE,
-		processTranscodeJob,
-		{ connection: transcodeConnection, concurrency },
-	);
-
-	attachWorkerLogs("finalize", finalizeWorker);
-	attachWorkerLogs("transcode", transcodeWorker);
-
-	return {
-		workers: [finalizeWorker, transcodeWorker],
-		connections: [finalizeConnection, transcodeConnection],
-	};
+	const consumers: Consumers = { workers: [], connections: [] };
+	for (const definition of ownedQueues) {
+		const connection = createConnection();
+		const worker = new Worker(definition.name, definition.process, {
+			connection,
+			concurrency,
+		});
+		attachWorkerLogs(definition.name, worker);
+		consumers.workers.push(worker);
+		consumers.connections.push(connection);
+	}
+	return consumers;
 }
 
 async function closeConsumers(consumers: Consumers): Promise<void> {
@@ -169,9 +191,7 @@ async function closeConsumers(consumers: Consumers): Promise<void> {
 	);
 }
 
-async function pendingCount(
-	queue: Queue<FinalizeJob> | Queue<TranscodeJob>,
-): Promise<number> {
+async function pendingCount(queue: Queue): Promise<number> {
 	const [waiting, active, delayed, prioritized, waitingChildren] =
 		await Promise.all([
 			queue.getWaitingCount(),
@@ -194,14 +214,13 @@ let shuttingDown = false;
 let httpServer: Server | null = null;
 
 async function waitUntilQueuesAreQuiet(): Promise<void> {
-	const finalizeQueue = getFinalizeQueue();
-	const transcodeQueue = getTranscodeQueue();
 	let emptySince: number | null = null;
 
 	while (!shuttingDown) {
-		const totalPending =
-			(await pendingCount(finalizeQueue)) +
-			(await pendingCount(transcodeQueue));
+		let totalPending = 0;
+		for (const definition of ownedQueues) {
+			totalPending += await pendingCount(definition.getQueue());
+		}
 
 		if (totalPending === 0) {
 			emptySince ??= Date.now();
@@ -215,7 +234,9 @@ async function waitUntilQueuesAreQuiet(): Promise<void> {
 }
 
 async function drainCycle(): Promise<void> {
-	console.log("[Worker] wake received; draining media queues.");
+	console.log(
+		`[Worker:${roleLabel}] wake received; draining ${ownedQueueNames.join(", ")}.`,
+	);
 	activeConsumers = createConsumers();
 	try {
 		await waitUntilQueuesAreQuiet();
@@ -226,7 +247,9 @@ async function drainCycle(): Promise<void> {
 		await closeQueueConnections();
 		await prisma.$disconnect();
 	}
-	console.log("[Worker] queues idle; outbound connections closed.");
+	console.log(
+		`[Worker:${roleLabel}] queues idle; outbound connections closed.`,
+	);
 }
 
 function requestDrain(): void {
@@ -258,7 +281,12 @@ function startWakeServer(): void {
 		if (request.method === "GET" && request.url === "/health") {
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(
-				JSON.stringify({ ok: true, draining: Boolean(drainPromise) }),
+				JSON.stringify({
+					ok: true,
+					role: roleLabel,
+					queues: ownedQueueNames,
+					draining: Boolean(drainPromise),
+				}),
 			);
 			return;
 		}
@@ -281,7 +309,9 @@ function startWakeServer(): void {
 	});
 
 	httpServer.listen(port, "::", () => {
-		console.log(`[Worker] serverless wake endpoint listening on port ${port}.`);
+		console.log(
+			`[Worker:${roleLabel}] serverless wake endpoint listening on port ${port} for ${ownedQueueNames.join(", ")}.`,
+		);
 	});
 }
 
@@ -311,7 +341,7 @@ if (serverless) {
 } else {
 	activeConsumers = createConsumers();
 	console.log(
-		`[Worker] up in always-on mode - concurrency ${concurrency} per queue.`,
+		`[Worker:${roleLabel}] up in always-on mode for ${ownedQueueNames.join(", ")} - concurrency ${concurrency} per queue.`,
 	);
 }
 

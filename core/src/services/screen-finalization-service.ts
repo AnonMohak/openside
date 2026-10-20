@@ -23,7 +23,7 @@ import { appendFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { prisma } from "../db/index.ts";
-import { ffmpegPath } from "../lib/ffmpeg-path.ts";
+import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
 import { enqueueFinalize, isQueueConfigured } from "../lib/queue.ts";
 import {
 	describeSegmentGaps,
@@ -107,7 +107,7 @@ function errorMessage(error: unknown): string {
 
 function runFfmpeg(args: string[]): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpegPath, args, {
+		const proc = spawn(ffmpegPath, withThreadLimit(args), {
 			stdio: ["ignore", "ignore", "pipe"],
 		});
 		let stderr = "";

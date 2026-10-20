@@ -58,15 +58,32 @@ flowchart LR
 
 > The worker shares `core`'s Prisma schema, queue definitions, and services with the API, so it's the **same build, a different entrypoint** - no separate repo needed. Scale it horizontally by running more worker instances.
 
+### Worker roles
+
+In production the worker runs as two services so finalization never waits
+behind other media work:
+
+| Role | Start command | Env file | Queues |
+|------|---------------|----------|--------|
+| `finalize` | `pnpm worker:finalize` | `.env.production-finalize-worker` | `finalize` |
+| `general` | `pnpm worker:general` | `.env.production-general-worker` | everything else (`transcode` today) |
+
+The role comes from `--role=<role>` or `WORKER_ROLE`. With no role, one worker
+consumes every queue (`pnpm worker` / `pnpm worker:dev`, handy for local dev).
+New queues belong to the `general` role: register them in `QUEUE_ROLES`
+(`src/lib/queue.ts`) and `QUEUE_DEFINITIONS` (`src/worker.ts`).
+
 ### Wake-on-demand worker
 
-The media worker can run in Railway Serverless mode instead of holding Redis
-connections open all month. Set `WORKER_SERVERLESS=true` on the worker, set the
-same `WORKER_WAKE_SECRET` on the API and worker, and set `WORKER_WAKE_URL` on the
-API to the worker's Railway private URL. After each enqueue the API wakes the
-worker; once both queues are empty, the worker closes Redis and database
-connections so Railway can put it to sleep. Enable **Serverless** on the Railway
-worker service and redeploy for the platform setting to take effect.
+The workers can run in Railway Serverless mode instead of holding Redis
+connections open all month. Set `WORKER_SERVERLESS=true` on each worker, set the
+same `WORKER_WAKE_SECRET` on the API and workers, and set
+`FINALIZE_WORKER_WAKE_URL` / `GENERAL_WORKER_WAKE_URL` on the API to each worker's
+Railway private URL (`WORKER_WAKE_URL` is the fallback for a single all-queue
+worker). After each enqueue the API wakes the worker that owns that queue; once
+its queues are empty, the worker closes Redis and database connections so
+Railway can put it to sleep. Enable **Serverless** on each Railway worker
+service and redeploy for the platform setting to take effect.
 
 For the API to sleep too, set `RATE_LIMIT_REDIS=false`. Maintenance runs only
 when real HTTP or Socket.IO traffic reaches the API, and its BullMQ producer

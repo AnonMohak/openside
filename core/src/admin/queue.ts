@@ -1,11 +1,12 @@
 import { Router } from "express";
 import {
+	QUEUE_ROLES,
 	closeQueueConnections,
 	getFinalizeQueue,
 	getTranscodeQueue,
 	isQueueConfigured,
 } from "../lib/queue.ts";
-import { wakeMediaWorker } from "../lib/worker-wake.ts";
+import { wakeWorker } from "../lib/worker-wake.ts";
 
 export const queueAdminRoutes = Router();
 
@@ -80,7 +81,7 @@ queueAdminRoutes.post("/queue/:name/jobs/:id/retry", async (req, res) => {
 		res.status(404).json({ error: "Job not found" });
 		return;
 	}
-	await wakeMediaWorker().catch(() => {});
+	await wakeWorker(QUEUE_ROLES[name]).catch(() => {});
 	res.json({ ok: true });
 });
 
