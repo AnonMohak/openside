@@ -154,7 +154,7 @@ const PricingModal = ({ open, onClose }: PricingModalProps) => {
             return (
               <div
                 key={plan.id}
-                className={`flex flex-col rounded-xl border p-5 ${
+                className={`flex min-h-[460px] flex-col rounded-xl border p-6 ${
                   plan.featured
                     ? "border-brand/40 bg-brand/5 ring-1 ring-brand/20"
                     : "border-border/50 bg-primary"
@@ -188,11 +188,11 @@ const PricingModal = ({ open, onClose }: PricingModalProps) => {
                   )}
                 </div>
 
-                <p className="mt-2 text-sm leading-6 text-fg-muted">
+                <p className="mt-3 text-sm leading-6 text-fg-muted">
                   {plan.description}
                 </p>
 
-                <ul className="mt-4 mb-6 space-y-2">
+                <ul className="mt-6 mb-8 space-y-3">
                   {plan.features.map((feature) => (
                     <li
                       key={feature}
