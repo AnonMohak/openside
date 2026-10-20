@@ -239,7 +239,7 @@ const InvitePanel = ({ roomCode, spaceId, onDismiss }: InvitePanelProps) => {
         {/* Link row */}
         <div className="flex items-stretch gap-2 rounded-xl border border-border bg-muted p-1 pl-3">
           <Link size={18} className="shrink-0 self-center text-foreground/40" />
-          <span className="flex flex-1 select-text items-center truncate font-mono text-sm font-light text-foreground/70">
+          <span className="flex flex-1 items-center truncate font-mono text-sm font-light text-foreground/70">
             {inviteLink}
           </span>
           <button

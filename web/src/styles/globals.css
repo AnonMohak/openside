@@ -262,17 +262,3 @@ html {
 .scrollbar-hide::-webkit-scrollbar {
   display: none; /* Chrome, Safari and Opera */
 }
-
-/* Space pages: no text selection except form fields and opted-in copyable
-   text (`select-text`), toggled by RoomPage. */
-body.room-no-select {
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-body.room-no-select input,
-body.room-no-select textarea,
-body.room-no-select [contenteditable="true"] {
-  -webkit-user-select: text;
-  user-select: text;
-}

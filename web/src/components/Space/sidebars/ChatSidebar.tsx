@@ -193,7 +193,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({ onClose }) => {
                     }`}
                   >
                     <div
-                      className={`select-text whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm leading-5 ${
+                      className={`whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm leading-5 ${
                         isMine
                           ? "rounded-br-sm bg-muted text-foreground"
                           : "rounded-bl-sm bg-muted text-foreground"
