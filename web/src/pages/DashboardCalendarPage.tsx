@@ -426,7 +426,7 @@ const DashboardCalendarPage = () => {
               <button
                 type="button"
                 onClick={goToday}
-                className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted cursor-pointer"
+                className="inline-flex h-9 items-center rounded-md bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
               >
                 Today
               </button>

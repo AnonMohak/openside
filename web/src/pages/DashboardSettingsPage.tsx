@@ -10,6 +10,7 @@
 
 import { isAxiosError } from "axios";
 import {
+  ArrowUpRight,
   Check,
   CreditCard,
   Loader2,
@@ -418,9 +419,17 @@ type SelfHostField = {
 };
 
 // Grouped by provider so the form reads as two short blocks, not one long grid.
-const SELFHOST_GROUPS: { title: string; fields: SelfHostField[] }[] = [
+const SELFHOST_GROUPS: {
+  title: string;
+  /** Where to find these values in the provider's dashboard. */
+  hint: string;
+  link: { label: string; href: string };
+  fields: SelfHostField[];
+}[] = [
   {
     title: "LiveKit",
+    hint: "Runs your calls. Find these under Settings → API keys in your LiveKit project.",
+    link: { label: "Open LiveKit Cloud", href: "https://cloud.livekit.io" },
     fields: [
       {
         key: "livekitUrl",
@@ -439,6 +448,11 @@ const SELFHOST_GROUPS: { title: string; fields: SelfHostField[] }[] = [
   },
   {
     title: "Cloudflare R2",
+    hint: "Stores your recordings. Create a bucket, then an API token with Object Read & Write.",
+    link: {
+      label: "Open Cloudflare R2",
+      href: "https://dash.cloudflare.com/?to=/:account/r2/overview",
+    },
     fields: [
       { key: "r2AccountId", label: "Account ID", placeholder: "1a2b3c4d…" },
       {
@@ -834,13 +848,32 @@ const SelfHostSection = () => {
             ) : (
               <form
                 onSubmit={handleSaveSelfHost}
-                className="mt-5 flex flex-col gap-6"
+                className="mt-5 flex flex-col gap-4"
               >
-                {SELFHOST_GROUPS.map(({ title, fields }) => (
-                  <div key={title} className="flex flex-col gap-3">
-                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                      {title}
-                    </p>
+                {SELFHOST_GROUPS.map(({ title, hint, link, fields }) => (
+                  <div
+                    key={title}
+                    className="flex flex-col gap-4 rounded-lg border border-border/50 bg-background/40 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">
+                          {title}
+                        </p>
+                        <p className="mt-0.5 text-xs leading-5 text-fg-subtle">
+                          {hint}
+                        </p>
+                      </div>
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-muted px-2.5 text-xs font-medium text-foreground transition-opacity hover:opacity-80"
+                      >
+                        {link.label}
+                        <ArrowUpRight size={13} />
+                      </a>
+                    </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {fields.map(
                         ({ key, label, placeholder, secret, wide }) => (
@@ -875,7 +908,7 @@ const SelfHostSection = () => {
                     </div>
                   </div>
                 ))}
-                <div className="flex flex-col gap-3 border-t border-border/50 pt-4">
+                <div className="flex flex-col gap-3 pt-1">
                   {subscribed && !selfHost && (
                     <p className="text-xs leading-5 text-fg-subtle">
                       Saving switches new recordings to your servers. Your Pro
