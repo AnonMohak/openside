@@ -24,7 +24,7 @@ import {
 import { useLocalParticipant } from "@livekit/components-react";
 import { Track } from "livekit-client";
 import { getOrCreateSessionId } from "@/utils/ParticipantSessionId";
-import { useSocket } from "@/context/socket";
+import { useSocket, type UploadProgressData } from "@/context/socket";
 import useUnloadWarning from "@/hooks/useUnloadWarning";
 import useRecordingManager, {
   type RecordingState,
@@ -35,6 +35,12 @@ import { useGetMe } from "@/hooks/useUserQuery";
 import type { RecordingSessionStatus } from "@/types/recordingTypes";
 import CountdownOverlay from "./CountdownOverlay";
 
+/** Another participant's post-stop upload, as last reported over the socket. */
+export interface ParticipantUpload {
+  progress: number;
+  done: boolean;
+}
+
 interface RecordingContextValue {
   recordingState: RecordingState;
   /** True while a recording is active anywhere in its lifecycle. */
@@ -43,6 +49,8 @@ interface RecordingContextValue {
   pendingUploads: number;
   /** Chunk upload progress, 0–100. */
   uploadProgress: number;
+  /** Hosts only: everyone else's upload for this session, keyed by LiveKit identity. */
+  participantUploads: Record<string, ParticipantUpload>;
   /** Seconds left in the synced 3-2-1 lead-in, or null when not counting down. */
   countdownValue: number | null;
   canControl: boolean;
@@ -394,6 +402,63 @@ const RecordingProvider = ({
   const uploadProgress =
     totalChunks > 0 ? Math.round((uploadedChunks / totalChunks) * 100) : 0;
 
+  // Once a recording stops, report our upload to the room so the host can
+  // show every participant's progress, not just their own.
+  const recordingSessionId = manager.sessionId;
+  const localIdentity = localParticipant.identity;
+  const uploadDone = manager.recordingState === "complete";
+  const isUploadPhase =
+    uploadDone ||
+    manager.recordingState === "stopping" ||
+    manager.recordingState === "uploading";
+  useEffect(() => {
+    if (!socket || !recordingSessionId || !isUploadPhase) return;
+    socket.emit("recording-upload-progress", roomCode, {
+      identity: localIdentity,
+      sessionId: recordingSessionId,
+      progress: uploadDone ? 100 : uploadProgress,
+      done: uploadDone,
+    });
+  }, [
+    socket,
+    roomCode,
+    localIdentity,
+    recordingSessionId,
+    isUploadPhase,
+    uploadDone,
+    uploadProgress,
+  ]);
+
+  // Tagged with its session so a new recording starts from an empty map.
+  const [uploadsBySession, setUploadsBySession] = useState<{
+    sessionId: string | null;
+    uploads: Record<string, ParticipantUpload>;
+  }>({ sessionId: null, uploads: {} });
+  useEffect(() => {
+    if (!socket || !canControl || !recordingSessionId) return;
+    const handleProgress = (data: UploadProgressData) => {
+      if (data.sessionId !== recordingSessionId) return;
+      setUploadsBySession((prev) => ({
+        sessionId: recordingSessionId,
+        uploads: {
+          ...(prev.sessionId === recordingSessionId ? prev.uploads : {}),
+          [data.identity]: { progress: data.progress, done: data.done },
+        },
+      }));
+    };
+    socket.on("participant-upload-progress", handleProgress);
+    return () => {
+      socket.off("participant-upload-progress", handleProgress);
+    };
+  }, [socket, canControl, recordingSessionId]);
+  const participantUploads = useMemo(
+    () =>
+      uploadsBySession.sessionId === recordingSessionId
+        ? uploadsBySession.uploads
+        : {},
+    [uploadsBySession, recordingSessionId],
+  );
+
   const value = useMemo<RecordingContextValue>(
     () => ({
       recordingState: manager.recordingState,
@@ -401,6 +466,7 @@ const RecordingProvider = ({
       recordingDurationMs: manager.recordingDurationMs,
       pendingUploads: manager.pendingUploads,
       uploadProgress,
+      participantUploads,
       countdownValue: manager.countdownValue,
       canControl,
       error: manager.error,
@@ -429,6 +495,7 @@ const RecordingProvider = ({
       manager,
       isActive,
       uploadProgress,
+      participantUploads,
       canControl,
       backendSession?.status,
       spaceId,

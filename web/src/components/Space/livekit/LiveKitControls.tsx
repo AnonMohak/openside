@@ -72,7 +72,10 @@ import CallWarningDialog from "../ui/CallWarningDialog";
 import { usePresence } from "@/hooks/usePresence";
 import { useLiveKitChat } from "../chat/LiveKitChatProvider";
 import { useLiveKitReactions } from "../reactions/LiveKitReactionsProvider";
-import { useRecordingContext } from "../recording/RecordingProvider";
+import {
+  type ParticipantUpload,
+  useRecordingContext,
+} from "../recording/RecordingProvider";
 import { useStartingMedia } from "./StartingMediaContext";
 import { useCameraPreview } from "./CameraPreview";
 import { useIsAudioOnlyCall } from "./AudioOnlyMode";
@@ -253,28 +256,38 @@ const ParticipantThumb = ({
   );
 };
 
-// Shown above the control bar once a recording's chunks have finished
-// uploading. This is upload confirmation only - server-side processing/merging
-// is surfaced on the project page, not here. Lists each participant with a tick,
-// plus a button through to the project.
+// Shown above the control bar while a stopped recording uploads and once it has.
+// This is upload confirmation only - server-side processing/merging is surfaced
+// on the project page, not here. Hosts get a row per participant with their live
+// progress; everyone else just sees their own. Ends with a link to the project.
 const savedCardDismissKey = (sessionId: string) =>
   `openside:uploadedCardDismissed:${sessionId}`;
+
+const clampPercent = (value: number) =>
+  Math.max(0, Math.min(100, Math.round(value)));
 
 const SavedSessionCard = ({
   spaceId,
   sessionId,
   onVisit,
   uploadProgress = null,
+  participantUploads = null,
 }: {
   spaceId: string | undefined;
   sessionId: string | null;
   onVisit: () => void;
   /** Set while this participant's chunks are still uploading (0-100). */
   uploadProgress?: number | null;
+  /** Hosts only: other participants' socket-reported uploads by identity. */
+  participantUploads?: Record<string, ParticipantUpload> | null;
 }) => {
   const isUploading = uploadProgress !== null;
-  const percent = Math.max(0, Math.min(100, Math.round(uploadProgress ?? 0)));
-  const participants = useParticipants();
+  const percent = clampPercent(uploadProgress ?? 0);
+  const allParticipants = useParticipants();
+  const showOthers = participantUploads !== null;
+  const participants = showOthers
+    ? allParticipants
+    : allParticipants.filter((participant) => participant.isLocal);
   // Pull the current session's per-track thumbnails (early posters from the first
   // chunk). Poll briefly so a thumbnail still generating shows up once ready.
   const { data: sessionsData } = useGetRecordingSessionsBySpace(
@@ -282,15 +295,48 @@ const SavedSessionCard = ({
     !!spaceId,
     3000,
   );
-  const thumbnailByIdentity = useMemo(() => {
-    const map = new Map<string, string>();
-    const session = sessionsData?.sessions?.[0];
+  const session =
+    sessionsData?.sessions?.find((s) => s.id === sessionId) ??
+    sessionsData?.sessions?.[0];
+  const { thumbnailByIdentity, uploadedByIdentity } = useMemo(() => {
+    const thumbnails = new Map<string, string>();
+    // Fallback for a missed socket update: true once every track is complete.
+    const uploaded = new Map<string, boolean>();
     for (const rec of session?.participantRecordings ?? []) {
       const identity = rec.participant?.livekitIdentity;
-      if (identity && rec.thumbnailUrl) map.set(identity, rec.thumbnailUrl);
+      if (!identity) continue;
+      if (rec.thumbnailUrl) thumbnails.set(identity, rec.thumbnailUrl);
+      uploaded.set(identity, (uploaded.get(identity) ?? true) && rec.isComplete);
     }
-    return map;
-  }, [sessionsData]);
+    return { thumbnailByIdentity: thumbnails, uploadedByIdentity: uploaded };
+  }, [session]);
+
+  type UploadRow = {
+    participant: (typeof participants)[number];
+    done: boolean;
+    progress: number | null;
+  };
+  const rows = participants.flatMap((participant): UploadRow[] => {
+    if (participant.isLocal) {
+      return [{ participant, done: !isUploading, progress: percent }];
+    }
+    const reported = participantUploads?.[participant.identity];
+    if (reported) {
+      return [
+        {
+          participant,
+          done: reported.done,
+          progress: clampPercent(reported.progress),
+        },
+      ];
+    }
+    // No socket update yet: lean on the polled session, and skip anyone who
+    // has no tracks in it (they joined after the recording).
+    const uploaded = uploadedByIdentity.get(participant.identity);
+    if (uploaded === undefined) return [];
+    return [{ participant, done: uploaded, progress: null }];
+  });
+  const allUploaded = rows.every((row) => row.done);
 
   // Dismissal is remembered per session, so once the host closes it with the
   // cross it never comes back - including after a refresh or rejoin.
@@ -342,12 +388,16 @@ const SavedSessionCard = ({
 
       {/* Header */}
       <p className="pr-6 text-lg font-semibold text-foreground">
-        {isUploading ? "Uploading your recording" : "Your recording is uploaded"}
+        {allUploaded
+          ? "Your recording is uploaded"
+          : rows.length > 1
+            ? "Uploading recordings"
+            : "Uploading your recording"}
       </p>
 
       {/* One row per participant in the recording */}
       <div className="flex flex-col gap-1">
-        {participants.map((participant) => {
+        {rows.map(({ participant, done, progress }) => {
           const name = participant.name?.trim() || "Guest";
           return (
             <div
@@ -365,12 +415,16 @@ const SavedSessionCard = ({
                   <span className="truncate text-sm font-medium text-foreground">
                     {name}
                   </span>
-                  <span className="text-xs text-foreground/50">
-                    {isUploading ? "Uploading…" : "Uploaded"}
+                  <span className="text-xs tabular-nums text-foreground/50">
+                    {done
+                      ? "Uploaded"
+                      : progress === null
+                        ? "Uploading…"
+                        : `Uploading… ${progress}%`}
                   </span>
                 </span>
               </span>
-              {isUploading ? (
+              {!done ? (
                 <Loader2 className="size-4 shrink-0 animate-spin text-foreground/50" />
               ) : (
                 <FaCircleCheck className="size-4 shrink-0 text-emerald-500" />
@@ -1255,11 +1309,15 @@ const LiveKitControls = ({
     const state = recording.recordingState;
     const isUploading = state === "stopping" || state === "uploading";
     // The project library belongs to the host, so "Go to project" is
-    // host-only. Everyone uploads their own tracks, so everyone sees progress.
+    // host-only. Everyone uploads their own tracks, so everyone sees progress;
+    // hosts also see everyone else's.
     const isRecordingHost =
       isHost ||
       participantRole === "HOST" ||
       localParticipant.attributes.room_admin === "true";
+    const participantUploads = recording.canControl
+      ? recording.participantUploads
+      : null;
 
     if (isUploading) {
       return (
@@ -1269,6 +1327,7 @@ const LiveKitControls = ({
             sessionId={recording.sessionId}
             onVisit={recording.openRecording}
             uploadProgress={recording.uploadProgress}
+            participantUploads={participantUploads}
           />
         </div>
       );
@@ -1282,6 +1341,7 @@ const LiveKitControls = ({
           spaceId={recording.spaceId}
           sessionId={recording.sessionId}
           onVisit={recording.openRecording}
+          participantUploads={participantUploads}
         />
       </div>
     );

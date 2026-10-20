@@ -328,14 +328,7 @@ export default function useRecordingManager(
     !!spaceId,
   );
 
-  const uploader = useChunkUploader(({ sequenceNumber, totalUploaded }) => {
-    // Let the host see progress.
-    socket?.emit("recording-chunk-uploaded", roomId, {
-      participantId: participantSessionId,
-      sequenceNumber,
-      totalUploaded,
-    });
-  });
+  const uploader = useChunkUploader();
 
   // Drain any chunks left over from a previous crashed session on mount.
   // Ref-gated: the uploader object's identity changes with its state, and an
@@ -1089,18 +1082,6 @@ export default function useRecordingManager(
       }
       await Promise.allSettled(completions);
 
-      socket?.emit("recording-complete", roomId, {
-        participantId: participantSessionId,
-        totalSegments:
-          (combinedRecordingIdRef.current
-            ? uploader.getUploadedCount(combinedRecordingIdRef.current)
-            : 0) +
-          allScreenIds.reduce(
-            (sum, id) => sum + uploader.getUploadedCount(id),
-            0,
-          ),
-      });
-
       setRecordingState("complete");
       stopSessionClock();
 
@@ -1125,8 +1106,6 @@ export default function useRecordingManager(
     pcmCapture,
     flushPendingChunks,
     uploader,
-    socket,
-    roomId,
     participantSessionId,
     spaceId,
     clearCountdown,

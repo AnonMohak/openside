@@ -40,24 +40,20 @@ interface RecordingSessionData {
   recordingMode: "VIDEO_AND_AUDIO" | "AUDIO_ONLY";
 }
 
-// Chunk upload progress data
-interface ChunkUploadedData {
-  participantId: string;
-  sequenceNumber: number;
-  totalUploaded: number;
-}
-
-// Recording complete data
-interface RecordingCompleteData {
-  participantId: string;
-  totalSegments: number;
+// One participant's post-stop upload progress, relayed so the host can watch it
+export interface UploadProgressData {
+  /** LiveKit identity of the uploading participant. */
+  identity: string;
+  sessionId: string;
+  /** 0-100. */
+  progress: number;
+  done: boolean;
 }
 
 interface ServerToClientEvents {
   "recording-started": (data: RecordingSessionData) => void;
   "recording-stopped": (sessionId: string) => void;
-  "participant-chunk-uploaded": (data: ChunkUploadedData) => void;
-  "participant-recording-complete": (data: RecordingCompleteData) => void;
+  "participant-upload-progress": (data: UploadProgressData) => void;
 }
 
 interface ClientToServerEvents {
@@ -67,8 +63,7 @@ interface ClientToServerEvents {
   "leave-room": (roomId: string) => void;
   "recording-start": (roomId: string, data: RecordingSessionData) => void;
   "recording-stop": (roomId: string, sessionId: string) => void;
-  "recording-chunk-uploaded": (roomId: string, data: ChunkUploadedData) => void;
-  "recording-complete": (roomId: string, data: RecordingCompleteData) => void;
+  "recording-upload-progress": (roomId: string, data: UploadProgressData) => void;
 }
 
 type SocketType = Socket<ServerToClientEvents, ClientToServerEvents>;

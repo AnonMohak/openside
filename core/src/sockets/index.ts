@@ -230,41 +230,23 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 		});
 
 		/**
-		 * EVENT: recording-chunk-uploaded
-		 * A participant successfully uploaded a chunk
-		 * Used for progress tracking (optional - host can see upload progress)
+		 * EVENT: recording-upload-progress
+		 * A participant's upload progress after a recording stops. Relayed to the
+		 * rest of the room so the host can watch everyone's tracks land.
 		 */
 		socket.on(
-			"recording-chunk-uploaded",
+			"recording-upload-progress",
 			(
 				roomId: string,
 				data: {
-					participantId: string;
-					sequenceNumber: number;
-					totalUploaded: number;
+					identity: string;
+					sessionId: string;
+					progress: number;
+					done: boolean;
 				},
 			) => {
-				// Broadcast to all (host can track progress)
-				socket.broadcast.to(roomId).emit("participant-chunk-uploaded", data);
-			},
-		);
-
-		/**
-		 * EVENT: recording-complete
-		 * A participant finished uploading all their chunks
-		 */
-		socket.on(
-			"recording-complete",
-			(
-				roomId: string,
-				data: {
-					participantId: string;
-					totalSegments: number;
-				},
-			) => {
-				socket.broadcast
-					.to(roomId)
-					.emit("participant-recording-complete", data);
+				if (!socket.rooms.has(roomId)) return;
+				socket.broadcast.to(roomId).emit("participant-upload-progress", data);
 			},
 		);
 	});
