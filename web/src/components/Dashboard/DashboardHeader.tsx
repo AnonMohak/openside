@@ -74,7 +74,7 @@ const DashboardHeader = ({
           target="_blank"
           rel="noreferrer"
           title="Sponsor on GitHub"
-          className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          className="flex h-9 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80"
         >
           <Heart size={14} className="fill-current text-pink-500" />
           Sponsor
@@ -86,7 +86,7 @@ const DashboardHeader = ({
           title={`GitHub repository${
             githubStars === undefined ? "" : `, ${githubStars} stars`
           }`}
-          className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          className="flex h-9 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80"
         >
           <FaGithub size={18} />
           <span className="flex items-center gap-1 tabular-nums">
