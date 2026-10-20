@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/lib/toast";
+import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import { useCreateCheckout, useUsage, type Usage } from "@/hooks/useUsage";
 
 interface PricingModalProps {
@@ -83,7 +84,8 @@ const PricingModal = ({ open, onClose }: PricingModalProps) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
-  if (!open) return null;
+  const { rendered, isClosing } = usePresence(open);
+  if (!rendered) return null;
 
   const handleSelect = (planId: Usage["plan"]) => {
     if (planId === "pro") {
@@ -111,14 +113,14 @@ const PricingModal = ({ open, onClose }: PricingModalProps) => {
   // Portaled so a transformed ancestor (e.g. the mobile sidebar drawer) can't trap it.
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/55 p-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
+      className={`fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/55 p-4 backdrop-blur-sm ${backdropMotion(isClosing)}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="pricing-modal-title"
       onClick={onClose}
     >
       <div
-        className="relative my-auto w-full max-w-4xl rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 sm:p-6 dark:bg-[#0f0f11]"
+        className={`relative my-auto w-full max-w-4xl rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 sm:p-6 dark:bg-[#0f0f11] ${panelMotion(isClosing)}`}
         onClick={(event) => event.stopPropagation()}
       >
         <button

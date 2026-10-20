@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import DashboardSidebar from "./DashboardSidebar";
 import DashboardHeader from "./DashboardHeader";
+import { backdropMotion, usePresence } from "@/hooks/usePresence";
 
 const SIDEBAR_STATE_KEY = "sidebarOpen";
 
@@ -19,6 +20,7 @@ const DashboardWrapper = ({ children, noPadding }: DashboardWrapperProps) => {
   // an overlay drawer with its own (non-persisted, default-closed) open state.
   const [isMobile, setIsMobile] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const mobileDrawer = usePresence(isMobileSidebarOpen);
 
   useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_STATE_KEY);
@@ -54,13 +56,19 @@ const DashboardWrapper = ({ children, noPadding }: DashboardWrapperProps) => {
   return (
     <div className="fixed inset-0 flex bg-background">
       {isMobile ? (
-        isMobileSidebarOpen && (
+        mobileDrawer.rendered && (
           <>
             <div
-              className="fixed inset-0 z-40 bg-black/40"
+              className={`fixed inset-0 z-40 bg-black/40 ${backdropMotion(mobileDrawer.isClosing)}`}
               onClick={() => setIsMobileSidebarOpen(false)}
             />
-            <div className="fixed inset-y-0 left-0 z-50">
+            <div
+              className={`fixed inset-y-0 left-0 z-50 duration-150 ${
+                mobileDrawer.isClosing
+                  ? "animate-out slide-out-to-left fill-mode-forwards"
+                  : "animate-in slide-in-from-left"
+              }`}
+            >
               <DashboardSidebar
                 isOpen
                 onNavigate={() => setIsMobileSidebarOpen(false)}

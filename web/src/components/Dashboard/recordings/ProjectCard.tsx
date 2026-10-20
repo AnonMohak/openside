@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FiEdit2, FiMoreVertical, FiTrash2 } from "react-icons/fi";
 import { PiRecordFill } from "react-icons/pi";
 import { useGetOutputsBySpace } from "@/hooks/useFinalOutputs";
+import { usePresence } from "@/hooks/usePresence";
 import { useDeleteSpace, useRenameSpace } from "@/hooks/useSpace";
 import { useEntitlements } from "@/hooks/useUsage";
 import type { Space } from "@/types/spaceTypes";
@@ -195,6 +196,7 @@ const ProjectCard = ({
   const sessionCount = space._count?.recordingSessions ?? 0;
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const renameDialog = usePresence(renaming);
   const [title, setTitle] = useState(space.title || "");
   const renameSpace = useRenameSpace();
   const deleteSpace = useDeleteSpace();
@@ -297,7 +299,7 @@ const ProjectCard = ({
         </div>
       </div>
 
-      {renaming && (
+      {renameDialog.rendered && (
         <RenameDialog
           heading="Rename project"
           description="Shown on your projects list and shared links."
@@ -307,6 +309,7 @@ const ProjectCard = ({
           onChange={setTitle}
           onCancel={() => setRenaming(false)}
           onSave={submitRename}
+          isClosing={renameDialog.isClosing}
         />
       )}
     </>

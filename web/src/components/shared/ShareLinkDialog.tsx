@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Globe, Loader2 } from "lucide-react";
+import { backdropMotion, panelMotion } from "@/hooks/usePresence";
 
 /**
  * Share a recording by public link, link-first: opening the dialog creates the
@@ -14,6 +15,7 @@ const ShareLinkDialog = ({
   onCreate,
   onStop,
   onClose,
+  isClosing = false,
 }: {
   recordingTitle?: string;
   /** The public URL, or null until it's been created. */
@@ -24,6 +26,8 @@ const ShareLinkDialog = ({
   onCreate: () => void;
   onStop: () => void;
   onClose: () => void;
+  /** Playing the exit animation (see usePresence). */
+  isClosing?: boolean;
 }) => {
   const [copied, setCopied] = useState(false);
   const requestedRef = useRef(false);
@@ -56,14 +60,14 @@ const ShareLinkDialog = ({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
+      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm ${backdropMotion(isClosing)}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="share-link-title"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[480px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
+        className={`w-full max-w-[480px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 dark:bg-[#0f0f11] ${panelMotion(isClosing)}`}
         onClick={(event) => event.stopPropagation()}
       >
         <h2

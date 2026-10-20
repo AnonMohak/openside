@@ -72,8 +72,9 @@ const CommandMenu = () => {
         open={open}
         onOpenChange={setOpen}
         label="Search"
-        overlayClassName="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm animate-in fade-in-0 duration-150"
-        contentClassName="fixed left-1/2 top-[18%] z-[110] w-[min(560px,calc(100%-1.5rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-border/50 bg-[#f9f9fb] shadow-2xl shadow-black/30 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
+        // Radix keeps both mounted until the closed-state animation finishes.
+        overlayClassName="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
+        contentClassName="fixed left-1/2 top-[18%] z-[110] w-[min(560px,calc(100%-1.5rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-border/50 bg-[#f9f9fb] shadow-2xl shadow-black/30 duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 dark:bg-[#0f0f11]"
       >
         <div className="flex items-center gap-2.5 border-b border-border/50 px-4">
           <Search size={16} className="shrink-0 text-fg-subtle" />

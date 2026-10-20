@@ -1,6 +1,7 @@
 import { Clapperboard } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import {
   FiChevronDown,
   FiChevronLeft,
@@ -243,10 +244,12 @@ const SpaceRecordingShareDialog = ({
   session,
   spaceId,
   onClose,
+  isClosing,
 }: {
   session: RecordingSession;
   spaceId: string;
   onClose: () => void;
+  isClosing: boolean;
 }) => {
   const share = useShareSpaceRecording(spaceId);
   const unshare = useUnshareSpaceRecording(spaceId);
@@ -268,6 +271,7 @@ const SpaceRecordingShareDialog = ({
       }
       onStop={() => unshare.mutate(session.id, { onSuccess: onClose })}
       onClose={onClose}
+      isClosing={isClosing}
     />
   );
 };
@@ -918,6 +922,12 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const [sharingSession, setSharingSession] = useState<RecordingSession | null>(
     null,
   );
+  // Keep each dialog mounted through its exit animation.
+  const renameDialog = usePresence(renaming);
+  const deleteDialog = usePresence(deleteConfirmOpen);
+  const recordingRenameDialog = usePresence(recordingToRename);
+  const recordingDeleteDialog = usePresence(recordingToDelete);
+  const shareDialog = usePresence(sharingSession);
   const focusedRecordingSessionId = searchParams.get("recordingSessionId");
   const { data: user } = useGetMe();
   const renameSpace = useRenameSpace();
@@ -1135,17 +1145,19 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           onShareSession={setSharingSession}
         />
       </div>
-      {sharingSession && (
+      {shareDialog.rendered && (
         <SpaceRecordingShareDialog
           session={
-            sessions.find((session) => session.id === sharingSession.id) ??
-            sharingSession
+            sessions.find(
+              (session) => session.id === shareDialog.rendered?.id,
+            ) ?? shareDialog.rendered
           }
           spaceId={spaceId}
           onClose={() => setSharingSession(null)}
+          isClosing={shareDialog.isClosing}
         />
       )}
-      {renaming && (
+      {renameDialog.rendered && (
         <RenameDialog
           heading="Rename project"
           description="Shown on your projects list and shared links."
@@ -1155,12 +1167,13 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           onChange={setTitle}
           onCancel={() => setRenaming(false)}
           onSave={submitRename}
+          isClosing={renameDialog.isClosing}
         />
       )}
-      {recordingToRename && (
+      {recordingRenameDialog.rendered && (
         <RenameDialog
           heading="Rename recording"
-          value={recordingToRename.title}
+          value={recordingRenameDialog.rendered.title}
           placeholder="Recording name"
           onChange={(value) =>
             setRecordingToRename((recording) =>
@@ -1169,11 +1182,12 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           }
           onCancel={() => setRecordingToRename(null)}
           onSave={submitRecordingRename}
+          isClosing={recordingRenameDialog.isClosing}
         />
       )}
-      {recordingToDelete && (
+      {recordingDeleteDialog.rendered && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
+          className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm ${backdropMotion(recordingDeleteDialog.isClosing)}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-recording-title"
@@ -1181,7 +1195,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           onClick={() => setRecordingToDelete(null)}
         >
           <div
-            className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
+            className={`w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 dark:bg-[#0f0f11] ${panelMotion(recordingDeleteDialog.isClosing)}`}
             onClick={(event) => event.stopPropagation()}
           >
             <h2
@@ -1195,7 +1209,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
               className="mt-1.5 text-sm leading-6 text-fg-muted"
             >
               <span className="font-medium text-foreground">
-                {recordingToDelete.title}
+                {recordingDeleteDialog.rendered.title}
               </span>{" "}
               and all of its tracks will be permanently deleted. This action
               cannot be undone.
@@ -1219,9 +1233,9 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           </div>
         </div>
       )}
-      {deleteConfirmOpen && (
+      {deleteDialog.rendered && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
+          className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm ${backdropMotion(deleteDialog.isClosing)}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-project-title"
@@ -1231,7 +1245,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           }}
         >
           <div
-            className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
+            className={`w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 dark:bg-[#0f0f11] ${panelMotion(deleteDialog.isClosing)}`}
             onClick={(event) => event.stopPropagation()}
           >
             <h2

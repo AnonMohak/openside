@@ -16,6 +16,7 @@ import { useDeleteSpace, useGetUserSpaces } from "@/hooks/useSpace";
 import { useGetMe } from "@/hooks/useUserQuery";
 import { toast } from "@/lib/toast";
 import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
+import { usePresence } from "@/hooks/usePresence";
 import type { Space } from "@/types/spaceTypes";
 
 type CalendarView = "month" | "week" | "list";
@@ -165,6 +166,7 @@ const DashboardCalendarPage = () => {
   const [pendingDelete, setPendingDelete] = useState<CalendarEvent | null>(
     null
   );
+  const deleteDialog = usePresence(pendingDelete);
   // Only the host can delete, and only sessions that haven't happened yet.
   const deleteHandler = (event: CalendarEvent) =>
     event.status === "SCHEDULED" && !!user && event.hostId === user.id
@@ -702,13 +704,14 @@ const DashboardCalendarPage = () => {
         onClose={() => setIsScheduleOpen(false)}
       />
 
-      {pendingDelete && (
+      {deleteDialog.rendered && (
         <CallWarningDialog
           title="Delete this session?"
-          description={`"${pendingDelete.title}" will be removed from your schedule. This can't be undone.`}
+          description={`"${deleteDialog.rendered.title}" will be removed from your schedule. This can't be undone.`}
           confirmLabel="Delete"
           onCancel={() => setPendingDelete(null)}
           onConfirm={confirmDelete}
+          isClosing={deleteDialog.isClosing}
         />
       )}
     </>

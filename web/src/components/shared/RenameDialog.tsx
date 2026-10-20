@@ -1,3 +1,5 @@
+import { backdropMotion, panelMotion } from "@/hooks/usePresence";
+
 /** Small modal for renaming a project or recording. Enter saves, Esc cancels. */
 const RenameDialog = ({
   heading,
@@ -8,6 +10,7 @@ const RenameDialog = ({
   onChange,
   onCancel,
   onSave,
+  isClosing = false,
 }: {
   heading: string;
   description?: string;
@@ -17,19 +20,21 @@ const RenameDialog = ({
   onChange: (value: string) => void;
   onCancel: () => void;
   onSave: () => void;
+  /** Playing the exit animation (see usePresence). */
+  isClosing?: boolean;
 }) => {
   const canSave = value.trim().length > 0;
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
+      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm ${backdropMotion(isClosing)}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="rename-dialog-title"
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
+        className={`w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 dark:bg-[#0f0f11] ${panelMotion(isClosing)}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div>

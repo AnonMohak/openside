@@ -36,6 +36,11 @@ import {
   type ScreenRecorderLayout,
 } from "./ScreenRecordingProvider";
 import { useLocalMedia } from "./LocalMediaProvider";
+import {
+  backdropMotion,
+  panelMotion,
+  usePresence,
+} from "@/hooks/usePresence";
 
 const LAYOUT_OPTIONS: {
   value: ScreenRecorderLayout;
@@ -69,6 +74,7 @@ interface ScreenRecorderControlsProps {
 const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const infoModal = usePresence(isInfoModalOpen);
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
   const [openMediaMenu, setOpenMediaMenu] = useState<"mic" | "cam" | null>(null);
@@ -613,13 +619,13 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
   );
 
   const renderInfoModal = () =>
-    isInfoModalOpen && (
+    infoModal.rendered && (
       <div
-        className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4"
+        className={`fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4 ${backdropMotion(infoModal.isClosing)}`}
         onClick={() => setIsInfoModalOpen(false)}
       >
         <div
-          className="w-full max-w-md rounded-2xl border border-call-border bg-call-background p-5 shadow-2xl"
+          className={`w-full max-w-md rounded-2xl border border-call-border bg-call-background p-5 shadow-2xl ${panelMotion(infoModal.isClosing)}`}
           onClick={(e) => e.stopPropagation()}
         >
           <h2 className="text-lg font-semibold text-foreground">

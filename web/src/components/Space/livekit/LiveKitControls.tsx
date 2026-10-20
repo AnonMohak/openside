@@ -69,6 +69,7 @@ import { playCallSound, prepareCallSounds } from "@/lib/callSounds";
 import { toast } from "@/lib/toast";
 import ControlButton from "../controls/ControlButton";
 import CallWarningDialog from "../ui/CallWarningDialog";
+import { usePresence } from "@/hooks/usePresence";
 import { useLiveKitChat } from "../chat/LiveKitChatProvider";
 import { useLiveKitReactions } from "../reactions/LiveKitReactionsProvider";
 import { useRecordingContext } from "../recording/RecordingProvider";
@@ -996,6 +997,7 @@ const LiveKitControls = ({
   const pendingExitCopy = pendingExitAction
     ? exitDialogCopy[pendingExitAction]
     : null;
+  const exitDialog = usePresence(pendingExitCopy);
 
   const handleSendReaction = (emoji: string) => {
     sendReaction(emoji).catch(() => {
@@ -1939,13 +1941,14 @@ const LiveKitControls = ({
           onClose={() => setSettingsTab(null)}
         />
       )}
-      {pendingExitCopy && (
+      {exitDialog.rendered && (
         <CallWarningDialog
-          title={pendingExitCopy.title}
-          description={pendingExitCopy.description}
-          confirmLabel={pendingExitCopy.confirmLabel}
+          title={exitDialog.rendered.title}
+          description={exitDialog.rendered.description}
+          confirmLabel={exitDialog.rendered.confirmLabel}
           onCancel={() => setPendingExitAction(null)}
           onConfirm={handleExitConfirm}
+          isClosing={exitDialog.isClosing}
         />
       )}
     </>

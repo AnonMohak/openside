@@ -28,6 +28,7 @@ import VideoPlayer from "@/components/shared/VideoPlayer";
 import RenameDialog from "@/components/shared/RenameDialog";
 import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
 import { toast } from "@/lib/toast";
+import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
 
 /** Public URL a share token resolves to (the SharedRecordingPage route). */
@@ -168,9 +169,11 @@ const ScreenVideoCard = ({
 const ShareDialog = ({
   rec,
   onClose,
+  isClosing,
 }: {
   rec: ScreenRecording;
   onClose: () => void;
+  isClosing: boolean;
 }) => {
   const share = useShareScreenRecording();
   const unshare = useUnshareScreenRecording();
@@ -192,6 +195,7 @@ const ShareDialog = ({
       }
       onStop={() => unshare.mutate(rec.id, { onSuccess: onClose })}
       onClose={onClose}
+      isClosing={isClosing}
     />
   );
 };
@@ -261,6 +265,10 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   const [renaming, setRenaming] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // Keep each dialog mounted through its exit animation.
+  const renameDialog = usePresence(renaming);
+  const deleteDialog = usePresence(deleteConfirmOpen);
+  const shareDialog = usePresence(shareOpen);
   const [title, setTitle] = useState("");
 
   // The list query already carries everything the detail needs (title, status,
@@ -451,10 +459,14 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           </div>
         </div>
       </div>
-      {shareOpen && (
-        <ShareDialog rec={rec} onClose={() => setShareOpen(false)} />
+      {shareDialog.rendered && (
+        <ShareDialog
+          rec={rec}
+          onClose={() => setShareOpen(false)}
+          isClosing={shareDialog.isClosing}
+        />
       )}
-      {renaming && (
+      {renameDialog.rendered && (
         <RenameDialog
           heading="Rename recording"
           value={title}
@@ -462,11 +474,12 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           onChange={setTitle}
           onCancel={() => setRenaming(false)}
           onSave={submitRename}
+          isClosing={renameDialog.isClosing}
         />
       )}
-      {deleteConfirmOpen && (
+      {deleteDialog.rendered && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm animate-in fade-in-0 duration-150"
+          className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm ${backdropMotion(deleteDialog.isClosing)}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-screen-recording-title"
@@ -474,7 +487,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           onClick={() => setDeleteConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 animate-in fade-in-0 zoom-in-95 duration-150 dark:bg-[#0f0f11]"
+            className={`w-full max-w-[420px] rounded-2xl border border-border/50 bg-[#f9f9fb] p-5 dark:bg-[#0f0f11] ${panelMotion(deleteDialog.isClosing)}`}
             onClick={(event) => event.stopPropagation()}
           >
             <h2

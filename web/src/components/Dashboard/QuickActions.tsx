@@ -14,6 +14,7 @@ import { useGetMe } from "@/hooks/useUserQuery";
 import { toast } from "@/lib/toast";
 import type { Space } from "@/types/spaceTypes";
 import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
+import { usePresence } from "@/hooks/usePresence";
 
 const UpcomingSessionsSkeleton = () => (
   <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
@@ -34,6 +35,7 @@ const QuickActions = () => {
   const navigate = useNavigate();
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Space | null>(null);
+  const deleteDialog = usePresence(pendingDelete);
   const deleteSpace = useDeleteSpace();
 
   const confirmDelete = () => {
@@ -273,13 +275,14 @@ const QuickActions = () => {
         onClose={() => setIsScheduleOpen(false)}
       />
 
-      {pendingDelete && (
+      {deleteDialog.rendered && (
         <CallWarningDialog
           title="Delete this session?"
-          description={`"${pendingDelete.title || "Untitled recording"}" will be removed from your schedule. This can't be undone.`}
+          description={`"${deleteDialog.rendered.title || "Untitled recording"}" will be removed from your schedule. This can't be undone.`}
           confirmLabel="Delete"
           onCancel={() => setPendingDelete(null)}
           onConfirm={confirmDelete}
+          isClosing={deleteDialog.isClosing}
         />
       )}
     </div>

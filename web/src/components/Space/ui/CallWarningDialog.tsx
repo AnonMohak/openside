@@ -1,4 +1,5 @@
 import type React from "react";
+import { backdropMotion, panelMotion } from "@/hooks/usePresence";
 
 interface CallWarningDialogProps {
   title: string;
@@ -8,6 +9,8 @@ interface CallWarningDialogProps {
   confirmVariant?: "danger" | "default";
   onCancel?: () => void;
   onConfirm: () => void;
+  /** Playing the exit animation (see usePresence). */
+  isClosing?: boolean;
 }
 
 const CallWarningDialog: React.FC<CallWarningDialogProps> = ({
@@ -18,11 +21,14 @@ const CallWarningDialog: React.FC<CallWarningDialogProps> = ({
   confirmVariant = "danger",
   onCancel,
   onConfirm,
+  isClosing = false,
 }) => {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm">
+    <div
+      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm ${backdropMotion(isClosing)}`}
+    >
       <div
-        className="w-full max-w-[380px] rounded-xl border border-border bg-background p-5 shadow-2xl"
+        className={`w-full max-w-[380px] rounded-xl border border-border bg-background p-5 shadow-2xl ${panelMotion(isClosing)}`}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="call-warning-title"
