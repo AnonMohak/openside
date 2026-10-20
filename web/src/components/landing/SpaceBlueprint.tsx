@@ -18,8 +18,8 @@ import { MdCallEnd } from "react-icons/md";
 // LiveKitControls without any of the LiveKit/runtime wiring.
 
 const PARTICIPANTS = [
-  { name: "Joe Rogan", image: "/img/hero/joe.jpg", muted: false },
-  { name: "Elon Musk", image: "/img/hero/elon.jpg", muted: false },
+  { name: "Joe Rogan", image: "/img/hero/joe.webp", muted: false },
+  { name: "Elon Musk", image: "/img/hero/elon.webp", muted: false },
 ];
 
 const formatDuration = (totalSeconds: number) => {

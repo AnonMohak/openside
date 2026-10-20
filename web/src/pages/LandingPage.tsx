@@ -1090,7 +1090,7 @@ const LandingPage = () => {
         description="Openside. Record, meet, and create together."
       />
       <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-[#ffffff] px-4 pt-24 sm:px-6 sm:pt-28">
-        <div className="absolute inset-0 z-0 bg-[url('/img/landing/hero-bg.jpg')] bg-cover bg-bottom" />
+        <div className="absolute inset-0 z-0 bg-[url('/img/landing/hero-bg.webp')] bg-cover bg-bottom" />
 
         <header className="absolute inset-x-0 top-0 z-20">
           <nav className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-4 py-3 sm:px-0">
@@ -1615,7 +1615,7 @@ const LandingPage = () => {
       </section>
       </div>
 
-      <footer className="relative overflow-hidden bg-[url('/img/landing/hero-bg.jpg')] bg-cover bg-top px-4 py-20 sm:px-6 sm:py-24">
+      <footer className="relative overflow-hidden bg-[url('/img/landing/hero-bg.webp')] bg-cover bg-top px-4 py-20 sm:px-6 sm:py-24">
         <div className="absolute inset-0 bg-black/20" />
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/65 via-black/15 to-transparent" />
         <motion.div
