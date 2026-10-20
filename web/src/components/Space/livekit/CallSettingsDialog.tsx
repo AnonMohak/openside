@@ -57,7 +57,6 @@ import {
   cleanDeviceLabel,
   sortMediaDevices,
 } from "@/lib/mediaDevices";
-import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { areCallSoundsEnabled, setCallSoundsEnabled } from "@/lib/callSounds";
 import {
   setPreviewCamera,
@@ -135,7 +134,6 @@ const applyEchoCancellation = async (room: Room, echoCancellation: boolean) => {
 
   const deviceId = micTrack.mediaStreamTrack.getSettings().deviceId;
   const wasMuted = micTrack.isMuted;
-  markLocalMediaAction();
   await micTrack.restartTrack({
     ...room.options.audioCaptureDefaults,
     // Without a device id LiveKit restarts with bare `audio: true`, dropping
@@ -297,8 +295,6 @@ const CallSettingsDialog = ({
         : kind === "audiooutput"
           ? speaker.setActiveMediaDevice
           : camera.setActiveMediaDevice;
-    // A switch restarts the published track - not a host mute.
-    markLocalMediaAction();
     try {
       await select(
         deviceId,

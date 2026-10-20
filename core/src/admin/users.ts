@@ -12,7 +12,6 @@ import {
 	keysetPage,
 	keysetWhere,
 	limitOf,
-	num,
 	offsetOf,
 	str,
 } from "./util.ts";

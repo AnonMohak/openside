@@ -12,7 +12,7 @@ export type RecordingFileStatus =
   | "PROCESSING"
   | "READY"
   | "FAILED";
-export type SegmentStatus = "UPLOADED" | "PROCESSING" | "PROCESSED" | "FAILED";
+type SegmentStatus = "UPLOADED" | "PROCESSING" | "PROCESSED" | "FAILED";
 export type VideoQuality =
   | "P360"
   | "P480"
@@ -172,23 +172,6 @@ export interface CreateParticipantRecordingPayload {
   startOffsetMs?: number;
 }
 
-export interface MarkRecordingCompletePayload {
-  expectedSegments: number;
-  participantSessionId?: string;
-  spaceId?: string;
-}
-
-export interface PresignSegmentPayload {
-  participantRecordingId: string;
-  spaceId: string;
-  participantSessionId?: string;
-  participantId?: string;
-  trackType: "combined" | "audio" | "screen" | "pcm";
-  sequenceNumber: number;
-  contentType: string;
-  ext?: string;
-}
-
 export interface PresignSegmentResponse {
   success: boolean;
   data: {
@@ -196,25 +179,6 @@ export interface PresignSegmentResponse {
     assetKey: string;
   };
   message: string;
-}
-
-export interface CreateSegmentPayload {
-  participantRecordingId: string;
-  spaceRecordingSessionId: string;
-  spaceId: string;
-  participantId?: string;
-  participantSessionId?: string;
-  sequenceNumber: number;
-  assetKey: string;
-  startMs: number;
-  durationMs: number;
-  sizeBytes: number;
-  checksum?: string;
-  // Raw-PCM segments only: format needed to build the WAV header server-side.
-  // Omitted for every other track type.
-  sampleRate?: number;
-  bitDepth?: number;
-  channelCount?: number;
 }
 
 // Responses
@@ -252,12 +216,6 @@ export interface GetSessionsListResponse {
 }
 
 export interface CreateParticipantRecordingResponse {
-  success: boolean;
-  data: ParticipantRecording;
-  message: string;
-}
-
-export interface MarkRecordingCompleteResponse {
   success: boolean;
   data: ParticipantRecording;
   message: string;

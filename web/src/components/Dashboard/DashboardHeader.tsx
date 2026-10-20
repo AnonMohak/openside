@@ -1,5 +1,3 @@
-"use client";
-
 import { Heart, Star } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { GoSidebarCollapse, GoSidebarExpand } from "react-icons/go";

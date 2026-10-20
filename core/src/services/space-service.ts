@@ -139,11 +139,11 @@ function isJoinCodeConflict(error: unknown): boolean {
 
 // Join codes are stored and generated in uppercase, but users may type them in
 // any case. Normalizing every lookup/store keeps "jk5f8" and "JK5F8" equivalent.
-export function normalizeJoinCode(joinCode: string): string {
+function normalizeJoinCode(joinCode: string): string {
 	return joinCode.trim().toUpperCase();
 }
 
-export async function isJoinCodeUnique(joinCode: string): Promise<boolean> {
+async function isJoinCodeUnique(joinCode: string): Promise<boolean> {
 	const existingSpace = await prisma.space.findUnique({
 		where: { joinCode: normalizeJoinCode(joinCode) },
 	});

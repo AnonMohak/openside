@@ -69,7 +69,7 @@ interface UseLocalRecordingOptions {
   chunkIntervalMs?: number;
 }
 
-export interface LocalRecordingStartOptions {
+interface LocalRecordingStartOptions {
   /** Maximum camera height for this recording session (720, 1080, or 2160). */
   videoResolution?: number;
   /** Audio-only sessions never instantiate MediaRecorder video/screen capture. */

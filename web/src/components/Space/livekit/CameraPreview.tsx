@@ -29,7 +29,6 @@ import {
 } from "@/components/shared/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { cleanDeviceLabel, sortMediaDevices } from "@/lib/mediaDevices";
-import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { playCallSound } from "@/lib/callSounds";
 import { useLowLight } from "@/hooks/useLowLight";
 import {
@@ -442,7 +441,6 @@ const CameraPreviewDialog = ({
     const previewTrack = trackRef.current;
     if (!previewTrack || isConfirming) return;
     setIsConfirming(true);
-    markLocalMediaAction();
 
     const localParticipant = room.localParticipant;
     const existing = localParticipant.getTrackPublication(Track.Source.Camera);

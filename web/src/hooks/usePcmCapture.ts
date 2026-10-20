@@ -50,7 +50,7 @@ interface UsePcmCaptureReturn {
   getClockBaseline: () => number | null;
 }
 
-export interface PcmCaptureStartOptions {
+interface PcmCaptureStartOptions {
   audioId?: string;
   sampleRate?: 44100 | 48000;
   noiseSuppression?: boolean;

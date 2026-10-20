@@ -12,7 +12,6 @@
  * - Socket.IO owns current app-level recording events.
  */
 
-"use client";
 import {
   createContext,
   useContext,
@@ -108,7 +107,6 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
 
     // Connection successful
     connection.on("connect", () => {
-      console.log("[Socket] Connected:", connection.id);
       setSocket(connection);
     });
 
@@ -118,15 +116,13 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
     });
 
     // Connection lost
-    connection.on("disconnect", (reason) => {
-      console.log("[Socket] Disconnected:", reason);
+    connection.on("disconnect", () => {
       setSocket(null);
     });
 
     // Clean up on unmount
     return () => {
       connection.disconnect();
-      console.log("[Socket] Connection closed");
     };
   }, []);
 

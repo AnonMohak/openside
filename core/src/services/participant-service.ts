@@ -25,7 +25,7 @@ interface JoinSpaceData {
 	isGuest: boolean;
 }
 
-export async function getSpaceIfLive(spaceId: string) {
+async function getSpaceIfLive(spaceId: string) {
 	const space = await prisma.space.findUnique({
 		where: { id: spaceId },
 		select: {
@@ -51,7 +51,7 @@ export async function getSpaceIfLive(spaceId: string) {
 	return space;
 }
 
-export async function findExistingParticipant(
+async function findExistingParticipant(
 	spaceId: string,
 	userId?: string,
 	participantSessionId?: string,

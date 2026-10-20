@@ -5,7 +5,6 @@ import {
 } from "@livekit/components-react";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { ConnectionState, RoomEvent, type Room } from "livekit-client";
-import { markLocalMediaAction } from "@/lib/localMediaIntent";
 
 // When the host's recording mode is "Audio only", the whole call goes
 // audio-only: every camera and screen share is turned off and locked until the
@@ -81,7 +80,6 @@ export const AudioOnlyController = ({
   useEffect(() => {
     if (!isAudioOnly) return;
     if (isCameraEnabled) {
-      markLocalMediaAction();
       void localParticipant.setCameraEnabled(false).catch(() => undefined);
     }
     if (isScreenShareEnabled) {

@@ -15,7 +15,7 @@ import { prisma } from "../db/index.ts";
 import { decryptSecret, encryptSecret, maskSecret } from "../lib/crypto.ts";
 import { invalidateInfraCache } from "./infra-service.ts";
 
-export interface SelfHostInput {
+interface SelfHostInput {
 	livekitUrl: string;
 	livekitApiKey: string;
 	livekitApiSecret: string;
@@ -25,7 +25,7 @@ export interface SelfHostInput {
 	r2Bucket: string;
 }
 
-export interface SelfHostView {
+interface SelfHostView {
 	enabled: boolean;
 	livekitUrl: string;
 	livekitApiKey: string; // masked

@@ -1,4 +1,4 @@
-import React, {
+import {
   createContext,
   type ReactNode,
   useCallback,
@@ -10,7 +10,7 @@ import React, {
 import { useLocalParticipant, useRoomContext } from "@livekit/components-react";
 import type { Room } from "livekit-client";
 
-export interface LiveKitReactionEvent {
+interface LiveKitReactionEvent {
   id: string;
   emoji: string;
   senderId: string;

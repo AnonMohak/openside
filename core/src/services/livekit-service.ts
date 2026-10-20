@@ -114,11 +114,6 @@ export function getLiveKitIdentity(input: {
 	return `guest:${input.spaceId}:${randomUUID()}`;
 }
 
-export function getLiveKitPublicConfig() {
-	const { url } = getLiveKitConfig();
-	return { url };
-}
-
 export async function createLiveKitRoom(input: {
 	name: string;
 	metadata?: Record<string, unknown>;

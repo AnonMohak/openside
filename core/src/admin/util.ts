@@ -16,7 +16,7 @@ export function str(value: unknown, max = 100): string {
 }
 
 /** Keyset cursor "<ISO date>_<id>"; ids may contain underscores, dates never do. */
-export function parseKeyset(req: Request): { date: Date; id: string } | null {
+function parseKeyset(req: Request): { date: Date; id: string } | null {
 	const raw = req.query.cursor;
 	if (typeof raw !== "string") return null;
 	const i = raw.indexOf("_");
@@ -60,9 +60,3 @@ export function offsetOf(req: Request): number {
 }
 
 export const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
-
-export const num = (v: bigint | number | null | undefined) =>
-	v == null ? 0 : Number(v);
-
-export const toSeconds = (ms: Date | null, since: Date) =>
-	ms ? Math.max(0, Math.round((ms.getTime() - since.getTime()) / 1000)) : null;

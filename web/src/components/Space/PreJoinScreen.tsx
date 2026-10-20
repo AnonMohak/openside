@@ -245,9 +245,6 @@ const PreJoinScreen = ({
       streamRef.current = mediaStream;
       setStream(mediaStream);
 
-      const s = mediaStream.getVideoTracks()[0]?.getSettings();
-      console.log("[capture]", s?.width, "x", s?.height, "@", s?.frameRate);
-
       const videoTracks = mediaStream.getVideoTracks();
       const audioTracks = mediaStream.getAudioTracks();
 

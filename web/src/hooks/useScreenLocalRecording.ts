@@ -35,7 +35,7 @@ interface UseScreenLocalRecordingOptions {
   chunkIntervalMs?: number;
 }
 
-export interface TrackSize {
+interface TrackSize {
   width: number;
   height: number;
 }

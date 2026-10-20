@@ -136,7 +136,7 @@ const SOUNDS = {
   },
 } satisfies Record<string, SoundSpec>;
 
-export type CallSound = keyof typeof SOUNDS;
+type CallSound = keyof typeof SOUNDS;
 
 let audioContext: AudioContext | null = null;
 

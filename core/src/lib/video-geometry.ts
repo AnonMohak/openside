@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { ffmpegPath } from "./ffmpeg-path.ts";
 
-export interface VideoSize {
+interface VideoSize {
 	width: number;
 	height: number;
 }
@@ -45,7 +45,7 @@ function ffmpegStderr(args: string[]): Promise<string> {
 }
 
 /** First video frame size reported in the container header (null if unreadable). */
-export async function probeVideoSize(file: string): Promise<VideoSize | null> {
+async function probeVideoSize(file: string): Promise<VideoSize | null> {
 	// No output file: ffmpeg prints the input's stream table to stderr, then
 	// exits non-zero ("At least one output file must be specified").
 	const out = await ffmpegStderr(["-hide_banner", "-i", file]);

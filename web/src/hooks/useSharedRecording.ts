@@ -14,7 +14,7 @@ import type {
   ScreenOutputKind,
 } from "@/hooks/useScreenRecordings";
 
-export interface SharedRecording {
+interface SharedRecording {
   id: string;
   source: "SCREEN_RECORDER" | "SPACE";
   title: string | null;
@@ -71,7 +71,7 @@ export async function fetchSharedOutputUrl(
 }
 
 /** URL for one ready track of a shared Space recording. */
-export async function fetchSharedFinalOutputUrl(
+async function fetchSharedFinalOutputUrl(
   token: string,
   outputId: string,
   download = false,
@@ -83,7 +83,7 @@ export async function fetchSharedFinalOutputUrl(
   return data.data.url as string;
 }
 
-export type SharedDownloadResult = {
+type SharedDownloadResult = {
   ready: boolean;
   url?: string;
   format: "webm" | "mp4" | "mp3" | "wav";

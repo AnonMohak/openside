@@ -1,5 +1,3 @@
-"use client";
-
 import { motion, useAnimation } from "framer-motion";
 import type { HTMLAttributes } from "react";
 import {
@@ -12,7 +10,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-export interface AudioLinesIconHandle {
+interface AudioLinesIconHandle {
   startAnimation: () => void;
   stopAnimation: () => void;
 }

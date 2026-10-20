@@ -18,17 +18,16 @@ export const DEMO_FPS = 24;
 export type AllowedFps = (typeof ALLOWED_FPS)[number];
 
 export const ALLOWED_VIDEO_RESOLUTIONS = [720, 1080, 2160] as const;
-export const DEFAULT_VIDEO_RESOLUTION = 2160;
-export type AllowedVideoResolution = (typeof ALLOWED_VIDEO_RESOLUTIONS)[number];
+const DEFAULT_VIDEO_RESOLUTION = 2160;
+type AllowedVideoResolution = (typeof ALLOWED_VIDEO_RESOLUTIONS)[number];
 
 export const ALLOWED_AUDIO_SAMPLE_RATES = [44100, 48000] as const;
-export const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
-export type AllowedAudioSampleRate =
-	(typeof ALLOWED_AUDIO_SAMPLE_RATES)[number];
+const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
+type AllowedAudioSampleRate = (typeof ALLOWED_AUDIO_SAMPLE_RATES)[number];
 
 export const RECORDING_MODES = ["VIDEO_AND_AUDIO", "AUDIO_ONLY"] as const;
 export type RecordingMode = (typeof RECORDING_MODES)[number];
-export const DEFAULT_RECORDING_MODE: RecordingMode = "VIDEO_AND_AUDIO";
+const DEFAULT_RECORDING_MODE: RecordingMode = "VIDEO_AND_AUDIO";
 
 /** Coerce any input to a valid target fps, falling back to the default. */
 export function clampFps(value: unknown): AllowedFps {

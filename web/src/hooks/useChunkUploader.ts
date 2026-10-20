@@ -33,7 +33,7 @@ import type {
   CreateSegmentResponse,
 } from "@/types/recordingTypes";
 
-export interface EnqueueChunkInput {
+interface EnqueueChunkInput {
   spaceId: string;
   spaceRecordingSessionId: string;
   recordingSessionId: string;
@@ -119,7 +119,7 @@ function isUnrecoverableUploadError(error: unknown): boolean {
 }
 
 /** API paths for the presign + segment-register calls. */
-export interface ChunkUploaderEndpoints {
+interface ChunkUploaderEndpoints {
   scope: BufferedUploadScope;
   presignPath: string;
   segmentPath: string;

@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import type { AuthenticatedRequest } from "../middlewares/auth-middleware";
 import { findOrCreateUser } from "../services/auth-service";
 import { getPublicProfile } from "../services/profile-service";

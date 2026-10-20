@@ -7,7 +7,6 @@ import {
   useRoomContext,
 } from "@livekit/components-react";
 import { Track, type Participant as LiveKitParticipant } from "livekit-client";
-import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { playCallSound } from "@/lib/callSounds";
 import { useCameraPreview } from "../livekit/CameraPreview";
 import {
@@ -177,7 +176,6 @@ const ParticipantRow = ({
     : participantName;
   const isHandRaised = participant.attributes.handRaised === "true";
   const setLocalMicrophone = async () => {
-    markLocalMediaAction();
     try {
       await localParticipant.setMicrophoneEnabled(isMicMuted);
       playCallSound(isMicMuted ? "micOn" : "micOff");
@@ -190,7 +188,6 @@ const ParticipantRow = ({
       openCameraPreview();
       return;
     }
-    markLocalMediaAction();
     try {
       await localParticipant.setCameraEnabled(false);
       playCallSound("cameraOff");

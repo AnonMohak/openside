@@ -47,11 +47,11 @@ export interface Entitlements {
 export const DEMO_RECORDING_SECONDS = 15 * 60;
 export const PRO_RECORDING_SECONDS = 20 * 60 * 60;
 export const DEMO_RETENTION_HOURS = 48;
-export const PRO_RETENTION_HOURS = 30 * 24;
+const PRO_RETENTION_HOURS = 30 * 24;
 /** Concurrent-participant caps per plan (host counts as one). Self-host is
  *  unlimited (null) - only the LiveKit room cap applies there. */
-export const DEMO_MAX_PARTICIPANTS = 2;
-export const PRO_MAX_PARTICIPANTS = 5;
+const DEMO_MAX_PARTICIPANTS = 2;
+const PRO_MAX_PARTICIPANTS = 5;
 /** Warn the client when this little metered credit remains. */
 export const LOW_CREDIT_WARNING_SECONDS = 2 * 60;
 

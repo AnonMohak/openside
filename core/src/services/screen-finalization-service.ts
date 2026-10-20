@@ -72,7 +72,7 @@ const FFMPEG_TIMEOUT_MS =
  * ffmpeg in-process - that would overload the API fleet. The session is left for
  * finalization recovery to retry.
  */
-export async function triggerScreenFinalize(sessionId: string): Promise<void> {
+async function triggerScreenFinalize(sessionId: string): Promise<void> {
 	if (!isQueueConfigured()) {
 		console.warn(
 			`[ScreenFinalize] Redis not configured; finalizing ${sessionId} in API process`,

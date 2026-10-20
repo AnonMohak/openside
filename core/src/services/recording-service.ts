@@ -1525,7 +1525,7 @@ export async function disableSpaceRecordingShare(
 	});
 }
 
-export interface SharedSpaceTrack {
+interface SharedSpaceTrack {
 	id: string;
 	title: string;
 	mimeType: string | null;
@@ -1546,7 +1546,7 @@ export interface SharedSpaceTrack {
 	cloudHasAudio: boolean;
 }
 
-export interface SharedRecordingView {
+interface SharedRecordingView {
 	id: string;
 	source: "SCREEN_RECORDER" | "SPACE";
 	title: string | null;

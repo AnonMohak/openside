@@ -170,7 +170,7 @@ const METER_SESSION_SELECT = {
  * current usage period. Returns the owner's usage snapshot (null when the
  * session isn't metered - self-host or unresolvable owner).
  */
-export async function meterSession(
+async function meterSession(
 	session: MeterableSession,
 	now: Date = new Date(),
 ): Promise<UsageSnapshot | null> {

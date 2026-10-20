@@ -19,7 +19,7 @@ export interface Usage {
   warning: boolean;
 }
 
-export interface Entitlements {
+interface Entitlements {
   plan: "demo" | "pro" | "selfhost";
   metered: boolean;
   recordingSecondsLimit: number | null;
@@ -91,7 +91,7 @@ export const useBillingPortal = () =>
 
 // Self-host settings
 
-export interface SelfHostConfigView {
+interface SelfHostConfigView {
   enabled: boolean;
   livekitUrl: string;
   livekitApiKey: string; // masked

@@ -23,7 +23,7 @@ export interface MimeCandidate {
 }
 
 /** Ordered by preference. Filtered by isTypeSupported() at selection time. */
-export const VIDEO_MIME_CANDIDATES: MimeCandidate[] = [
+const VIDEO_MIME_CANDIDATES: MimeCandidate[] = [
   {
     mimeType: "video/mp4;codecs=avc1.640033,mp4a.40.2",
     codec: "h264",
@@ -71,7 +71,7 @@ export function firstSupportedVideoMime(): MimeCandidate {
  * false-positive we fall back on; we also match the known Chrome messages, which
  * historically surfaced as generic errors without the EncodingError name.
  */
-export function classifyRecorderError(event: Event): {
+function classifyRecorderError(event: Event): {
   isEncodingError: boolean;
   name: string;
   message: string;
@@ -88,7 +88,7 @@ export function classifyRecorderError(event: Event): {
   return { isEncodingError, name, message };
 }
 
-export interface RecorderFallbackHandlers {
+interface RecorderFallbackHandlers {
   /** Fired for the initial recorder AND after every before-data fallback swap,
    *  so the caller updates its recorder ref + metadata to the ACTIVE codec. */
   onActiveRecorder: (recorder: MediaRecorder, candidate: MimeCandidate) => void;

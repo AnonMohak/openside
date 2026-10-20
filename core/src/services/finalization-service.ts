@@ -65,9 +65,7 @@ const ALIGNED_MIN_OFFSET_MS = 500;
  * what the queue exists to prevent. The session is left for finalization
  * recovery to retry later.
  */
-export async function triggerFinalize(
-	recordingSessionId: string,
-): Promise<void> {
+async function triggerFinalize(recordingSessionId: string): Promise<void> {
 	if (!isQueueConfigured()) {
 		void finalizeSession(recordingSessionId);
 		return;

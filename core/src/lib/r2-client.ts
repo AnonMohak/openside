@@ -16,7 +16,7 @@ export const R2_BUCKET = process.env.R2_BUCKET ?? "";
 
 let cachedClient: S3Client | null = null;
 
-export function isR2Configured(): boolean {
+function isR2Configured(): boolean {
 	return Boolean(accountId && accessKeyId && secretAccessKey && R2_BUCKET);
 }
 

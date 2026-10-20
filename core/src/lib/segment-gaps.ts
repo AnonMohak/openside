@@ -35,7 +35,7 @@ export async function waitForLateSegments<
 	return [];
 }
 
-export interface SegmentGaps {
+interface SegmentGaps {
 	/** Sequence numbers missing between the first and last chunk we received. */
 	interiorMissing: number[];
 	/** How many expected chunks past the last one we received never arrived. */

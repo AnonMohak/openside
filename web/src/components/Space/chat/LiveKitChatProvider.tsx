@@ -1,4 +1,4 @@
-import React, {
+import {
   createContext,
   ReactNode,
   useCallback,
@@ -11,7 +11,7 @@ import { useLocalParticipant, useRoomContext } from "@livekit/components-react";
 import type { Room } from "livekit-client";
 import { useGetMe } from "@/hooks/useUserQuery";
 
-export interface ChatMessageData {
+interface ChatMessageData {
   id: string;
   senderId: string;
   senderName: string;

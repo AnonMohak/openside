@@ -28,7 +28,7 @@ const AVATAR_CONTENT_TYPES: Record<string, string> = {
 	"image/gif": "gif",
 };
 
-export interface PublicProfile {
+interface PublicProfile {
 	id: string;
 	name: string;
 	email: string;
@@ -79,7 +79,7 @@ const PROFILE_SELECT = {
 } as const;
 
 /** Shape a user row for the client, resolving the avatar to a usable URL. */
-export async function toPublicProfile(row: ProfileRow): Promise<PublicProfile> {
+async function toPublicProfile(row: ProfileRow): Promise<PublicProfile> {
 	// A user-uploaded avatar lives in R2 and needs a presigned GET; otherwise
 	// fall back to the Clerk image URL stored on the row.
 	const avatar = row.avatarKey
@@ -112,7 +112,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile> {
 }
 
 /** Deterministic avatar key. Random suffix busts caches + avoids ext clashes. */
-export function buildAvatarKey(userId: string, ext: string): string {
+function buildAvatarKey(userId: string, ext: string): string {
 	const suffix = Math.random().toString(36).slice(2, 10);
 	return `avatars/${userId}/${suffix}.${ext}`;
 }

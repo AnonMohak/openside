@@ -12,7 +12,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import api from "@/lib/axiosInstance";
 import { GET_ME_QUERY_KEY, type MeUser } from "@/hooks/useUserQuery";
 
-export interface ProfileUpdate {
+interface ProfileUpdate {
   name?: string;
   avatarKey?: string | null;
 }
@@ -78,7 +78,7 @@ export const useUpdateProfile = () => {
   });
 };
 
-export interface RecordingSettingsUpdate {
+interface RecordingSettingsUpdate {
   cloudBackupEnabled?: boolean;
   /** Frame-rate preference; only 24 or 30 are accepted server-side. */
   targetFps?: number;

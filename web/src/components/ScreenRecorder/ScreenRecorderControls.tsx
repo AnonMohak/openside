@@ -29,7 +29,6 @@ import { Square, Monitor, Camera, PictureInPicture2, LayoutTemplate } from "luci
 import { FiUploadCloud } from "react-icons/fi";
 import { cn } from "@/lib/utils";
 import { sortMediaDevices } from "@/lib/mediaDevices";
-import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import ControlButton from "../Space/controls/ControlButton";
 import {
   useScreenRecordingContext,
@@ -121,7 +120,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
   const cameraDevices = sortMediaDevices(rawCameraDevices);
 
   const toggleMicrophone = async () => {
-    markLocalMediaAction();
     try {
       await toggleMicrophoneMedia();
     } catch {
@@ -130,7 +128,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
   };
 
   const toggleCamera = async () => {
-    markLocalMediaAction();
     try {
       await toggleCameraMedia();
     } catch {
@@ -142,7 +139,6 @@ const ScreenRecorderControls = ({ onExit }: ScreenRecorderControlsProps) => {
     kind: SelectableDeviceKind,
     deviceId: string,
   ) => {
-    markLocalMediaAction();
     try {
       if (kind === "audioinput") await selectMicrophone(deviceId);
       else await selectCamera(deviceId);

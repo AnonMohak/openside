@@ -169,7 +169,7 @@ interface ResolveInput {
 	downloadName?: string;
 }
 
-export interface ResolveResult {
+interface ResolveResult {
 	ready: boolean;
 	url?: string;
 	format: DownloadFormat;

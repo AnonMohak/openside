@@ -32,7 +32,7 @@ import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
 
 /** Public URL a share token resolves to (the SharedRecordingPage route). */
-export const shareUrlFor = (token: string) =>
+const shareUrlFor = (token: string) =>
   `${window.location.origin}/share/${token}`;
 
 const formatDay = (value?: string | null) =>

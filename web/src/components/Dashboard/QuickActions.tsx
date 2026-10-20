@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import generateRoomId from "@/utils/GenerateRoomId";
 import { createIntentKey } from "@/pages/RoomPage";

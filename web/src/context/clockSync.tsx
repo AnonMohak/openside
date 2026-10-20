@@ -21,7 +21,6 @@
  * the least-delayed ping gives the most accurate offset (standard NTP practice).
  */
 
-"use client";
 import {
   createContext,
   useCallback,

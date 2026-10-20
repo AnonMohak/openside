@@ -58,7 +58,7 @@ const jsonMessage = (message: string) => ({
  * Build a limiter with a shared (Redis or memory) store. `name` namespaces the
  * Redis keys so different limiters don't share a bucket.
  */
-export function createRateLimiter(
+function createRateLimiter(
 	name: string,
 	{ windowMs, limit }: { windowMs: number; limit: number },
 ) {

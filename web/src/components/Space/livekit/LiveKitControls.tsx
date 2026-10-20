@@ -64,7 +64,6 @@ import {
 import { cn } from "@/lib/utils";
 import { useGetRecordingSessionsBySpace } from "@/hooks/useRecording";
 import { canSelectAudioOutput, sortMediaDevices } from "@/lib/mediaDevices";
-import { markLocalMediaAction } from "@/lib/localMediaIntent";
 import { playCallSound, prepareCallSounds } from "@/lib/callSounds";
 import { toast } from "@/lib/toast";
 import ControlButton from "../controls/ControlButton";
@@ -670,7 +669,6 @@ const LiveKitControls = ({
   }, [attributeHandRaised, optimisticHandRaised]);
 
   const toggleMicrophone = async () => {
-    markLocalMediaAction();
     try {
       if (deafened) {
         // Undeafening plays its own sound; no separate unmute blip.
@@ -692,7 +690,6 @@ const LiveKitControls = ({
   // Straight on, for people who turned the preview off in settings - still
   // with their saved background.
   const turnOnCameraDirectly = async () => {
-    markLocalMediaAction();
     try {
       const publication = await localParticipant.setCameraEnabled(true);
       playCallSound("cameraOn");
@@ -718,7 +715,6 @@ const LiveKitControls = ({
       else await turnOnCameraDirectly();
       return;
     }
-    markLocalMediaAction();
     try {
       await localParticipant.setCameraEnabled(false);
       playCallSound("cameraOff");
@@ -738,9 +734,6 @@ const LiveKitControls = ({
           ? setActiveSpeakerDevice
           : setActiveCameraDevice;
 
-    // A switch restarts the published track, which can briefly flip the
-    // enabled flags - don't let the watcher misread that as a host mute.
-    markLocalMediaAction();
     try {
       await setActiveDevice(
         deviceId,
@@ -951,7 +944,6 @@ const LiveKitControls = ({
   const handleDeafenToggle = async (checked: boolean) => {
     const shouldDeafen = checked === true;
 
-    markLocalMediaAction();
     playCallSound(shouldDeafen ? "deafen" : "undeafen");
     setDeafened(shouldDeafen);
 

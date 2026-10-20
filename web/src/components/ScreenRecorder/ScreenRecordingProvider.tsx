@@ -31,14 +31,14 @@ import useUnloadWarning from "@/hooks/useUnloadWarning";
 import type { ScreenStreams } from "@/hooks/useScreenLocalRecording";
 import { useLocalMedia } from "./LocalMediaProvider";
 
-export interface RecordingInfo {
+interface RecordingInfo {
   title: string;
   description: string;
 }
 
 export type ScreenRecorderLayout = "screen" | "camera" | "screen-camera";
-export type PipSize = "normal" | "big";
-export type PipShape = "square" | "rectangle";
+type PipSize = "normal" | "big";
+type PipShape = "square" | "rectangle";
 
 interface ScreenRecordingContextValue {
   recordingState: ScreenRecordingState;

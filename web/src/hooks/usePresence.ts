@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /** Length of every overlay's enter/exit animation (tw-animate default). */
-export const OVERLAY_ANIMATION_MS = 150;
+const OVERLAY_ANIMATION_MS = 150;
 
 /**
  * Keeps an overlay mounted long enough to play its exit animation.

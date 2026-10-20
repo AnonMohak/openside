@@ -1,5 +1,3 @@
-"use client"
-
 import AppLoader from "@/components/shared/AppLoader"
 import { useGetMe } from "@/hooks/useUserQuery"
 import { useAuth, useClerk } from "@clerk/clerk-react"

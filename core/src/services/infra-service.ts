@@ -37,7 +37,7 @@ export interface R2Infra {
 	selfHost: boolean;
 }
 
-export interface SelfHostCredentials {
+interface SelfHostCredentials {
 	livekitUrl: string;
 	livekitApiKey: string;
 	livekitApiSecret: string;
@@ -97,7 +97,7 @@ export function invalidateSpaceInfraCache(spaceId: string) {
 	spaceStampCache.delete(spaceId);
 }
 
-export function getEnvLiveKitInfra(): LiveKitInfra {
+function getEnvLiveKitInfra(): LiveKitInfra {
 	const url = process.env.LIVEKIT_URL;
 	const apiKey = process.env.LIVEKIT_API_KEY;
 	const apiSecret = process.env.LIVEKIT_API_SECRET;
@@ -109,7 +109,7 @@ export function getEnvLiveKitInfra(): LiveKitInfra {
 	return { url, apiKey, apiSecret, selfHost: false };
 }
 
-export function getEnvR2Infra(): R2Infra {
+function getEnvR2Infra(): R2Infra {
 	return { client: getR2Client(), bucket: R2_BUCKET, selfHost: false };
 }
 
@@ -155,7 +155,7 @@ async function getStoredSelfHost(
 }
 
 /** Decrypted self-host credentials for a user, or null when not active. */
-export async function getSelfHostCredentials(
+async function getSelfHostCredentials(
 	userId: string,
 ): Promise<SelfHostCredentials | null> {
 	const stored = await getStoredSelfHost(userId);
@@ -241,20 +241,6 @@ function r2FromCredentials(creds: SelfHostCredentials | null): R2Infra {
 	};
 }
 
-export async function resolveLiveKitForUser(
-	userId: string | null | undefined,
-): Promise<LiveKitInfra> {
-	if (!userId) return getEnvLiveKitInfra();
-	return liveKitFromCredentials(await getSelfHostCredentials(userId));
-}
-
-export async function resolveR2ForUser(
-	userId: string | null | undefined,
-): Promise<R2Infra> {
-	if (!userId) return getEnvR2Infra();
-	return r2FromCredentials(await getSelfHostCredentials(userId));
-}
-
 async function getSpaceStamp(spaceId: string): Promise<Stamp> {
 	const cached = readCache(spaceStampCache, spaceId);
 	if (cached !== undefined) return cached;
@@ -313,7 +299,7 @@ export async function resolveLiveKitForSpace(
 	);
 }
 
-export interface R2RawCredentials {
+interface R2RawCredentials {
 	accessKeyId: string;
 	secretAccessKey: string;
 	endpoint: string;

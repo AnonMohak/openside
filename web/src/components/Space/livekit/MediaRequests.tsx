@@ -11,7 +11,7 @@
 
 import type { Room } from "livekit-client";
 
-export const MEDIA_REQUEST_TOPIC = "openside-media-requests";
+const MEDIA_REQUEST_TOPIC = "openside-media-requests";
 
 export type MediaRequestSource = "microphone" | "camera";
 

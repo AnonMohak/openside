@@ -13,7 +13,7 @@ import type { RecordingComment } from "@/hooks/useScreenRecordings";
 
 const GUEST_NAME_KEY = "openside:guest-comment-name";
 
-export const readGuestName = (): string => {
+const readGuestName = (): string => {
   try {
     return localStorage.getItem(GUEST_NAME_KEY) ?? "";
   } catch {
