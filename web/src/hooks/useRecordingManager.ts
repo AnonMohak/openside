@@ -119,6 +119,8 @@ interface UseRecordingManagerReturn {
   combinedChunkIndex: number;
   screenChunkIndex: number;
   pendingUploads: number;
+  /** Byte progress (0-100) of the chunk currently uploading; 100 when idle. */
+  chunkUploadProgress: number;
   /** Seconds left in the synced lead-in (3,2,1), or null when not counting down. */
   countdownValue: number | null;
   startRecording: (
@@ -1302,6 +1304,7 @@ export default function useRecordingManager(
     combinedChunkIndex,
     screenChunkIndex,
     pendingUploads: uploader.pendingCount,
+    chunkUploadProgress: uploader.chunkProgress,
     countdownValue,
     startRecording,
     stopRecording,

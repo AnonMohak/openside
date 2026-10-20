@@ -62,6 +62,8 @@ interface UseChunkUploaderReturn {
   /** Number of successfully uploaded segments for a given recording. */
   getUploadedCount: (participantRecordingId: string) => number;
   pendingCount: number;
+  /** Byte progress (0-100) of the chunk currently uploading; 100 when idle. */
+  chunkProgress: number;
   failedPermanently: boolean;
 }
 
@@ -74,6 +76,39 @@ const STALE_CHUNK_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface QueueItem extends BufferedChunk {
   attempts: number;
+}
+
+/** Min gap between chunk-progress state updates, so a fast upload doesn't
+ *  re-render (and re-broadcast) on every progress event. */
+const PROGRESS_THROTTLE_MS = 150;
+
+/**
+ * PUT a blob to a presigned URL. XHR rather than fetch because fetch can't
+ * report upload progress; `onProgress` gets the fraction of bytes sent (0-1).
+ */
+function putWithProgress(
+  url: string,
+  blob: Blob,
+  contentType: string,
+  onProgress: (fraction: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`R2 PUT failed with status ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("R2 PUT network error"));
+    xhr.onabort = () => reject(new Error("R2 PUT aborted"));
+    xhr.send(blob);
+  });
 }
 
 function ext(mimeType: string): string {
@@ -158,13 +193,27 @@ export default function useChunkUploader(
   const quarantinedRef = useRef<Set<string>>(new Set());
   const [pendingCount, setPendingCount] = useState(0);
   const [failedPermanently, setFailedPermanently] = useState(false);
+  const [chunkProgress, setChunkProgressState] = useState(100);
+  const lastProgressRef = useRef({ value: 100, at: 0 });
 
   const syncPending = useCallback(() => {
     setPendingCount(queueRef.current.length);
   }, []);
 
+  const setChunkProgress = useCallback((percent: number, force = false) => {
+    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    const last = lastProgressRef.current;
+    const now = Date.now();
+    if (value === last.value) return;
+    if (!force && now - last.at < PROGRESS_THROTTLE_MS) return;
+    lastProgressRef.current = { value, at: now };
+    setChunkProgressState(value);
+  }, []);
+
   const uploadOne = useCallback(
     async (item: QueueItem): Promise<void> => {
+      setChunkProgress(0, true);
+
       // 1. Presign
       const presign = await api.post<PresignSegmentResponse>(
         endpoints.presignPath,
@@ -182,17 +231,14 @@ export default function useChunkUploader(
       const { uploadUrl, assetKey } = presign.data.data;
 
       // 2. PUT blob straight to R2 (no auth header - the URL is the auth).
-      const putRes = await fetch(uploadUrl, {
-        method: "PUT",
-        body: item.blob,
-        headers: {
-          "Content-Type": item.mimeType || "application/octet-stream",
-        },
-      });
-
-      if (!putRes.ok) {
-        throw new Error(`R2 PUT failed with status ${putRes.status}`);
-      }
+      // Bytes sent drive the chunk's progress; registering it below is the
+      // last step, so the PUT tops out at 99 and only a registered chunk hits 100.
+      await putWithProgress(
+        uploadUrl,
+        item.blob,
+        item.mimeType || "application/octet-stream",
+        (fraction) => setChunkProgress(fraction * 99),
+      );
 
       // 3. Register segment metadata. PCM chunks additionally carry the audio
       // format the server needs to write a WAV header (undefined otherwise).
@@ -213,6 +259,7 @@ export default function useChunkUploader(
 
       // 4. Done - drop from durable buffer.
       await deleteChunk(item.id);
+      setChunkProgress(100, true);
 
       let seqs = uploadedSeqsRef.current.get(item.participantRecordingId);
       if (!seqs) {
@@ -226,7 +273,7 @@ export default function useChunkUploader(
         totalUploaded: seqs.size,
       });
     },
-    [onChunkUploaded, endpoints],
+    [onChunkUploaded, endpoints, setChunkProgress],
   );
 
   const processQueue = useCallback(async () => {
@@ -249,6 +296,7 @@ export default function useChunkUploader(
             );
             await deleteChunk(item.id);
             queueRef.current.shift();
+            setChunkProgress(100, true);
             syncPending();
             continue;
           }
@@ -273,6 +321,7 @@ export default function useChunkUploader(
             );
             quarantinedRef.current.add(item.id);
             queueRef.current.shift();
+            setChunkProgress(100, true);
             setFailedPermanently(true);
             syncPending();
             continue;
@@ -289,7 +338,7 @@ export default function useChunkUploader(
     } finally {
       processingRef.current = false;
     }
-  }, [uploadOne, syncPending]);
+  }, [uploadOne, syncPending, setChunkProgress]);
 
   const enqueue = useCallback(
     async (input: EnqueueChunkInput) => {
@@ -415,6 +464,7 @@ export default function useChunkUploader(
       waitUntilDrained,
       getUploadedCount,
       pendingCount,
+      chunkProgress,
       failedPermanently,
     }),
     [
@@ -423,6 +473,7 @@ export default function useChunkUploader(
       waitUntilDrained,
       getUploadedCount,
       pendingCount,
+      chunkProgress,
       failedPermanently,
     ],
   );

@@ -396,11 +396,9 @@ const RecordingProvider = ({
     startRecording,
   ]);
 
-  // Upload progress: uploaded / produced chunks.
-  const totalChunks = manager.combinedChunkIndex;
-  const uploadedChunks = Math.max(0, totalChunks - manager.pendingUploads);
-  const uploadProgress =
-    totalChunks > 0 ? Math.round((uploadedChunks / totalChunks) * 100) : 0;
+  // Upload progress: bytes sent for the chunk currently uploading. Chunks
+  // stream up while recording, so this is the live 0-100 of each one in turn.
+  const uploadProgress = manager.chunkUploadProgress;
 
   // Once a recording stops, report our upload to the room so the host can
   // show every participant's progress, not just their own.
