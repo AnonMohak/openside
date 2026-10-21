@@ -24,7 +24,6 @@ import {
   BsFillRecordCircleFill,
 } from "react-icons/bs";
 import {
-  FiArrowUp,
   FiCheck,
   FiCheckSquare,
   FiChevronDown,
@@ -268,7 +267,7 @@ const savedCardDismissKey = (sessionId: string) =>
 const clampPercent = (value: number) =>
   Math.max(0, Math.min(100, Math.round(value)));
 
-const UPLOAD_RING_RADIUS = 7;
+const UPLOAD_RING_RADIUS = 13;
 const UPLOAD_RING_CIRCUMFERENCE = 2 * Math.PI * UPLOAD_RING_RADIUS;
 
 /**
@@ -303,11 +302,11 @@ const LiveUploadStatus = ({
     <span
       tabIndex={0}
       aria-label={`${headline}. Current chunk ${percent}%, ${uploaded} of ${total} chunks uploaded.`}
-      className="group/upload relative flex cursor-default items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/5"
+      className="group/upload relative flex cursor-default items-center gap-2 rounded-lg px-1.5 py-1 outline-none transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/5"
     >
       <span
         className={cn(
-          "relative grid size-[18px] shrink-0 place-items-center transition-colors",
+          "relative grid size-[30px] shrink-0 place-items-center transition-colors",
           behind
             ? "text-amber-400"
             : caughtUp
@@ -316,13 +315,13 @@ const LiveUploadStatus = ({
         )}
       >
         <svg
-          viewBox="0 0 18 18"
+          viewBox="0 0 30 30"
           className="absolute inset-0 size-full -rotate-90"
           aria-hidden="true"
         >
           <circle
-            cx="9"
-            cy="9"
+            cx="15"
+            cy="15"
             r={UPLOAD_RING_RADIUS}
             fill="none"
             stroke="currentColor"
@@ -330,8 +329,8 @@ const LiveUploadStatus = ({
             className="opacity-20"
           />
           <circle
-            cx="9"
-            cy="9"
+            cx="15"
+            cy="15"
             r={UPLOAD_RING_RADIUS}
             fill="none"
             stroke="currentColor"
@@ -343,12 +342,12 @@ const LiveUploadStatus = ({
           />
         </svg>
         {caughtUp ? (
-          <FiCheck className="size-2.5" strokeWidth={3.5} />
+          <FiCheck className="size-[13.5px]" strokeWidth={3} />
         ) : (
-          <FiArrowUp className="size-2.5" strokeWidth={3.5} />
+          <FiUploadCloud className="size-[13.5px]" strokeWidth={2.5} />
         )}
       </span>
-      <span className="min-w-[2.25rem] text-left text-sm font-medium tabular-nums text-foreground">
+      <span className="min-w-[2.5rem] text-left text-[15px] font-medium tabular-nums text-foreground">
         {percent}%
       </span>
 
@@ -387,7 +386,7 @@ const LiveUploadStatus = ({
             after you stop.
           </span>
         )}
-        <span className="absolute left-[15px] top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-[5px] rotate-45 border-b border-r border-call-border/80 bg-primary-hover" />
+        <span className="absolute left-[21px] top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-[5px] rotate-45 border-b border-r border-call-border/80 bg-primary-hover" />
       </span>
     </span>
   );
