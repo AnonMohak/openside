@@ -28,7 +28,15 @@ import {
 	isSelfHostActive,
 } from "./infra-service.ts";
 import { maybeFinalizeScreenSession } from "./screen-finalization-service.ts";
-import { deleteObjects } from "./storage-service.ts";
+import {
+	type PrefixTarget,
+	addStoredKey,
+	deleteObjects,
+	deletePrefixTargets,
+	resolvePrefixTarget,
+	sessionStoragePrefix,
+	trackChunkPrefix,
+} from "./storage-service.ts";
 import { assertCanRecord, meterSessionById } from "./usage-service.ts";
 
 interface StartSessionData {
@@ -78,23 +86,12 @@ interface CreateSegmentData {
 
 // Helper Functions
 
-const DERIVED_FORMATS = ["mp4", "mp3", "wav"] as const;
 const SCREEN_PROCESSING_TIMEOUT_MS =
 	Number(process.env.SCREEN_PROCESSING_TIMEOUT_MS) || 3 * 60 * 60 * 1000;
 
+/** A master/output key plus every download format cached next to it. */
 function addKey(keys: Set<string>, key?: string | null) {
-	if (!key) return;
-	keys.add(key);
-	if (/\.webm$/i.test(key)) {
-		for (const format of DERIVED_FORMATS) {
-			keys.add(key.replace(/\.webm$/i, `.${format}`));
-		}
-	}
-	// A lossless WAV master (from the PCM track) only ever derives an MP3 (see
-	// download-service). Sweep that cached MP3 alongside the WAV.
-	if (/\.wav$/i.test(key)) {
-		keys.add(key.replace(/\.wav$/i, ".mp3"));
-	}
+	addStoredKey(keys, key, { withCachedFormats: true });
 }
 
 function addScreenOutputKeys(keys: Set<string>, outputs: unknown) {
@@ -159,6 +156,50 @@ async function deleteSessionRows(sessionId: string) {
 	]);
 }
 
+/** Where a session's objects live - resolved before its rows are deleted (a
+ *  self-host session's bucket is looked up from them). */
+async function sessionPrefixTarget(session: {
+	id: string;
+	source: string;
+	spaceId: string | null;
+	userId: string | null;
+}): Promise<PrefixTarget | null> {
+	const prefix = sessionStoragePrefix(session);
+	if (!prefix) return null;
+	return resolvePrefixTarget(prefix).catch((error) => {
+		console.error(
+			`[RecordingCleanup] can't resolve storage for ${session.id}:`,
+			error,
+		);
+		return null;
+	});
+}
+
+/**
+ * Delete what a session stored: the keys the database knows about, then
+ * everything else under the session's prefix - a chunk that was uploaded but
+ * never registered, a download format cached next to a master.
+ */
+async function deleteSessionStorage(
+	sessionId: string,
+	keys: Set<string>,
+	target: PrefixTarget | null,
+): Promise<void> {
+	await deleteObjects([...keys]).catch((error) => {
+		console.error(
+			`[RecordingCleanup] failed to delete R2 objects for ${sessionId}:`,
+			error,
+		);
+	});
+	if (!target) return;
+	await deletePrefixTargets([target]).catch((error) => {
+		console.error(
+			`[RecordingCleanup] prefix sweep failed for ${sessionId} (known keys are gone):`,
+			error,
+		);
+	});
+}
+
 /**
  * Delete a recording session, its DB rows, and every stored object it owns -
  * segments, merged files, thumbnails, final outputs, screen outputs. No
@@ -172,6 +213,9 @@ export async function purgeRecordingSessionCascade(
 		where: { id: sessionId },
 		select: {
 			id: true,
+			source: true,
+			spaceId: true,
+			userId: true,
 			outputs: true,
 			participantRecordings: {
 				select: {
@@ -197,7 +241,9 @@ export async function purgeRecordingSessionCascade(
 	for (const recording of session.participantRecordings) {
 		addKey(keys, recording.mergedFileKey);
 		addKey(keys, recording.thumbnailKey);
-		for (const segment of recording.segments) addKey(keys, segment.assetKey);
+		for (const segment of recording.segments) {
+			addStoredKey(keys, segment.assetKey);
+		}
 	}
 	for (const output of session.finalOutputs) {
 		addKey(keys, output.masterKey);
@@ -205,13 +251,9 @@ export async function purgeRecordingSessionCascade(
 		addKey(keys, output.thumbnailKey);
 	}
 
+	const target = await sessionPrefixTarget(session);
 	await deleteSessionRows(sessionId);
-	await deleteObjects([...keys]).catch((error) => {
-		console.error(
-			`[RecordingCleanup] failed to delete R2 objects for ${sessionId}:`,
-			error,
-		);
-	});
+	await deleteSessionStorage(sessionId, keys, target);
 }
 
 export async function isHostOrCoHost(
@@ -1541,6 +1583,20 @@ async function cleanupFinalizedChunks(): Promise<void> {
 	for (const recording of recordings) {
 		try {
 			await deleteObjects(recording.segments.map((seg) => seg.assetKey));
+			// Plus anything uploaded but never registered (a chunk whose
+			// register call never landed) - the track's folder holds only chunks.
+			const firstKey = recording.segments[0]?.assetKey;
+			const prefix = firstKey ? trackChunkPrefix(firstKey, recording.id) : null;
+			if (prefix) {
+				await resolvePrefixTarget(prefix)
+					.then((target) => deletePrefixTargets([target]))
+					.catch((error) =>
+						console.error(
+							`[Recording] orphan chunk sweep failed for ${recording.id}:`,
+							error,
+						),
+					);
+			}
 			await prisma.recordingSegment.updateMany({
 				where: { id: { in: recording.segments.map((seg) => seg.id) } },
 				data: { status: "PROCESSED" },
@@ -1641,10 +1697,13 @@ export async function deleteSpaceRecordingSession(
 		select: {
 			id: true,
 			source: true,
+			spaceId: true,
+			userId: true,
 			space: { select: { hostId: true } },
 			participantRecordings: {
 				select: {
 					mergedFileKey: true,
+					thumbnailKey: true,
 					segments: { select: { assetKey: true } },
 				},
 			},
@@ -1669,7 +1728,10 @@ export async function deleteSpaceRecordingSession(
 	const keys = new Set<string>();
 	for (const recording of session.participantRecordings) {
 		addKey(keys, recording.mergedFileKey);
-		for (const segment of recording.segments) addKey(keys, segment.assetKey);
+		addStoredKey(keys, recording.thumbnailKey);
+		for (const segment of recording.segments) {
+			addStoredKey(keys, segment.assetKey);
+		}
 	}
 	for (const output of session.finalOutputs) {
 		addKey(keys, output.masterKey);
@@ -1677,13 +1739,9 @@ export async function deleteSpaceRecordingSession(
 		addKey(keys, output.thumbnailKey);
 	}
 
+	const target = await sessionPrefixTarget(session);
 	await deleteSessionRows(sessionId);
-	await deleteObjects([...keys]).catch((error) => {
-		console.error(
-			`[RecordingCleanup] failed to delete R2 objects for ${sessionId}:`,
-			error,
-		);
-	});
+	await deleteSessionStorage(sessionId, keys, target);
 
 	return { deleted: true };
 }
@@ -2515,6 +2573,7 @@ export async function deleteScreenRecordingSession(
 		select: {
 			id: true,
 			source: true,
+			spaceId: true,
 			userId: true,
 			outputs: true,
 			participantRecordings: {
@@ -2545,7 +2604,9 @@ export async function deleteScreenRecordingSession(
 	addScreenOutputKeys(keys, session.outputs);
 	for (const recording of session.participantRecordings) {
 		addKey(keys, recording.mergedFileKey);
-		for (const segment of recording.segments) addKey(keys, segment.assetKey);
+		for (const segment of recording.segments) {
+			addStoredKey(keys, segment.assetKey);
+		}
 	}
 	for (const output of session.finalOutputs) {
 		addKey(keys, output.masterKey);
@@ -2553,13 +2614,9 @@ export async function deleteScreenRecordingSession(
 		addKey(keys, output.thumbnailKey);
 	}
 
+	const target = await sessionPrefixTarget(session);
 	await deleteSessionRows(sessionId);
-	await deleteObjects([...keys]).catch((error) => {
-		console.error(
-			`[RecordingCleanup] failed to delete R2 objects for ${sessionId}:`,
-			error,
-		);
-	});
+	await deleteSessionStorage(sessionId, keys, target);
 
 	return { deleted: true };
 }

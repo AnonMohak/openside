@@ -10,6 +10,7 @@
  * itself (conditional updates, deduped queue jobs).
  */
 
+import { expireDownloadCache } from "../services/download-cache-service.ts";
 import {
 	reconcileLiveKitState,
 	reconcilePendingEgress,
@@ -55,6 +56,14 @@ const maintenanceTasks: MaintenanceTask[] = [
 		intervalMs:
 			Number(process.env.LIVEKIT_RECONCILE_INTERVAL_MS) || 5 * 60 * 1000,
 		run: reconcileLiveKitState,
+		nextRunAt: 0,
+		running: false,
+	},
+	{
+		name: "Download cache expiry",
+		intervalMs:
+			Number(process.env.DOWNLOAD_CACHE_SWEEP_INTERVAL_MS) || 60 * 60 * 1000,
+		run: expireDownloadCache,
 		nextRunAt: 0,
 		running: false,
 	},

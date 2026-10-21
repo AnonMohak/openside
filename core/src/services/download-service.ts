@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
 import { enqueueTranscode, isQueueConfigured } from "../lib/queue.ts";
+import { touchDownloadCache } from "./download-cache-service.ts";
 import {
 	downloadObjectToFile,
 	objectExists,
@@ -150,6 +151,7 @@ export async function transcodeToR2(
 		if (outStat.size === 0) throw new Error("Transcode produced an empty file");
 
 		await putFileObject(targetKey, outPath, CONTENT_TYPE[format]);
+		await touchDownloadCache(targetKey);
 	} finally {
 		if (tmp)
 			await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
@@ -219,6 +221,7 @@ export async function resolveDownloadUrl({
 		// MP3 from the WAV: transcode-and-cache next to the WAV, then presign.
 		const mp3Key = derivedKey(audioWavKey, "mp3");
 		if (await objectExists(mp3Key)) {
+			void touchDownloadCache(mp3Key);
 			return {
 				ready: true,
 				format,
@@ -262,6 +265,7 @@ export async function resolveDownloadUrl({
 	const targetKey = derivedKey(masterKey, format);
 
 	if (await objectExists(targetKey)) {
+		void touchDownloadCache(targetKey);
 		return {
 			ready: true,
 			format,

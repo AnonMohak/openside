@@ -39,8 +39,11 @@ import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
 import {
 	deleteObjects,
+	deletePrefixTargets,
 	getObjectBuffer,
 	putFileObject,
+	resolvePrefixTarget,
+	trackChunkPrefix,
 } from "./storage-service.ts";
 
 /** Bottom-right "openside.pro" badge burned into DEMO masters only. Points
@@ -474,6 +477,30 @@ async function composeBoth(
 	return { key, durationMs: screen.durationMs };
 }
 
+/**
+ * After a track's registered chunks are deleted, clear its chunk folder too:
+ * a chunk uploaded but never registered is otherwise never deleted. The
+ * folder holds only that track's chunks.
+ */
+async function sweepChunkFolders(
+	recs: ({ id: string; segments: { assetKey: string }[] } | undefined)[],
+	sessionId: string,
+): Promise<void> {
+	for (const rec of recs) {
+		const firstKey = rec?.segments[0]?.assetKey;
+		const prefix = rec && firstKey ? trackChunkPrefix(firstKey, rec.id) : null;
+		if (!prefix) continue;
+		await resolvePrefixTarget(prefix)
+			.then((target) => deletePrefixTargets([target]))
+			.catch((error) =>
+				console.error(
+					`[ScreenFinalize] orphan chunk sweep failed for ${sessionId}:`,
+					error,
+				),
+			);
+	}
+}
+
 export async function finalizeScreenSession(sessionId: string): Promise<void> {
 	if (inFlight.has(sessionId)) return;
 	inFlight.add(sessionId);
@@ -663,6 +690,7 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 					error,
 				);
 			});
+			await sweepChunkFolders([screenRec, cameraRec], sessionId);
 			const staleRecIds = [screenRec?.id, cameraRec?.id].filter(
 				(id): id is string => Boolean(id),
 			);
@@ -719,9 +747,12 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 		// only fully uploaded tracks are dropped, mirroring the Space finalizer.
 		// (The "both" path above already deleted its chunks.)
 		if (!outputs.both) {
-			const chunkKeys = [recByRole.screen, recByRole.camera]
-				.filter((rec) => rec?.isComplete)
-				.flatMap((rec) => rec?.segments.map((s) => s.assetKey) ?? []);
+			const doneRecs = [recByRole.screen, recByRole.camera].filter(
+				(rec) => rec?.isComplete,
+			);
+			const chunkKeys = doneRecs.flatMap(
+				(rec) => rec?.segments.map((s) => s.assetKey) ?? [],
+			);
 			if (chunkKeys.length > 0) {
 				await deleteObjects(chunkKeys).catch((error) => {
 					console.error(
@@ -729,6 +760,7 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 						error,
 					);
 				});
+				await sweepChunkFolders(doneRecs, sessionId);
 			}
 		}
 	} catch (error) {

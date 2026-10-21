@@ -15,6 +15,7 @@ import {
 	DeleteObjectsCommand,
 	GetObjectCommand,
 	HeadObjectCommand,
+	ListObjectsV2Command,
 	PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -221,4 +222,130 @@ export async function deleteObjects(keys: string[]): Promise<void> {
 			);
 		}
 	}
+}
+
+// ── Bulk cleanup ───────────────────────────────────────────────────────────
+
+/** Formats a master can be transcoded to and cached next to itself (see
+ *  download-service's derivedKey). */
+const CACHED_DOWNLOAD_EXTENSIONS = ["mp4", "webm", "mp3", "wav"];
+
+/**
+ * Add a stored key - and, for a master, every download format cached next to
+ * it - to a delete set. Deleting a cache that was never made is a no-op.
+ */
+export function addStoredKey(
+	keys: Set<string>,
+	key: string | null | undefined,
+	options: { withCachedFormats?: boolean } = {},
+): void {
+	if (!key) return;
+	keys.add(key);
+	if (!options.withCachedFormats) return;
+	if (!/\.(?:mp4|webm|mp3|wav)$/i.test(key)) return;
+	for (const extension of CACHED_DOWNLOAD_EXTENSIONS) {
+		keys.add(key.replace(/\.[a-z0-9]+$/i, `.${extension}`));
+	}
+}
+
+/**
+ * The prefixes we're allowed to wipe: a whole space, one recording session, or
+ * one track's chunks. Anything broader (a user's root, the bucket) is refused.
+ * A track's folder is its cuid - never a kind folder like `combined/` or
+ * `screen/`, which holds masters.
+ */
+const DELETABLE_PREFIX =
+	/^(?:spaces\/[^/]+\/(?:sessions\/[^/]+\/(?:[^/]+\/c[a-z0-9]{20,}\/)?)?|screen\/[^/]+\/sessions\/[^/]+\/(?:c[a-z0-9]{20,}\/)?)$/;
+
+/** Most objects one prefix delete will page through (1000 per page). */
+const MAX_PREFIX_PAGES = 200;
+
+export interface PrefixTarget {
+	prefix: string;
+	buckets: R2Infra[];
+}
+
+/**
+ * Where a prefix's objects can live. Resolve this BEFORE deleting the rows a
+ * self-host session's bucket is looked up from.
+ */
+export async function resolvePrefixTarget(
+	prefix: string,
+): Promise<PrefixTarget> {
+	if (!DELETABLE_PREFIX.test(prefix) || prefix.includes("..")) {
+		throw new Error(`Refusing to delete unscoped prefix "${prefix}"`);
+	}
+	return { prefix, buckets: await resolveR2CandidatesForKey(prefix) };
+}
+
+/**
+ * Delete every object under each prefix, in every bucket it could be in. This
+ * is what catches objects the database never knew about - a chunk uploaded
+ * but never registered, a cached download format. Needs list permission on the
+ * bucket; callers delete the keys they do know about first.
+ */
+export async function deletePrefixTargets(
+	targets: PrefixTarget[],
+): Promise<number> {
+	let deleted = 0;
+	const done = new Set<string>();
+	for (const { prefix, buckets } of targets) {
+		for (const r2 of buckets) {
+			const id = `${r2.bucket}:${r2.selfHost}:${prefix}`;
+			if (done.has(id)) continue;
+			done.add(id);
+			for (let page = 0; page < MAX_PREFIX_PAGES; page++) {
+				// Deleting as we go, so the first page is always the next one.
+				const listed = await r2.client.send(
+					new ListObjectsV2Command({
+						Bucket: r2.bucket,
+						Prefix: prefix,
+						MaxKeys: 1000,
+					}),
+				);
+				const keys = (listed.Contents ?? []).flatMap((object) =>
+					object.Key ? [object.Key] : [],
+				);
+				if (keys.length === 0) break;
+				await r2.client.send(
+					new DeleteObjectsCommand({
+						Bucket: r2.bucket,
+						Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
+					}),
+				);
+				deleted += keys.length;
+				if (!listed.IsTruncated) break;
+			}
+		}
+	}
+	return deleted;
+}
+
+/** The prefix holding one track's chunks, from one of its chunk keys. */
+export function trackChunkPrefix(
+	chunkKey: string,
+	participantRecordingId: string,
+): string | null {
+	const marker = `/${participantRecordingId}/`;
+	const index = chunkKey.indexOf(marker);
+	if (index < 0) return null;
+	const prefix = chunkKey.slice(0, index + marker.length);
+	return DELETABLE_PREFIX.test(prefix) ? prefix : null;
+}
+
+/** The prefix holding everything a recording session stored. */
+export function sessionStoragePrefix(session: {
+	id: string;
+	source: string;
+	spaceId: string | null;
+	userId: string | null;
+}): string | null {
+	if (session.source === "SCREEN_RECORDER") {
+		return session.userId
+			? `screen/${session.userId}/sessions/${session.id}/`
+			: null;
+	}
+	return session.spaceId
+		? `spaces/${session.spaceId}/sessions/${session.id}/`
+		: null;
 }

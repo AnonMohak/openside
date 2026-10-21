@@ -8,7 +8,13 @@ import {
 	getLiveKitRoomName,
 } from "./livekit-service.ts";
 import { stopActiveSpaceRecordingSessions } from "./recording-service.ts";
-import { deleteObjects } from "./storage-service.ts";
+import {
+	type PrefixTarget,
+	addStoredKey,
+	deleteObjects,
+	deletePrefixTargets,
+	resolvePrefixTarget,
+} from "./storage-service.ts";
 
 interface CreateSpaceData {
 	title: string;
@@ -465,15 +471,18 @@ export async function deleteSpace(
 			livekitRoomName: true,
 			recordingSessions: {
 				select: {
+					id: true,
 					participantRecordings: {
 						select: {
 							mergedFileKey: true,
+							thumbnailKey: true,
 							segments: { select: { assetKey: true } },
 						},
 					},
 					finalOutputs: {
 						select: {
 							masterKey: true,
+							audioWavKey: true,
 							thumbnailKey: true,
 						},
 					},
@@ -489,19 +498,35 @@ export async function deleteSpace(
 		throw new Error("FORBIDDEN");
 	}
 
+	// Known keys (masters with their cached download formats), then a sweep of
+	// the space's folder for anything the database never knew about.
 	const keys = new Set<string>();
-	const addKey = (key?: string | null) => {
-		if (key) keys.add(key);
-	};
+	const cached = { withCachedFormats: true };
 	for (const session of space.recordingSessions) {
 		for (const recording of session.participantRecordings) {
-			addKey(recording.mergedFileKey);
-			for (const segment of recording.segments) addKey(segment.assetKey);
+			addStoredKey(keys, recording.mergedFileKey, cached);
+			addStoredKey(keys, recording.thumbnailKey);
+			for (const segment of recording.segments) {
+				addStoredKey(keys, segment.assetKey);
+			}
 		}
 		for (const output of session.finalOutputs) {
-			addKey(output.masterKey);
-			addKey(output.thumbnailKey);
+			addStoredKey(keys, output.masterKey, cached);
+			addStoredKey(keys, output.audioWavKey, cached);
+			addStoredKey(keys, output.thumbnailKey);
 		}
+	}
+	// Resolved before the rows go: a self-host session's bucket is looked up
+	// from them.
+	const targets: PrefixTarget[] = [];
+	for (const prefix of [
+		`spaces/${spaceId}/`,
+		...space.recordingSessions.map(
+			(session) => `spaces/${spaceId}/sessions/${session.id}/`,
+		),
+	]) {
+		const target = await resolvePrefixTarget(prefix).catch(() => null);
+		if (target) targets.push(target);
 	}
 
 	await prisma.$transaction([
@@ -521,6 +546,12 @@ export async function deleteSpace(
 	await deleteObjects([...keys]).catch((error) => {
 		console.error(
 			`[SpaceCleanup] failed to delete R2 objects for ${spaceId}:`,
+			error,
+		);
+	});
+	await deletePrefixTargets(targets).catch((error) => {
+		console.error(
+			`[SpaceCleanup] prefix sweep failed for ${spaceId} (known keys are gone):`,
 			error,
 		);
 	});

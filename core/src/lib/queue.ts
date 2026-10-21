@@ -97,6 +97,22 @@ function getProducerConnection(): IORedis {
 	return producerConnection;
 }
 
+/**
+ * Run commands on the shared producer connection, which closes again once
+ * idle (so a serverless API can still sleep). Null when Redis isn't set up.
+ */
+export async function withRedis<T>(
+	run: (redis: IORedis) => Promise<T>,
+): Promise<T | null> {
+	if (!redisUrl) return null;
+	beginProducerOperation();
+	try {
+		return await run(getProducerConnection());
+	} finally {
+		endProducerOperation();
+	}
+}
+
 export function getFinalizeQueue(): Queue<FinalizeJob> {
 	if (!finalizeQueue) {
 		finalizeQueue = new Queue<FinalizeJob>(FINALIZE_QUEUE, {
