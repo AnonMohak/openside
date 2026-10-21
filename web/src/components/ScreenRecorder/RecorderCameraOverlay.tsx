@@ -133,7 +133,8 @@ const PreviewVideo = ({ stream }: { stream: MediaStream }) => {
       autoPlay
       muted
       playsInline
-      className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+      // Mirrored, like looking in a mirror (the final video is flipped too).
+      className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
     />
   );
 };

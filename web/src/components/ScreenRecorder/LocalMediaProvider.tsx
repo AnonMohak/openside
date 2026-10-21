@@ -24,6 +24,9 @@ import {
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useEntitlements } from "@/hooks/useUsage";
 
+/** What the browser's share picker opens on: a screen, a window or this tab. */
+export type ScreenSurface = "monitor" | "window" | "browser";
+
 interface LocalMediaContextValue {
   cameraStream: MediaStream | null;
   micStream: MediaStream | null;
@@ -35,7 +38,8 @@ interface LocalMediaContextValue {
 
   toggleCamera: () => Promise<void>;
   toggleMicrophone: () => Promise<void>;
-  toggleScreenShare: () => Promise<void>;
+  /** Starts sharing (picker preselects `surface`) or stops the share. */
+  toggleScreenShare: (surface?: ScreenSurface) => Promise<void>;
   stopScreenShare: () => Promise<void>;
 
   microphoneDevices: MediaDeviceInfo[];
@@ -192,39 +196,46 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
     await acquireMic(activeMicrophoneId || undefined);
   }, [acquireMic, activeMicrophoneId, setMic]);
 
-  const toggleScreenShare = useCallback(async () => {
-    if (screenRef.current) {
-      stopStream(screenRef.current);
-      setScreen(null);
-      return;
-    }
-    // audio: true captures tab/system audio when the user grants it; mixed with
-    // the mic into the screen ("combined") recording at record time.
-    // Capture height and frame rate are capped by the plan (demo 720p/24fps,
-    // pro/self-host 4K/60fps).
-    //
-    // displaySurface "monitor": preselect the whole screen in the picker (the
-    // user can still choose a tab or window). A tab/window surface RESIZES
-    // whenever it changes shape - switching tabs, resizing or maximizing the
-    // window - which makes the capture track change resolution mid-recording;
-    // a monitor surface holds one geometry for the whole take. Finalization
-    // now normalizes resolution switches away, but the clean capture is still
-    // the better default (a resize otherwise costs letterbox bars).
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        displaySurface: "monitor",
-        frameRate: { ideal: maxFpsRef.current, max: maxFpsRef.current },
-        height: { max: maxVideoHeightRef.current },
-      },
-      audio: true,
-    });
-    // Browser "Stop sharing" UI ends the track directly - reflect that.
-    stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-      stopStream(screenRef.current);
-      setScreen(null);
-    });
-    setScreen(stream);
-  }, [setScreen]);
+  const toggleScreenShare = useCallback(
+    async (surface: ScreenSurface = "monitor") => {
+      if (screenRef.current) {
+        stopStream(screenRef.current);
+        setScreen(null);
+        return;
+      }
+      // audio: true captures tab/system audio when the user grants it; mixed with
+      // the mic into the screen ("combined") recording at record time.
+      // Capture height and frame rate are capped by the plan (demo 720p/24fps,
+      // pro/self-host 4K/60fps).
+      //
+      // displaySurface preselects that kind of source in the picker (the user
+      // can still switch). "monitor" is the default: a tab/window surface RESIZES
+      // whenever it changes shape - switching tabs, resizing or maximizing the
+      // window - which makes the capture track change resolution mid-recording;
+      // a monitor surface holds one geometry for the whole take. Finalization
+      // now normalizes resolution switches away, but the clean capture is still
+      // the better default (a resize otherwise costs letterbox bars).
+      // "browser" offers this very tab first (Chrome's preferCurrentTab).
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: surface,
+          frameRate: { ideal: maxFpsRef.current, max: maxFpsRef.current },
+          height: { max: maxVideoHeightRef.current },
+        },
+        audio: true,
+        ...(surface === "browser"
+          ? { preferCurrentTab: true, selfBrowserSurface: "include" }
+          : {}),
+      } as DisplayMediaStreamOptions);
+      // Browser "Stop sharing" UI ends the track directly - reflect that.
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        stopStream(screenRef.current);
+        setScreen(null);
+      });
+      setScreen(stream);
+    },
+    [setScreen],
+  );
 
   const stopScreenShare = useCallback(async () => {
     stopStream(screenRef.current);

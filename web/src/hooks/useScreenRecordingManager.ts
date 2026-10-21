@@ -196,6 +196,7 @@ export default function useScreenRecordingManager({
     },
     onError: (err, trackType) => {
       setError(`${trackType}: ${err.message}`);
+      toast.error("Recording failed - please try again.");
       setRecordingState("error");
     },
   });
@@ -242,6 +243,7 @@ export default function useScreenRecordingManager({
       const message =
         err instanceof Error ? err.message : "Failed to start recording";
       console.error("[ScreenRecordingManager] start failed:", err);
+      toast.error("Couldn't start recording - please try again.");
       setError(message);
       setRecordingState("error");
       try {
@@ -308,6 +310,7 @@ export default function useScreenRecordingManager({
       }
       const message =
         err instanceof Error ? err.message : "Failed to start recording";
+      toast.error("Couldn't start recording - please try again.");
       setError(message);
       setRecordingState("error");
     }
@@ -458,6 +461,7 @@ export default function useScreenRecordingManager({
       // Whatever went wrong client-side, the session must not stay ACTIVE
       // (it would keep metering usage until the recovery sweep reaps it).
       await stopSession();
+      toast.error("Couldn't save the recording - please try again.");
       setError(message);
       setRecordingState("error");
     }

@@ -103,6 +103,8 @@ interface Composition {
 	layout?: "screen" | "camera" | "screen-camera";
 	cameraSize?: "normal" | "big";
 	cameraShape?: "square" | "rectangle" | "circle";
+	/** Flipped horizontally, like a mirror. */
+	cameraMirror?: boolean;
 	cameraCorner?: string; // currently always "bottom-right"
 }
 
@@ -435,6 +437,7 @@ async function composeBoth(
 	// so it's cheap - kept on both the quality and fast paths for consistency.
 	const camChain =
 		`[1:v]crop='min(iw,ih*${aspectStr})':'min(ih,iw/${aspectStr})',` +
+		(comp.cameraMirror ? "hflip," : "") +
 		`scale=${camW}:${camH},fps=${fps},setpts=PTS-STARTPTS,format=rgba,` +
 		`geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlphaExpr(radius)}'[cam];`;
 	// A re-encoded screen master is already one fixed size; a remuxed/raw-concat

@@ -32,7 +32,7 @@ import useScreenRecordingManager, {
 import useUnloadWarning from "@/hooks/useUnloadWarning";
 import { usePresence } from "@/hooks/usePresence";
 import type { ScreenStreams } from "@/hooks/useScreenLocalRecording";
-import { useLocalMedia } from "./LocalMediaProvider";
+import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
 
 interface RecordingInfo {
   title: string;
@@ -78,6 +78,9 @@ interface ScreenRecordingContextValue {
   setCameraSize: (size: PipSize) => void;
   cameraShape: PipShape;
   setCameraShape: (shape: PipShape) => void;
+  /** What the share picker opens on when Start is pressed. */
+  screenSurface: ScreenSurface;
+  setScreenSurface: (surface: ScreenSurface) => void;
 }
 
 const ScreenRecordingContext =
@@ -142,6 +145,13 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   const layoutRef = useRef(layout);
   const cameraSizeRef = useRef(cameraSize);
   const cameraShapeRef = useRef(cameraShape);
+  const [screenSurface, setScreenSurfaceState] =
+    useState<ScreenSurface>("monitor");
+  const screenSurfaceRef = useRef(screenSurface);
+  const setScreenSurface = useCallback((s: ScreenSurface) => {
+    screenSurfaceRef.current = s;
+    setScreenSurfaceState(s);
+  }, []);
   const setLayout = useCallback((l: ScreenRecorderLayout) => {
     layoutRef.current = l;
     setLayoutState(l);
@@ -202,6 +212,8 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       layout: layoutRef.current,
       cameraSize: cameraSizeRef.current,
       cameraShape: cameraShapeRef.current,
+      // The camera is always shown mirrored, so the video matches the preview.
+      cameraMirror: true,
       cameraCorner: "bottom-right",
     }),
   });
@@ -271,7 +283,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     }
     if (needsScreen && !live.screen) {
       try {
-        await toggleScreenShare();
+        await toggleScreenShare(screenSurfaceRef.current);
       } catch {
         // Screen picker dismissed - stay idle.
         return;
@@ -336,6 +348,8 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       setCameraSize,
       cameraShape,
       setCameraShape,
+      screenSurface,
+      setScreenSurface,
     }),
     [
       isOpen,
@@ -354,6 +368,8 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       setCameraSize,
       cameraShape,
       setCameraShape,
+      screenSurface,
+      setScreenSurface,
     ],
   );
 
