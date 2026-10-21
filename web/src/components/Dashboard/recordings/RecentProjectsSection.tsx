@@ -1,24 +1,39 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
+import { useScreenRecordings } from "@/hooks/useScreenRecordings";
 import { useGetUserSpaces } from "@/hooks/useSpace";
 import ProjectCard from "./ProjectCard";
+import { ScreenRecordingCard } from "./ScreenRecordingsSection";
 
 const RecentProjectsSection = () => {
   const navigate = useNavigate();
-  const { data: spaces = [], isLoading } = useGetUserSpaces("hosted");
+  const { data: spaces = [], isLoading: spacesLoading } =
+    useGetUserSpaces("hosted");
+  const { data: screenRecordings = [], isLoading: screenLoading } =
+    useScreenRecordings();
+  const isLoading = spacesLoading || screenLoading;
 
+  // Meeting projects and screen recordings, newest first.
   const recentProjects = useMemo(
     () =>
-      spaces
-        .filter((space) => (space._count?.recordingSessions ?? 0) > 0)
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt ?? 0).getTime() -
-            new Date(a.createdAt ?? 0).getTime(),
-        )
+      [
+        ...spaces
+          .filter((space) => (space._count?.recordingSessions ?? 0) > 0)
+          .map((space) => ({
+            kind: "space" as const,
+            space,
+            at: new Date(space.createdAt ?? 0).getTime(),
+          })),
+        ...screenRecordings.map((recording) => ({
+          kind: "screen" as const,
+          recording,
+          at: new Date(recording.startedAt || recording.createdAt).getTime(),
+        })),
+      ]
+        .sort((a, b) => b.at - a.at)
         .slice(0, 4),
-    [spaces],
+    [spaces, screenRecordings],
   );
 
   if (isLoading) {
@@ -60,15 +75,23 @@ const RecentProjectsSection = () => {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {recentProjects.map((space) => (
-            <ProjectCard
-              key={space.id}
-              space={space}
-              onOpen={(item) => navigate(`/dashboard/project/${item.id}`)}
-              showOptions={false}
-              showRetention={false}
-            />
-          ))}
+          {recentProjects.map((item) =>
+            item.kind === "space" ? (
+              <ProjectCard
+                key={item.space.id}
+                space={item.space}
+                onOpen={(space) => navigate(`/dashboard/project/${space.id}`)}
+                showOptions={false}
+                showRetention={false}
+              />
+            ) : (
+              <ScreenRecordingCard
+                key={item.recording.id}
+                rec={item.recording}
+                compact
+              />
+            ),
+          )}
         </div>
       )}
     </section>

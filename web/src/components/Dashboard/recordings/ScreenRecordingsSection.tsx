@@ -30,7 +30,9 @@ const RECORDINGS_PER_PAGE = 8;
 
 const StatusBadge = ({ status }: { status: ScreenRecording["status"] }) => {
   if (status === "READY") return null;
-  const processing = status === "PROCESSING" || status === "STOPPED";
+  // ACTIVE = still recording (or uploading): not a failure.
+  const processing =
+    status === "PROCESSING" || status === "STOPPED" || status === "ACTIVE";
   return (
     <span
       className={cn(
@@ -121,15 +123,28 @@ const ScreenThumbnail = ({ rec }: { rec: ScreenRecording }) => {
 
 // Library card - mirrors the space ProjectCard: the whole card opens the
 // recording's project page, where playback, downloads, rename, and delete live.
-const ScreenRecordingCard = ({ rec }: { rec: ScreenRecording }) => {
+// `compact` matches the dashboard's recent-projects cards exactly.
+export const ScreenRecordingCard = ({
+  rec,
+  compact = false,
+}: {
+  rec: ScreenRecording;
+  compact?: boolean;
+}) => {
   const navigate = useNavigate();
-  const recordedAt = formatDate(rec.startedAt || rec.createdAt);
+  const startedAt = rec.startedAt || rec.createdAt;
+  const recordedAt = formatDate(startedAt);
 
   return (
     <button
       type="button"
       onClick={() => navigate(`/dashboard/project/screen/${rec.id}`)}
-      className="flex flex-col gap-3 rounded-xl border border-border bg-primary p-3 text-left transition-colors hover:border-fg-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+      className={cn(
+        "flex flex-col gap-3 rounded-xl bg-primary p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60",
+        compact
+          ? "cursor-pointer overflow-hidden border border-border/50 transition-opacity hover:opacity-80"
+          : "border border-border transition-colors hover:border-fg-faint",
+      )}
     >
       <div className="relative w-full">
         <ScreenThumbnail rec={rec} />
@@ -144,11 +159,28 @@ const ScreenRecordingCard = ({ rec }: { rec: ScreenRecording }) => {
         <p className="truncate text-sm font-semibold text-foreground">
           {rec.title || "Untitled recording"}
         </p>
-        {recordedAt && (
-          <p className="flex items-center gap-1 text-xs text-fg-subtle">
-            <FiClock className="size-3" />
-            Recorded {recordedAt}
+        {compact ? (
+          <p className="flex items-center gap-1.5 text-xs text-fg-subtle">
+            <span className="whitespace-nowrap">Screen recording</span>
+            {startedAt && (
+              <>
+                <span>·</span>
+                <span className="whitespace-nowrap">
+                  {new Date(startedAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              </>
+            )}
           </p>
+        ) : (
+          recordedAt && (
+            <p className="flex items-center gap-1 text-xs text-fg-subtle">
+              <FiClock className="size-3" />
+              Recorded {recordedAt}
+            </p>
+          )
         )}
       </div>
     </button>
