@@ -33,6 +33,8 @@ interface LocalMediaContextValue {
   screenStream: MediaStream | null;
 
   isCameraEnabled: boolean;
+  /** A camera is being opened (permission prompt / device warm-up). */
+  isCameraLoading: boolean;
   isMicrophoneEnabled: boolean;
   isScreenShareEnabled: boolean;
 
@@ -78,6 +80,10 @@ const stopStream = (stream: MediaStream | null) => {
 
 const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  // Counted, so overlapping opens (e.g. a device switch mid-open) don't clear
+  // it early.
+  const cameraLoadsRef = useRef(0);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
 
@@ -147,14 +153,22 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
       // portrait, while the aspect hint makes the browser crop-and-scale it to
       // a normal landscape webcam frame.
       const cap = maxVideoHeightRef.current;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-          aspectRatio: { ideal: 16 / 9 },
-          width: { ideal: Math.round((cap * 16) / 9) },
-          height: { ideal: cap, max: cap },
-        },
-      });
+      cameraLoadsRef.current += 1;
+      setIsCameraLoading(true);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+            aspectRatio: { ideal: 16 / 9 },
+            width: { ideal: Math.round((cap * 16) / 9) },
+            height: { ideal: cap, max: cap },
+          },
+        });
+      } finally {
+        cameraLoadsRef.current -= 1;
+        if (cameraLoadsRef.current === 0) setIsCameraLoading(false);
+      }
       stopStream(cameraRef.current);
       setCamera(stream);
       const settings = stream.getVideoTracks()[0]?.getSettings();
@@ -297,6 +311,7 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
     micStream,
     screenStream,
     isCameraEnabled: !!cameraStream,
+    isCameraLoading,
     isMicrophoneEnabled: !!micStream,
     isScreenShareEnabled: !!screenStream,
     toggleCamera,

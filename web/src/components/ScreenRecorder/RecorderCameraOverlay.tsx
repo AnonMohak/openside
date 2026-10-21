@@ -1,5 +1,12 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { Circle, Maximize2, Minimize2, Square, VideoOff } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Circle,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Square,
+  VideoOff,
+} from "lucide-react";
 import useDraggable from "@/hooks/useDraggable";
 import { cn } from "@/lib/utils";
 import { useLocalMedia } from "./LocalMediaProvider";
@@ -23,7 +30,7 @@ interface RecorderCameraOverlayProps {
 }
 
 const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
-  const { cameraStream, toggleCamera } = useLocalMedia();
+  const { cameraStream, isCameraLoading, toggleCamera } = useLocalMedia();
   const {
     isActive,
     layout,
@@ -94,6 +101,8 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
           >
             {cameraStream ? (
               <PreviewVideo stream={cameraStream} />
+            ) : isCameraLoading ? (
+              <CameraLoader />
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-white/70">
                 <VideoOff size={20} />
@@ -116,8 +125,17 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
   );
 };
 
+const CameraLoader = () => (
+  <div className="absolute inset-0 flex items-center justify-center text-white/60">
+    <Loader2 size={22} className="animate-spin" />
+  </div>
+);
+
 const PreviewVideo = ({ stream }: { stream: MediaStream }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The stream whose first frame has painted - a new stream shows the loader
+  // until its own frame arrives, instead of a black box.
+  const [readyStream, setReadyStream] = useState<MediaStream | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -128,14 +146,18 @@ const PreviewVideo = ({ stream }: { stream: MediaStream }) => {
 
   // Muted: a local preview must never play the mic back (feedback).
   return (
-    <video
-      ref={videoRef}
-      autoPlay
-      muted
-      playsInline
-      // Mirrored, like looking in a mirror (the final video is flipped too).
-      className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
-    />
+    <>
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        onLoadedData={() => setReadyStream(stream)}
+        // Mirrored, like looking in a mirror (the final video is flipped too).
+        className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
+      />
+      {readyStream !== stream && <CameraLoader />}
+    </>
   );
 };
 
