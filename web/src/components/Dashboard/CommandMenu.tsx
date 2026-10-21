@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Command } from "cmdk";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, FolderOpen, Home, Search, Settings } from "lucide-react";
@@ -7,12 +7,16 @@ import { FiMonitor } from "react-icons/fi";
 import { MdOutlineVideoLabel } from "react-icons/md";
 import generateRoomId from "@/utils/GenerateRoomId";
 import { createIntentKey } from "@/pages/RoomPage";
+import { useScreenRecordings } from "@/hooks/useScreenRecordings";
 import { useGetUserSpaces } from "@/hooks/useSpace";
 import ScheduleModal from "./ScheduleModal";
 
 const isMac =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** Projects listed before you type; searching covers all of them. */
+const RECENT_PROJECT_LIMIT = 5;
 
 /**
  * Header search: a ⌘K / Ctrl+K command palette over pages, quick actions and
@@ -22,8 +26,10 @@ const CommandMenu = () => {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
-  // Same cached query the projects pages use, so opening this is instant.
+  const [search, setSearch] = useState("");
+  // Same cached queries the projects pages use, so opening this is instant.
   const { data: spaces = [] } = useGetUserSpaces("hosted");
+  const { data: screenRecordings = [] } = useScreenRecordings();
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -38,6 +44,7 @@ const CommandMenu = () => {
 
   const run = (action: () => void) => {
     setOpen(false);
+    setSearch("");
     action();
   };
 
@@ -48,9 +55,37 @@ const CommandMenu = () => {
     navigate(`/${roomId}`);
   };
 
-  const projects = spaces.filter(
-    (space) => (space._count?.recordingSessions ?? 0) > 0,
+  // Meeting projects and screen recordings, newest first.
+  const projects = useMemo(
+    () =>
+      [
+        ...spaces
+          .filter((space) => (space._count?.recordingSessions ?? 0) > 0)
+          .map((space) => ({
+            id: space.id,
+            title: space.title || "Untitled recording",
+            path: `/dashboard/project/${space.id}`,
+            screen: false,
+            at: new Date(space.createdAt ?? 0).getTime(),
+          })),
+        ...screenRecordings.map((recording) => ({
+          id: recording.id,
+          title: recording.title || "Untitled recording",
+          path: `/dashboard/project/screen/${recording.id}`,
+          screen: true,
+          at: new Date(recording.startedAt || recording.createdAt).getTime(),
+        })),
+      ].sort((a, b) => b.at - a.at),
+    [spaces, screenRecordings],
   );
+  const shownProjects = search.trim()
+    ? projects
+    : projects.slice(0, RECENT_PROJECT_LIMIT);
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setSearch("");
+  };
 
   return (
     <>
@@ -70,7 +105,7 @@ const CommandMenu = () => {
 
       <Command.Dialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
         label="Search"
         // Radix keeps both mounted until the closed-state animation finishes.
         overlayClassName="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
@@ -79,6 +114,8 @@ const CommandMenu = () => {
         <div className="flex items-center gap-2.5 border-b border-border/50 px-4">
           <Search size={16} className="shrink-0 text-fg-subtle" />
           <Command.Input
+            value={search}
+            onValueChange={setSearch}
             placeholder="Search projects, pages and actions..."
             className="h-12 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-fg-faint"
           />
@@ -116,6 +153,35 @@ const CommandMenu = () => {
             </Item>
           </Command.Group>
 
+          {shownProjects.length > 0 && (
+            <Command.Group
+              heading={search.trim() ? "Projects" : "Recent projects"}
+            >
+              {shownProjects.map((project) => (
+                <Item
+                  key={project.id}
+                  // Unique value so two projects with the same title don't merge.
+                  value={`${project.title} ${project.id}`}
+                  keywords={
+                    project.screen
+                      ? ["screen recording"]
+                      : ["meeting", "space recording"]
+                  }
+                  icon={
+                    project.screen ? (
+                      <FiMonitor size={15} />
+                    ) : (
+                      <MdOutlineVideoLabel size={15} />
+                    )
+                  }
+                  onSelect={() => run(() => navigate(project.path))}
+                >
+                  {project.title}
+                </Item>
+              ))}
+            </Command.Group>
+          )}
+
           <Command.Group heading="Pages">
             <Item
               icon={<Home size={15} />}
@@ -146,23 +212,6 @@ const CommandMenu = () => {
             </Item>
           </Command.Group>
 
-          {projects.length > 0 && (
-            <Command.Group heading="Projects">
-              {projects.map((space) => (
-                <Item
-                  key={space.id}
-                  // Unique value so two projects with the same title don't merge.
-                  value={`${space.title || "Untitled recording"} ${space.id}`}
-                  icon={<MdOutlineVideoLabel size={15} />}
-                  onSelect={() =>
-                    run(() => navigate(`/dashboard/project/${space.id}`))
-                  }
-                >
-                  {space.title || "Untitled recording"}
-                </Item>
-              ))}
-            </Command.Group>
-          )}
         </Command.List>
       </Command.Dialog>
 
