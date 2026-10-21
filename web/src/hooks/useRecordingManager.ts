@@ -135,6 +135,8 @@ interface UseRecordingManagerReturn {
   pendingUploads: number;
   /** Byte progress (0-100) of the chunks uploading right now; 100 when idle. */
   chunkUploadProgress: number;
+  /** This take's chunks so far (every track: camera, mic audio, screen). */
+  takeChunks: TakeChunkCounts;
   /** Seconds left in the synced lead-in (3,2,1), or null when not counting down. */
   countdownValue: number | null;
   startRecording: (
@@ -149,6 +151,13 @@ interface UseRecordingManagerReturn {
   setScreenStream: (stream: MediaStream | null) => void;
   attachScreenStream: (stream: MediaStream) => Promise<void>;
   detachScreenStream: () => Promise<void>;
+}
+
+interface TakeChunkCounts {
+  /** Chunks recorded so far in the current take. */
+  total: number;
+  /** Of those, uploaded and registered. */
+  uploaded: number;
 }
 
 interface PendingChunk {
@@ -331,7 +340,34 @@ export default function useRecordingManager(
     !!spaceId,
   );
 
-  const uploader = useChunkUploader(undefined, undefined, {
+  // Chunk counts for the take being captured. Only chunks this tab recorded
+  // count as uploaded - a resumed track's older chunks (another tab's) don't.
+  const takeChunksRef = useRef({
+    sessionId: null as string | null,
+    total: 0,
+    routedKeys: new Set<string>(),
+    uploadedKeys: new Set<string>(),
+  });
+  const [takeChunks, setTakeChunks] = useState<TakeChunkCounts>({
+    total: 0,
+    uploaded: 0,
+  });
+  const publishTakeChunks = useCallback(() => {
+    const take = takeChunksRef.current;
+    setTakeChunks({ total: take.total, uploaded: take.uploadedKeys.size });
+  }, []);
+  const onChunkUploaded = useCallback(
+    (info: { participantRecordingId: string; sequenceNumber: number }) => {
+      const key = `${info.participantRecordingId}:${info.sequenceNumber}`;
+      const take = takeChunksRef.current;
+      if (!take.routedKeys.has(key) || take.uploadedKeys.has(key)) return;
+      take.uploadedKeys.add(key);
+      publishTakeChunks();
+    },
+    [publishTakeChunks],
+  );
+
+  const uploader = useChunkUploader(onChunkUploaded, undefined, {
     concurrency: UPLOAD_CONCURRENCY_DRAINING,
   });
   const uploaderRef = useRef(uploader);
@@ -384,6 +420,12 @@ export default function useRecordingManager(
   const enqueueRouted = useCallback(
     (route: TrackRoute, chunk: PendingChunk) => {
       if (!route.recordingId) return;
+      const take = takeChunksRef.current;
+      if (route.sessionId === take.sessionId) {
+        take.routedKeys.add(
+          `${route.recordingId}:${route.baseSequence + chunk.sequenceNumber}`,
+        );
+      }
       void uploaderRef.current.enqueue({
         spaceId: spaceIdRef.current,
         spaceRecordingSessionId: route.spaceRecordingSessionId,
@@ -529,10 +571,14 @@ export default function useRecordingManager(
       }
       route.localCount = Math.max(route.localCount, chunk.sequenceNumber + 1);
       if (route.abandoned) return;
+      if (route.sessionId === takeChunksRef.current.sessionId) {
+        takeChunksRef.current.total += 1;
+        publishTakeChunks();
+      }
       if (route.recordingId) enqueueRouted(route, chunk);
       else route.pending.push(chunk);
     },
-    [enqueueRouted],
+    [enqueueRouted, publishTakeChunks],
   );
 
   /** Report how many chunks a track recorded. Retries; never blocks on uploads. */
@@ -857,6 +903,13 @@ export default function useRecordingManager(
         );
         timeOriginRef.current = performance.now();
         routesRef.current = new Map();
+        takeChunksRef.current = {
+          sessionId: data.sessionId,
+          total: 0,
+          routedKeys: new Set(),
+          uploadedKeys: new Set(),
+        };
+        publishTakeChunks();
         screenKeyRef.current = null;
         screenMaxSizesRef.current.clear();
         unavailableNotifiedRef.current = false;
@@ -899,6 +952,7 @@ export default function useRecordingManager(
       readLiveStream,
       acquireRecorderLock,
       syncSources,
+      publishTakeChunks,
     ],
   );
 
@@ -1456,6 +1510,7 @@ export default function useRecordingManager(
     screenChunkIndex: localRecording.screenChunkIndex,
     pendingUploads: uploader.pendingCount,
     chunkUploadProgress: uploader.chunkProgress,
+    takeChunks,
     countdownValue,
     startRecording,
     stopRecording,

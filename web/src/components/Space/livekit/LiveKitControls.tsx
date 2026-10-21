@@ -31,6 +31,7 @@ import {
   FiSettings,
   FiSmile,
   FiSquare,
+  FiUploadCloud,
   FiVideo,
   FiVideoOff,
 } from "react-icons/fi";
@@ -1277,6 +1278,9 @@ const LiveKitControls = ({
     // Failures are announced as toasts (see the recording-failure effect).
     if (recording.recordingState !== "recording") return null;
 
+    const { total, uploaded } = recording.takeChunks;
+    const uploadedOfTotal = `${uploaded} of ${total} chunk${total === 1 ? "" : "s"} uploaded`;
+
     return (
       <div className="flex items-center gap-1.5">
         <span className="relative flex size-2.5">
@@ -1289,6 +1293,25 @@ const LiveKitControls = ({
           className="inline-block min-w-[3.25rem] text-left text-base font-normal tabular-nums text-foreground"
         >
           {formatRecordingDuration(recording.recordingDurationMs)}
+        </span>
+        <span className="mx-1 h-5 w-px bg-foreground/30" />
+        {/* Byte progress of the chunk uploading right now - chunks go up while
+            recording, so it climbs to 100 for each one in turn. */}
+        <span
+          tabIndex={0}
+          className="group/upload relative flex items-center gap-1.5 text-sm font-medium tabular-nums text-foreground outline-none"
+          aria-label={`Uploading ${recording.uploadProgress}%. ${uploadedOfTotal}`}
+        >
+          <FiUploadCloud className="size-[1.125rem]" />
+          <span className="inline-block min-w-[2.5rem] text-left">
+            {recording.uploadProgress}%
+          </span>
+          <span
+            role="tooltip"
+            className="pointer-events-none invisible absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[70] -translate-x-1/2 whitespace-nowrap rounded-lg border border-border bg-popover px-3 py-2 text-xs font-normal leading-5 text-popover-foreground opacity-0 shadow-md group-hover/upload:visible group-hover/upload:opacity-100 group-focus-visible/upload:visible group-focus-visible/upload:opacity-100"
+          >
+            {uploadedOfTotal}
+          </span>
         </span>
       </div>
     );

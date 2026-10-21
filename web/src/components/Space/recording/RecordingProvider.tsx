@@ -49,6 +49,8 @@ interface RecordingContextValue {
   pendingUploads: number;
   /** Chunk upload progress, 0–100. */
   uploadProgress: number;
+  /** This participant's chunks in the current take: recorded vs uploaded. */
+  takeChunks: { total: number; uploaded: number };
   /** Hosts only: everyone else's upload for this session, keyed by LiveKit identity. */
   participantUploads: Record<string, ParticipantUpload>;
   /** Seconds left in the synced 3-2-1 lead-in, or null when not counting down. */
@@ -461,6 +463,7 @@ const RecordingProvider = ({
       recordingDurationMs: manager.recordingDurationMs,
       pendingUploads: manager.pendingUploads,
       uploadProgress,
+      takeChunks: manager.takeChunks,
       participantUploads,
       countdownValue: manager.countdownValue,
       canControl,

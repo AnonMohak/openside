@@ -162,6 +162,31 @@ function videoBitrateFor(width?: number, height?: number): number {
 
 const AUDIO_BITRATE = 128000;
 
+/**
+ * Cap the camera at the session's resolution. This is the call's own track, so
+ * it must keep the call's constraints: applyConstraints REPLACES the whole set,
+ * and a bare `{ height }` dropped the 16:9 crop and resolution the call asked
+ * for - the camera fell back to its raw frame (portrait on an upright phone
+ * camera) for the rest of the call. Leaves a camera already within the cap
+ * untouched.
+ */
+async function capCameraHeight(
+  track: MediaStreamTrack,
+  maxHeight: number,
+): Promise<void> {
+  const { width, height } = track.getSettings();
+  if (!width || !height || height <= maxHeight) return;
+  const aspectRatio = width / height;
+  await track
+    .applyConstraints({
+      ...track.getConstraints(),
+      width: { ideal: Math.round(maxHeight * aspectRatio) },
+      height: { ideal: maxHeight, max: maxHeight },
+      aspectRatio: { ideal: aspectRatio },
+    })
+    .catch(() => undefined);
+}
+
 function trackIdsOf(tracks: MediaStreamTrack[]): string {
   return tracks
     .map((track) => track.id)
@@ -297,9 +322,7 @@ export default function useLocalRecording(
       const videoTrack = stream.getVideoTracks()[0];
       const maxHeight = startOptionsRef.current.videoResolution;
       if (videoTrack && maxHeight) {
-        await videoTrack
-          .applyConstraints({ height: { max: maxHeight } })
-          .catch(() => undefined);
+        await capCameraHeight(videoTrack, maxHeight);
       }
       const videoSettings = getVideoSettings(stream);
       const audioSettings = getAudioSettings(stream);
