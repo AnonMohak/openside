@@ -105,6 +105,24 @@ const AuthModal = ({
     setResetError(null);
   };
 
+  // Freeze the page behind the overlay. The scrollbar's width is padded back
+  // so the page doesn't jump sideways when it disappears.
+  useEffect(() => {
+    if (!open) return;
+    const root = document.documentElement;
+    const scrollbarWidth = window.innerWidth - root.clientWidth;
+    const previous = {
+      overflow: root.style.overflow,
+      paddingRight: root.style.paddingRight,
+    };
+    root.style.overflow = "hidden";
+    if (scrollbarWidth > 0) root.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      root.style.overflow = previous.overflow;
+      root.style.paddingRight = previous.paddingRight;
+    };
+  }, [open]);
+
   // Close on Escape.
   useEffect(() => {
     if (!open) return;
