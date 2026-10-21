@@ -32,11 +32,12 @@ const ShareLinkDialog = ({
   const [copied, setCopied] = useState(false);
   const requestedRef = useRef(false);
 
-  // Mint the link on open - once, even if the dialog re-renders meanwhile.
+  // Mint the link on open only - never again once "Stop sharing" clears the
+  // url while the dialog is still mounted, or the revoke would re-share.
   useEffect(() => {
-    if (url || requestedRef.current) return;
+    if (requestedRef.current) return;
     requestedRef.current = true;
-    onCreate();
+    if (!url) onCreate();
   }, [url, onCreate]);
 
   useEffect(() => {
@@ -130,7 +131,7 @@ const ShareLinkDialog = ({
           <button
             type="button"
             onClick={onClose}
-            className="h-9 rounded-lg bg-foreground px-5 text-sm font-semibold text-background transition-opacity hover:opacity-85 cursor-pointer"
+            className="h-9 rounded-lg bg-muted px-5 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
           >
             Done
           </button>

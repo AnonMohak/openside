@@ -252,8 +252,13 @@ const SharedSpaceTrackRow = ({
   }
   const canDownload = videoItems.length > 0 || audioItems.length > 0;
   const specs = [
-    formatDuration(track.durationMs),
-    track.hasVideo && track.height ? `${track.height}p` : null,
+    track.durationMs ? formatDuration(track.durationMs) : null,
+    // "1080p" names the short side, so a portrait 1080x1920 track is 1080p.
+    track.hasVideo && track.width && track.height
+      ? Math.min(track.width, track.height) >= 2160
+        ? "4K"
+        : `${Math.min(track.width, track.height)}p`
+      : null,
     track.hasVideo && track.fps ? `${track.fps} fps` : null,
     formatBitrate(track.bitrate),
     track.mimeType?.replace("video/", "").replace("audio/", "").toUpperCase() ?? null,

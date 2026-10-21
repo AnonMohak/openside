@@ -31,23 +31,11 @@ const formatDuration = (ms?: number | null) => {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 };
 
+// "1080p" names the SHORT side, so a portrait 1080x1920 track is 1080p too.
 const qualityLabel = (output: FinalOutput) => {
-  if (output.height) return `${output.height}p`;
-  if (output.width) return `${output.width}w`;
-  return "";
-};
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  if (!output.width || !output.height) return "";
+  const short = Math.min(output.width, output.height);
+  return short >= 2160 ? "4K" : `${short}p`;
 };
 
 const triggerBrowserDownload = (url: string) => {
@@ -136,7 +124,7 @@ const RowThumbnail = ({
     <span
       className={`relative flex size-9 shrink-0 items-center justify-center overflow-hidden ${
         showPerson
-          ? "rounded-full bg-brand text-sm font-semibold text-white"
+          ? "rounded-full bg-muted text-sm font-medium text-foreground"
           : "rounded-lg bg-muted text-fg-muted"
       }`}
     >
@@ -278,7 +266,6 @@ const OutputCard = ({
     : hasVideo
       ? LuVideo
       : LuAudioLines;
-  const recordedAt = formatDateTime(output.recordingSession?.startedAt);
 
   const { data: entitlements } = useEntitlements();
   const deletesIn = formatRetentionRemaining(
@@ -311,7 +298,8 @@ const OutputCard = ({
       videoItems.push({
         id: `${output.id}:${format}`,
         name: "Raw video",
-        description: "Full-quality video recorded in the participant's browser.",
+        description:
+          "Full-quality video recorded in the participant's browser.",
         kind: "video",
         output,
         format,
@@ -328,7 +316,8 @@ const OutputCard = ({
     videoItems.push({
       id: `${alignedSource.id}:aligned:mp4`,
       name: "Aligned video",
-      description: "Lines up with the session start, padded if they joined late.",
+      description:
+        "Lines up with the session start, padded if they joined late.",
       kind: "video",
       output: alignedSource,
       format: "mp4",
@@ -420,8 +409,8 @@ const OutputCard = ({
     <div
       onClick={canPlay ? onSelect : undefined}
       aria-pressed={canPlay ? selected : undefined}
-      className={`group flex items-center gap-3 px-3 py-2.5 transition-colors ${
-        selected ? "bg-brand/[0.07]" : "hover:bg-muted/50"
+      className={`group flex items-center gap-3 px-3.5 py-2.5 transition-colors ${
+        selected ? "bg-muted/50" : "hover:bg-muted/30"
       } ${canPlay ? "cursor-pointer" : ""}`}
     >
       <RowThumbnail
@@ -432,62 +421,41 @@ const OutputCard = ({
       />
 
       <div className="min-w-0 flex-1">
-        <p className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-semibold text-foreground">
-            {title}
-          </span>
-          {selected && (
-            <span className="shrink-0 rounded-md bg-brand/15 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-brand dark:text-blue-300">
-              Playing
-            </span>
-          )}
-        </p>
+        <p className="truncate text-sm font-medium text-foreground">{title}</p>
         {/* Always show the status so users know where the recording stands; on
             a ready track, follow it with the useful stats. */}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-fg-subtle">
           {/* Ready tracks lead with their stats; anything else shows its status. */}
           {!isReady && (
             <span
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap font-medium ${
-                isFailed ? "text-danger" : "text-warning"
-              }`}
+              className={`whitespace-nowrap ${isFailed ? "text-danger" : ""}`}
             >
-              <span
-                className={`size-1.5 rounded-full ${
-                  isFailed ? "bg-danger" : "bg-warning"
-                }`}
-              />
               {statusLabel(output.status)}
             </span>
           )}
           {isReady && (
             <>
-              <span className="tabular-nums whitespace-nowrap">
-                {formatDuration(output.durationMs)}
-              </span>
-              {hasVideo && qualityLabel(output) && (
-                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                  <span className="text-fg-faint">·</span>
-                  <span className="tabular-nums">{qualityLabel(output)}</span>
-                </span>
-              )}
-              {recordedAt && (
-                <span className="hidden items-center gap-1.5 whitespace-nowrap sm:inline-flex">
-                  <span className="text-fg-faint">·</span>
-                  <span>{recordedAt}</span>
-                </span>
-              )}
-              {deletesIn && (
-                <span
-                  className="inline-flex items-center gap-1.5 whitespace-nowrap"
-                  title="This recording auto-deletes when it reaches your plan's retention window."
-                >
-                  <span className="text-fg-faint">·</span>
-                  <span className="text-warning/80">
-                    deletes in {deletesIn}
+              {[
+                output.durationMs ? formatDuration(output.durationMs) : null,
+                hasVideo ? qualityLabel(output) : null,
+                hasVideo && output.fps ? `${Math.round(output.fps)} fps` : null,
+                deletesIn ? `Deletes in ${deletesIn}` : null,
+              ]
+                .filter(Boolean)
+                .map((part, index) => (
+                  <span
+                    key={part}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums"
+                    title={
+                      part?.startsWith("Deletes in")
+                        ? "This recording auto-deletes when it reaches your plan's retention window."
+                        : undefined
+                    }
+                  >
+                    {index > 0 && <span className="text-fg-faint">·</span>}
+                    {part}
                   </span>
-                </span>
-              )}
+                ))}
             </>
           )}
         </div>
@@ -501,7 +469,7 @@ const OutputCard = ({
             onClick={(event) => event.stopPropagation()}
             aria-label={downloading ? "Preparing download" : "Download"}
             title={downloading ? "Preparing download" : "Download"}
-            className="group/trigger flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-muted pl-3 pr-2 text-xs font-medium text-foreground ring-1 ring-transparent transition-colors hover:ring-border disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:ring-border"
+            className="group/trigger flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-muted pl-3 pr-2 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:opacity-80"
           >
             {downloading ? (
               <FiLoader className="size-3.5 animate-spin" />

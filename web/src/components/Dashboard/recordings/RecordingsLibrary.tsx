@@ -3,14 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import {
+  FiCalendar,
   FiChevronDown,
   FiChevronLeft,
   FiCheck,
-  FiEdit2,
+  FiClock,
   FiFilter,
   FiFolder,
   FiLoader,
   FiMonitor,
+  FiMoreHorizontal,
   FiShare2,
   FiTrash2,
   FiVideo,
@@ -51,7 +53,7 @@ import OutputCard from "./OutputCard";
 import ProjectCard from "./ProjectCard";
 import ScreenRecordingsSection from "./ScreenRecordingsSection";
 import VideoPlayer from "@/components/shared/VideoPlayer";
-import RenameDialog from "@/components/shared/RenameDialog";
+import InlineTitle from "@/components/shared/InlineTitle";
 import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
 import { toast } from "@/lib/toast";
 
@@ -71,41 +73,56 @@ const formatDay = (value?: string) =>
 const recordingLabel = (count: number) =>
   `${count} recording${count === 1 ? "" : "s"}`;
 
-// "Oct 18, 9:30 PM", "12:34", "4K", "30 fps" - whatever the session knows.
-const sessionMeta = (session: RecordingSession) => {
-  const parts: string[] = [];
+// "Oct 18, 9:30 PM", "12:34", ["4K", "30 fps"]. Length and quality come only
+// from the finished track files - never the session's requested settings or its
+// start→stop wall time, which can both differ from what was really recorded.
+const sessionMeta = (
+  session: RecordingSession,
+  outputs: FinalOutput[] = [],
+) => {
   const started = new Date(session.startedAt);
-  if (!Number.isNaN(started.getTime())) {
-    parts.push(
-      started.toLocaleString("en-US", {
+  const date = Number.isNaN(started.getTime())
+    ? null
+    : started.toLocaleString("en-US", {
         month: "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
-      }),
-    );
+      });
+  const ready = outputs.filter((output) => output.status === "READY");
+  const video = ready.filter((output) => output.hasVideo);
+  const maxOf = (values: (number | null | undefined)[]) =>
+    Math.max(0, ...values.map((value) => value ?? 0));
+
+  const seconds = Math.round(
+    maxOf(ready.map((output) => output.durationMs)) / 1000,
+  );
+  let duration: string | null = null;
+  if (seconds > 0) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const sec = String(seconds % 60).padStart(2, "0");
+    duration = h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
   }
-  if (session.stoppedAt) {
-    const seconds = Math.round(
-      (new Date(session.stoppedAt).getTime() - started.getTime()) / 1000,
-    );
-    if (seconds > 0) {
-      const h = Math.floor(seconds / 3600);
-      const m = Math.floor((seconds % 3600) / 60);
-      const sec = String(seconds % 60).padStart(2, "0");
-      parts.push(
-        h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`,
-      );
-    }
+
+  // "1080p" names the short side, so a portrait 1080x1920 track is 1080p.
+  const shortSide = maxOf(
+    video.map((output) =>
+      output.width && output.height ? Math.min(output.width, output.height) : 0,
+    ),
+  );
+  const fps = maxOf(video.map((output) => output.fps));
+  const specs: string[] = [];
+  if (
+    session.recordingMode === "AUDIO_ONLY" ||
+    (ready.length > 0 && video.length === 0)
+  ) {
+    specs.push("Audio only");
+  } else {
+    if (shortSide) specs.push(shortSide >= 2160 ? "4K" : `${shortSide}p`);
+    if (fps) specs.push(`${Math.round(fps)} fps`);
   }
-  if (session.recordingMode === "AUDIO_ONLY") parts.push("Audio only");
-  else if (session.videoResolution)
-    parts.push(
-      session.videoResolution >= 2160 ? "4K" : `${session.videoResolution}p`,
-    );
-  if (session.targetFps && session.recordingMode !== "AUDIO_ONLY")
-    parts.push(`${session.targetFps} fps`);
-  return parts;
+  return { date, duration, specs };
 };
 
 const groupOutputVariants = (outputs: FinalOutput[]) => {
@@ -169,74 +186,134 @@ const TrackPlayer = ({ output }: { output: FinalOutput | null }) => {
   );
 };
 
-// Bottom-right of a recording card: a "Shared" badge when public, and one
-// options menu for share / rename / delete.
+// Top-right of a recording card: a "Shared" badge when public, and a "more"
+// menu for share / delete.
 const RecordingSessionActions = ({
   shareToken,
   onShare,
-  onRename,
   onDelete,
 }: {
   shareToken?: string | null;
   onShare?: () => void;
-  onRename?: () => void;
   onDelete?: () => void;
 }) => {
-  if (!onShare && !onRename && !onDelete) return null;
+  if (!onShare && !onDelete && !shareToken) return null;
   return (
-    <>
+    <div className="flex shrink-0 items-center gap-1.5">
       {shareToken && (
-        <span className="mr-1 flex h-6 items-center gap-1 rounded-md bg-success/10 px-2 text-xs font-medium text-success">
-          <FiShare2 className="size-3" />
+        <span className="flex h-8 items-center gap-1.5 rounded-lg bg-success/10 px-3 text-xs font-medium text-success">
+          <FiShare2 className="size-3.5" />
           Shared
         </span>
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label="Recording options"
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 data-[state=open]:opacity-80 cursor-pointer"
+      {(onShare || onDelete) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Recording options"
+              className="flex size-8 items-center justify-center rounded-lg bg-muted text-foreground transition-colors hover:bg-muted/70 data-[state=open]:bg-muted/70 cursor-pointer"
+            >
+              <FiMoreHorizontal className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={6}
+            className="w-44 rounded-xl border-border/50 bg-primary p-1"
           >
-            Options
-            <FiChevronDown className="size-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          sideOffset={6}
-          className="w-44 rounded-xl border-border/50 bg-primary p-1"
-        >
-          {onShare && (
-            <DropdownMenuItem
-              onSelect={onShare}
-              className="cursor-pointer rounded-lg py-2"
-            >
-              <FiShare2 />
-              {shareToken ? "Sharing settings" : "Share"}
-            </DropdownMenuItem>
+            {onShare && (
+              <DropdownMenuItem
+                onSelect={onShare}
+                className="cursor-pointer rounded-lg py-2"
+              >
+                <FiShare2 />
+                {shareToken ? "Sharing settings" : "Share"}
+              </DropdownMenuItem>
+            )}
+            {onDelete && (
+              <DropdownMenuItem
+                onSelect={onDelete}
+                className="cursor-pointer rounded-lg py-2 text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
+              >
+                <FiTrash2 />
+                Delete
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
+};
+
+// Top of a recording card: title (click to rename), then when / how long /
+// what quality, with the share + options actions on the right.
+const RecordingHeader = ({
+  title,
+  session,
+  outputs,
+  processing = false,
+  onRename,
+  ...actions
+}: {
+  title: string;
+  session?: RecordingSession;
+  /** The recording's track outputs - the source of its real length/quality. */
+  outputs?: FinalOutput[];
+  processing?: boolean;
+  shareToken?: string | null;
+  onShare?: () => void;
+  onRename?: (title: string) => void;
+  onDelete?: () => void;
+}) => {
+  const meta = session ? sessionMeta(session, outputs) : null;
+  return (
+    <div className="flex w-full items-center justify-between gap-3 px-3.5 pb-3 pt-3.5">
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <h3 className="text-[0.95rem] font-semibold leading-tight tracking-[-0.01em] text-foreground">
+          <InlineTitle value={title} onSave={onRename} className="truncate" />
+        </h3>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-subtle">
+          {processing ? (
+            <span className="flex items-center gap-1.5 font-medium text-warning">
+              <FiLoader className="size-3 animate-spin" />
+              Processing…
+            </span>
+          ) : (
+            meta && (
+              <>
+                {meta.date && (
+                  <span className="flex items-center gap-1.5">
+                    <FiCalendar className="size-3" />
+                    {meta.date}
+                  </span>
+                )}
+                {meta.duration && (
+                  <span className="flex items-center gap-1.5 tabular-nums">
+                    <FiClock className="size-3" />
+                    {meta.duration}
+                  </span>
+                )}
+                {meta.specs.length > 0 && (
+                  <span className="flex items-center gap-1">
+                    {meta.specs.map((spec) => (
+                      <span
+                        key={spec}
+                        className="rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium leading-none text-fg-muted"
+                      >
+                        {spec}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </>
+            )
           )}
-          {onRename && (
-            <DropdownMenuItem
-              onSelect={onRename}
-              className="cursor-pointer rounded-lg py-2"
-            >
-              <FiEdit2 />
-              Rename
-            </DropdownMenuItem>
-          )}
-          {onDelete && (
-            <DropdownMenuItem
-              onSelect={onDelete}
-              className="cursor-pointer rounded-lg py-2 text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
-            >
-              <FiTrash2 />
-              Delete
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+        </div>
+      </div>
+      <RecordingSessionActions {...actions} />
+    </div>
   );
 };
 
@@ -278,13 +355,10 @@ const SpaceRecordingShareDialog = ({
 
 // One recording (a single start→stop run within the meeting). Has its own
 // player and its own track list, with its own selected track.
-const TracksHeading = ({ count }: { count: number }) => (
-  <div className="flex items-center gap-2 px-1">
-    <h3 className="text-sm font-semibold text-foreground">Tracks</h3>
-    <span className="rounded-full bg-muted px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted">
-      {count}
-    </span>
-  </div>
+const TracksHeading = () => (
+  <h3 className="px-3.5 pb-2.5 pt-1 text-xs font-medium text-fg-muted">
+    Tracks
+  </h3>
 );
 
 const RecordingBlock = ({
@@ -306,7 +380,7 @@ const RecordingBlock = ({
   cooking?: ParticipantRecording[];
   title: string;
   showDivider: boolean;
-  onRename?: () => void;
+  onRename?: (title: string) => void;
   onDelete?: () => void;
   shareToken?: string | null;
   onShare?: () => void;
@@ -351,61 +425,47 @@ const RecordingBlock = ({
   return (
     <section
       id={`recording-session-${id}`}
-      className={`flex flex-col gap-4 ${showDivider ? "border-t border-border/50 pt-8" : ""}`}
+      className={`flex flex-col gap-4 ${showDivider ? "pt-4" : ""}`}
     >
       <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
-        <div className="p-2 pb-0">
+        <RecordingHeader
+          title={title}
+          session={session}
+          outputs={rows.map((row) => row.primary)}
+          shareToken={shareToken}
+          onShare={onShare}
+          onRename={onRename}
+          onDelete={onDelete}
+        />
+        <div className="p-2">
           <TrackPlayer output={activeOutput} />
         </div>
-        <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold text-foreground">
-              {title}
-            </p>
-            {session && (
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-fg-subtle">
-                {sessionMeta(session).map((part, index) => (
-                  <span key={part} className="flex items-center gap-1.5">
-                    {index > 0 && <span aria-hidden>·</span>}
-                    {part}
-                  </span>
-                ))}
-              </p>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <RecordingSessionActions
-              shareToken={shareToken}
-              onShare={onShare}
-              onRename={onRename}
-              onDelete={onDelete}
+        <TracksHeading />
+        <div className="flex min-w-0 flex-col divide-y divide-border/50 border-t border-border/50">
+          {groupedRows.flatMap((group, groupIndex) =>
+            group.map(({ primary, aligned, cloud }, partIndex) => (
+              <OutputCard
+                key={primary.sourceRecordingId ?? primary.id}
+                output={primary}
+                alignedOutput={aligned}
+                cloudOutput={cloud}
+                partLabel={
+                  group.length > 1 ? `Part ${partIndex + 1}` : undefined
+                }
+                fallbackTitle={`Participant ${groupIndex + 1}`}
+                selected={primary.id === activeId}
+                onSelect={() => setSelectedId(primary.id)}
+              />
+            )),
+          )}
+          {cooking.map((track, index) => (
+            <ProcessingTrackCard
+              key={track.id}
+              track={track}
+              index={groupedRows.length + index}
             />
-          </div>
+          ))}
         </div>
-      </div>
-      <TracksHeading count={rows.length + cooking.length} />
-      <div className="flex min-w-0 flex-1 flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
-        {groupedRows.flatMap((group, groupIndex) =>
-          group.map(({ primary, aligned, cloud }, partIndex) => (
-            <OutputCard
-              key={primary.sourceRecordingId ?? primary.id}
-              output={primary}
-              alignedOutput={aligned}
-              cloudOutput={cloud}
-              partLabel={group.length > 1 ? `Part ${partIndex + 1}` : undefined}
-              fallbackTitle={`Participant ${groupIndex + 1}`}
-              selected={primary.id === activeId}
-              onSelect={() => setSelectedId(primary.id)}
-            />
-          )),
-        )}
-        {cooking.map((track, index) => (
-          <ProcessingTrackCard
-            key={track.id}
-            track={track}
-            index={groupedRows.length + index}
-          />
-        ))}
       </div>
     </section>
   );
@@ -469,7 +529,7 @@ const ProcessingTrackCard = ({
   const pct = estimateTrackProgress(track, now);
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
+    <div className="flex items-center gap-3 px-3.5 py-2.5">
       <span className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
         {avatar ? (
           <img src={avatar} alt="" className="h-full w-full object-cover" />
@@ -479,7 +539,7 @@ const ProcessingTrackCard = ({
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-foreground">{name}</p>
+        <p className="truncate text-sm font-medium text-foreground">{name}</p>
         {failed ? (
           <span className="mt-1 inline-block rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
             Failed
@@ -493,7 +553,7 @@ const ProcessingTrackCard = ({
           <div className="mt-1.5 flex items-center gap-2">
             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
               <span
-                className="block h-full rounded-full bg-warning transition-[width] duration-1000 ease-linear"
+                className="block h-full rounded-full bg-foreground/60 transition-[width] duration-1000 ease-linear"
                 style={{ width: `${pct}%` }}
               />
             </span>
@@ -523,17 +583,25 @@ const ProcessingRecordingBlock = ({
   tracks: ParticipantRecording[];
   title: string;
   showDivider: boolean;
-  onRename?: () => void;
+  onRename?: (title: string) => void;
   onDelete?: () => void;
   shareToken?: string | null;
   onShare?: () => void;
 }) => (
   <section
     id={`recording-session-${id}`}
-    className={`flex flex-col gap-4 ${showDivider ? "border-t border-border/50 pt-8" : ""}`}
+    className={`flex flex-col gap-4 ${showDivider ? "pt-4" : ""}`}
   >
     <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
-      <div className="p-2 pb-0">
+      <RecordingHeader
+        title={title}
+        processing
+        shareToken={shareToken}
+        onShare={onShare}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
+      <div className="p-2">
         <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black text-white/60 ring-1 ring-border/50">
           <FiLoader className="size-6 animate-spin" />
           <span className="text-sm">Processing your recording…</span>
@@ -543,28 +611,12 @@ const ProcessingRecordingBlock = ({
           </span>
         </div>
       </div>
-      <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
-        <div className="min-w-0">
-          <p className="truncate text-base font-semibold text-foreground">
-            {title}
-          </p>
-          <p className="mt-0.5 text-xs text-fg-subtle">Processing…</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <RecordingSessionActions
-            shareToken={shareToken}
-            onShare={onShare}
-            onRename={onRename}
-            onDelete={onDelete}
-          />
-        </div>
+      <TracksHeading />
+      <div className="flex min-w-0 flex-col divide-y divide-border/50 border-t border-border/50">
+        {tracks.map((track, index) => (
+          <ProcessingTrackCard key={track.id} track={track} index={index} />
+        ))}
       </div>
-    </div>
-    <TracksHeading count={tracks.length} />
-    <div className="flex min-w-0 flex-1 flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
-      {tracks.map((track, index) => (
-        <ProcessingTrackCard key={track.id} track={track} index={index} />
-      ))}
     </div>
   </section>
 );
@@ -778,7 +830,9 @@ const SpaceOutputs = ({
           title={block.title}
           showDivider={index > 0}
           onRename={
-            canManage ? () => onRenameSession(block.id, block.title) : undefined
+            canManage
+              ? (next: string) => onRenameSession(block.id, next)
+              : undefined
           }
           onDelete={
             canManage ? () => onDeleteSession(block.id, block.title) : undefined
@@ -796,7 +850,9 @@ const SpaceOutputs = ({
           title={rec.title}
           showDivider={processingBlocks.length + index > 0}
           onRename={
-            canManage ? () => onRenameSession(rec.id, rec.title) : undefined
+            canManage
+              ? (next: string) => onRenameSession(rec.id, next)
+              : undefined
           }
           onDelete={
             canManage ? () => onDeleteSession(rec.id, rec.title) : undefined
@@ -850,7 +906,9 @@ const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
       <div className="min-w-0 space-y-1">
         <h1 className="text-xl font-semibold text-foreground">Projects</h1>
         <p className="text-sm text-fg-muted">
-          <span className="sm:hidden">Preview and download your recordings.</span>
+          <span className="sm:hidden">
+            Preview and download your recordings.
+          </span>
           <span className="hidden sm:inline">
             Your recordings, ready to preview and download.
           </span>
@@ -917,13 +975,7 @@ const ProjectDetailSkeleton = () => (
 export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [renaming, setRenaming] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [recordingToRename, setRecordingToRename] = useState<{
-    id: string;
-    title: string;
-  } | null>(null);
   const [recordingToDelete, setRecordingToDelete] = useState<{
     id: string;
     title: string;
@@ -932,9 +984,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
     null,
   );
   // Keep each dialog mounted through its exit animation.
-  const renameDialog = usePresence(renaming);
   const deleteDialog = usePresence(deleteConfirmOpen);
-  const recordingRenameDialog = usePresence(recordingToRename);
   const recordingDeleteDialog = usePresence(recordingToDelete);
   const shareDialog = usePresence(sharingSession);
   const focusedRecordingSessionId = searchParams.get("recordingSessionId");
@@ -1037,18 +1087,6 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const sessionCount = space._count?.recordingSessions ?? sessions.length;
   const canManage = user?.id === space.hostId;
 
-  const openRename = () => {
-    setTitle(space.title || "");
-    setRenaming(true);
-  };
-
-  const submitRename = () => {
-    const next = title.trim();
-    setRenaming(false);
-    if (!next || next === (space.title || "")) return;
-    renameSpace.mutate({ spaceId: space.id, title: next });
-  };
-
   const openDeleteConfirmation = () => {
     setDeleteConfirmOpen(true);
   };
@@ -1061,21 +1099,9 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
     navigate("/dashboard/project");
   };
 
-  const openRecordingRename = (sessionId: string, sessionTitle: string) => {
-    setRecordingToRename({ id: sessionId, title: sessionTitle });
-  };
-
-  const submitRecordingRename = () => {
-    if (!recordingToRename) return;
-    const nextTitle = recordingToRename.title.trim();
-    if (!nextTitle) return;
-    // Optimistic: the hook updates the cache instantly and rolls back on
-    // failure, so close the dialog immediately - no loader, no await.
-    renameRecordingSession.mutate({
-      sessionId: recordingToRename.id,
-      title: nextTitle,
-    });
-    setRecordingToRename(null);
+  // Optimistic: the hook updates the cache instantly and rolls back on failure.
+  const renameRecording = (sessionId: string, nextTitle: string) => {
+    renameRecordingSession.mutate({ sessionId, title: nextTitle });
   };
 
   const openRecordingDelete = (sessionId: string, sessionTitle: string) => {
@@ -1105,8 +1131,18 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
               <FiChevronLeft className="size-5" />
             </button>
             <div className="min-w-0 space-y-0.5">
-              <h1 className="truncate text-xl font-semibold leading-tight tracking-[-0.01em] text-foreground">
-                {space.title || "Untitled space"}
+              <h1 className="text-xl font-semibold leading-tight tracking-[-0.01em] text-foreground">
+                <InlineTitle
+                  value={space.title || "Untitled space"}
+                  maxLength={100}
+                  onSave={
+                    canManage
+                      ? (next) =>
+                          renameSpace.mutate({ spaceId: space.id, title: next })
+                      : undefined
+                  }
+                  className="truncate"
+                />
               </h1>
               <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-fg-subtle">
                 <span>{recordingLabel(sessionCount)}</span>
@@ -1121,14 +1157,6 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           </div>
           {canManage && (
             <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={openRename}
-                className="flex h-9 items-center gap-1.5 rounded-lg bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
-              >
-                <FiEdit2 className="size-3.5" />
-                Rename
-              </button>
               <button
                 type="button"
                 onClick={openDeleteConfirmation}
@@ -1149,7 +1177,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           outputs={outputs ?? []}
           sessions={sessions}
           canManage={canManage}
-          onRenameSession={openRecordingRename}
+          onRenameSession={renameRecording}
           onDeleteSession={openRecordingDelete}
           onShareSession={setSharingSession}
         />
@@ -1164,34 +1192,6 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
           spaceId={spaceId}
           onClose={() => setSharingSession(null)}
           isClosing={shareDialog.isClosing}
-        />
-      )}
-      {renameDialog.rendered && (
-        <RenameDialog
-          heading="Rename project"
-          description="Shown on your projects list and shared links."
-          value={title}
-          maxLength={100}
-          placeholder="Project name"
-          onChange={setTitle}
-          onCancel={() => setRenaming(false)}
-          onSave={submitRename}
-          isClosing={renameDialog.isClosing}
-        />
-      )}
-      {recordingRenameDialog.rendered && (
-        <RenameDialog
-          heading="Rename recording"
-          value={recordingRenameDialog.rendered.title}
-          placeholder="Recording name"
-          onChange={(value) =>
-            setRecordingToRename((recording) =>
-              recording ? { ...recording, title: value } : recording,
-            )
-          }
-          onCancel={() => setRecordingToRename(null)}
-          onSave={submitRecordingRename}
-          isClosing={recordingRenameDialog.isClosing}
         />
       )}
       {recordingDeleteDialog.rendered && (
@@ -1365,7 +1365,9 @@ const RecordingsLibrary = () => {
         <div className="min-w-0 space-y-1">
           <h1 className="text-xl font-semibold text-foreground">Projects</h1>
           <p className="text-sm text-fg-muted">
-            <span className="sm:hidden">Preview and download your recordings.</span>
+            <span className="sm:hidden">
+              Preview and download your recordings.
+            </span>
             <span className="hidden sm:inline">
               Your recordings, ready to preview and download.
             </span>
