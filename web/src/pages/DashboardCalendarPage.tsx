@@ -473,7 +473,7 @@ const DashboardCalendarPage = () => {
               </div>
             )}
             {view !== "list" && (
-              <h1 className="min-w-0 truncate text-sm font-medium text-foreground sm:text-base">
+              <h1 className="min-w-0 truncate text-base font-medium text-foreground">
                 <span className="sm:hidden">{shortHeaderLabel}</span>
                 <span className="hidden sm:inline">{headerLabel}</span>
               </h1>

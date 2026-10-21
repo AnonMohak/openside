@@ -846,14 +846,17 @@ const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
     aria-label="Loading projects"
     className="flex flex-col gap-6 px-2 pb-2 pt-0"
   >
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="space-y-1">
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0 space-y-1">
         <h1 className="text-xl font-semibold text-foreground">Projects</h1>
         <p className="text-sm text-fg-muted">
-          Your recordings, ready to preview and download.
+          <span className="sm:hidden">Preview and download your recordings.</span>
+          <span className="hidden sm:inline">
+            Your recordings, ready to preview and download.
+          </span>
         </p>
       </div>
-      <div className="skeleton-shimmer h-9 w-36 rounded-lg" />
+      <div className="skeleton-shimmer size-9 shrink-0 rounded-lg sm:w-36" />
     </div>
     {filter !== "screen" && <SkeletonSection title="Space Recordings" />}
     {filter !== "space" && <SkeletonSection title="Screen recordings" />}
@@ -1345,6 +1348,9 @@ const RecordingsLibrary = () => {
     spacesWithRecordings.length - visibleSpaces.length,
   );
 
+  const activeFilterLabel =
+    PROJECT_FILTERS.find((item) => item.value === filter)?.label ?? "";
+
   if (isLoading || areScreenRecordingsLoading)
     return <ProjectsListSkeleton filter={filter} />;
 
@@ -1353,22 +1359,32 @@ const RecordingsLibrary = () => {
 
   return (
     <div className="flex flex-col gap-6 px-2 pb-2 pt-0">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
+      {/* Title and filter share one line on phones too: short copy and an
+          icon-only filter button below sm. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 space-y-1">
           <h1 className="text-xl font-semibold text-foreground">Projects</h1>
           <p className="text-sm text-fg-muted">
-            Your recordings, ready to preview and download.
+            <span className="sm:hidden">Preview and download your recordings.</span>
+            <span className="hidden sm:inline">
+              Your recordings, ready to preview and download.
+            </span>
           </p>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex h-9 items-center gap-2 rounded-lg border border-border/50 bg-primary px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted data-[state=open]:bg-muted cursor-pointer"
+              aria-label={`Filter: ${activeFilterLabel}`}
+              className="flex size-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-border/50 bg-primary text-sm font-medium text-foreground transition-colors hover:bg-muted data-[state=open]:bg-muted cursor-pointer sm:w-auto sm:px-3"
             >
               <FiFilter size={14} className="text-fg-subtle" />
-              {PROJECT_FILTERS.find((item) => item.value === filter)?.label}
-              <FiChevronDown size={14} className="text-fg-subtle" />
+              {/* Phones: just the icon - the names are in the menu. */}
+              <span className="hidden sm:inline">{activeFilterLabel}</span>
+              <FiChevronDown
+                size={14}
+                className="hidden text-fg-subtle sm:block"
+              />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
