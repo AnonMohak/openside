@@ -227,6 +227,24 @@ const CommandMenu = () => {
             <Command.Group heading="Pages">{renderEntries(pages)}</Command.Group>
           )}
         </Command.List>
+
+        {/* What project search covers, and the keys. */}
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 px-4 py-2.5 text-[0.7rem] text-fg-subtle">
+          <span className="truncate">
+            Find a project by its name, a take, or someone in the call
+          </span>
+          <span className="flex shrink-0 items-center gap-2 max-md:hidden">
+            <span className="flex items-center gap-1">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+              navigate
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>↵</Kbd>
+              open
+            </span>
+          </span>
+        </div>
       </Command.Dialog>
 
       <ScheduleModal
@@ -236,6 +254,12 @@ const CommandMenu = () => {
     </>
   );
 };
+
+const Kbd = ({ children }: { children: ReactNode }) => (
+  <kbd className="flex h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted px-1 font-sans text-[0.6rem] font-medium text-fg-muted">
+    {children}
+  </kbd>
+);
 
 const Item = ({
   icon,
