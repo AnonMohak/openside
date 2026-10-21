@@ -9,6 +9,7 @@ import generateRoomId from "@/utils/GenerateRoomId";
 import { createIntentKey } from "@/pages/RoomPage";
 import { useProjectSearch } from "@/hooks/useProjectSearch";
 import ScheduleModal from "./ScheduleModal";
+import { useScreenRecordingContext } from "@/components/ScreenRecorder/ScreenRecordingProvider";
 
 const isMac =
   typeof navigator !== "undefined" &&
@@ -36,6 +37,7 @@ const entryMatches = (entry: MenuEntry, query: string) =>
  */
 const CommandMenu = () => {
   const navigate = useNavigate();
+  const { openRecorder } = useScreenRecordingContext();
   const [open, setOpen] = useState(false);
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -87,7 +89,7 @@ const CommandMenu = () => {
       {
         label: "Screen recorder",
         icon: <FiMonitor size={15} />,
-        onSelect: () => run(() => navigate("/dashboard/screen-recorder")),
+        onSelect: () => run(openRecorder),
       },
     ] satisfies MenuEntry[]
   ).filter((entry) => entryMatches(entry, query));

@@ -102,7 +102,7 @@ async function triggerScreenFinalize(sessionId: string): Promise<void> {
 interface Composition {
 	layout?: "screen" | "camera" | "screen-camera";
 	cameraSize?: "normal" | "big";
-	cameraShape?: "square" | "rectangle";
+	cameraShape?: "square" | "rectangle" | "circle";
 	cameraCorner?: string; // currently always "bottom-right"
 }
 
@@ -421,7 +421,11 @@ async function composeBoth(
 	const camH = Math.round((comp.cameraSize === "big" ? 0.3 : 0.22) * baseH);
 	const camW = Math.round(camH * aspect);
 	const margin = Math.round(0.03 * baseH);
-	const radius = Math.max(2, Math.round(0.12 * camH));
+	// A circle is a square whose corner radius is half its side.
+	const radius =
+		comp.cameraShape === "circle"
+			? Math.floor(camH / 2)
+			: Math.max(2, Math.round(0.12 * camH));
 	// Screen capture is variable-frame-rate; normalize both inputs to a constant
 	// fps before overlay (and force CFR output) so the merged video isn't laggy.
 	const fps = screen.fps && screen.fps >= 10 ? Math.round(screen.fps) : 30;

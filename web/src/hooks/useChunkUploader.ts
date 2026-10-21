@@ -75,6 +75,8 @@ interface UseChunkUploaderReturn {
   resumeOrphans: (options?: ResumeOrphansOptions) => Promise<void>;
   /** Resolves when the queue is fully drained (all chunks uploaded). */
   waitUntilDrained: (timeoutMs?: number) => Promise<boolean>;
+  /** Drop every chunk of a session that's being deleted (see the queue). */
+  discardSession: (recordingSessionId: string) => Promise<void>;
   /** Number of successfully uploaded segments for a given recording. */
   getUploadedCount: (participantRecordingId: string) => number;
   /** How many uploads run at once (lower while recording, to spare the call). */
@@ -259,6 +261,8 @@ class ChunkUploadQueue {
   // Chunks set aside after repeated non-network failures - kept in IndexedDB
   // for a later session, skipped by resumeOrphans for the rest of this one.
   private setAside = new Set<string>();
+  // Sessions the user deleted mid-recording: their chunks are never uploaded.
+  private discarded = new Set<string>();
   private lastProgress = { value: 100, at: 0 };
   private disposed = false;
 
@@ -346,6 +350,12 @@ class ChunkUploadQueue {
         );
       }
 
+      // The session was deleted while this chunk was being persisted.
+      if (this.discarded.has(buffered.recordingSessionId)) {
+        await deleteChunk(buffered.id).catch(() => undefined);
+        return;
+      }
+
       // A resumeOrphans pass can race the putChunk await above and queue this
       // chunk from IndexedDB before we get here - never queue the id twice.
       if (!this.items.some((item) => item.id === buffered.id)) {
@@ -410,6 +420,36 @@ class ChunkUploadQueue {
       };
       check();
     });
+  }
+
+  /**
+   * Drop a deleted session's chunks: queued ones (and their IndexedDB copies)
+   * go now, in-flight ones are removed when they settle. Resolves once none
+   * remain, so the caller can delete the session without a late upload
+   * landing after it (bounded - a stuck upload just 404s and drops later).
+   */
+  async discardSession(
+    recordingSessionId: string,
+    timeoutMs = 15000,
+  ): Promise<void> {
+    this.discarded.add(recordingSessionId);
+    this.items = this.items.filter((item) => {
+      if (item.recordingSessionId !== recordingSessionId || item.inFlight) {
+        return true;
+      }
+      void deleteChunk(item.id).catch(() => undefined);
+      return false;
+    });
+    this.listener.onPending(this.items.length);
+
+    const start = Date.now();
+    while (
+      this.pendingEnqueues > 0 ||
+      this.items.some((item) => item.recordingSessionId === recordingSessionId)
+    ) {
+      if (Date.now() - start > timeoutMs) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
 
   private toItem(chunk: BufferedChunk, persisted: boolean): QueueItem {
@@ -551,7 +591,10 @@ class ChunkUploadQueue {
       this.items = this.items.filter((queued) => queued !== item);
     };
 
-    if (outcome === "done") {
+    if (outcome !== "done" && this.discarded.has(item.recordingSessionId)) {
+      remove();
+      void deleteChunk(item.id).catch(() => undefined);
+    } else if (outcome === "done") {
       remove();
       let seqs = this.uploadedSeqs.get(item.participantRecordingId);
       if (!seqs) {
@@ -661,6 +704,8 @@ export default function useChunkUploader(
         queue.resumeOrphans(resumeOptions),
       waitUntilDrained: (timeoutMs?: number) =>
         queue.waitUntilDrained(timeoutMs),
+      discardSession: (recordingSessionId: string) =>
+        queue.discardSession(recordingSessionId),
       getUploadedCount: (participantRecordingId: string) =>
         queue.getUploadedCount(participantRecordingId),
       setConcurrency: (concurrency: number) =>

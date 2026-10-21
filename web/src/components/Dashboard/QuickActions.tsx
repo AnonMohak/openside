@@ -14,6 +14,7 @@ import { toast } from "@/lib/toast";
 import type { Space } from "@/types/spaceTypes";
 import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
 import { usePresence } from "@/hooks/usePresence";
+import { useScreenRecordingContext } from "@/components/ScreenRecorder/ScreenRecordingProvider";
 
 const UpcomingSessionsSkeleton = () => (
   <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
@@ -32,6 +33,7 @@ const UpcomingSessionsSkeleton = () => (
 
 const QuickActions = () => {
   const navigate = useNavigate();
+  const { openRecorder } = useScreenRecordingContext();
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Space | null>(null);
   const deleteDialog = usePresence(pendingDelete);
@@ -137,7 +139,7 @@ const QuickActions = () => {
       description: "Capture your screen",
       icon: <FiMonitor size={18} />,
       badge: "Beta",
-      onClick: () => navigate("/dashboard/screen-recorder"),
+      onClick: openRecorder,
       // Phone/tablet browsers can't capture the screen, so the card is
       // desktop-only.
       className: "max-lg:hidden",

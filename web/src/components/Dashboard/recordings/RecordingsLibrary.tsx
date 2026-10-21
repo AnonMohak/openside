@@ -56,6 +56,7 @@ import VideoPlayer from "@/components/shared/VideoPlayer";
 import InlineTitle from "@/components/shared/InlineTitle";
 import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
 import { toast } from "@/lib/toast";
+import { useScreenRecordingContext } from "@/components/ScreenRecorder/ScreenRecordingProvider";
 
 const PROJECTS_PER_PAGE = 8;
 const shareUrlFor = (token: string) =>
@@ -1505,7 +1506,8 @@ const FILTER_EMPTY: Record<
     title: string;
     description: string;
     cta: string;
-    to: string;
+    /** Null opens the floating screen recorder instead of navigating. */
+    to: string | null;
   }
 > = {
   space: {
@@ -1522,12 +1524,13 @@ const FILTER_EMPTY: Record<
     description:
       "Capture your screen, camera, or both. Finished recordings show up here.",
     cta: "Open screen recorder",
-    to: "/dashboard/screen-recorder",
+    to: null,
   },
 };
 
 const FilterEmpty = ({ kind }: { kind: "space" | "screen" }) => {
   const navigate = useNavigate();
+  const { openRecorder } = useScreenRecordingContext();
   const { icon: Icon, title, description, cta, to } = FILTER_EMPTY[kind];
 
   return (
@@ -1541,7 +1544,7 @@ const FilterEmpty = ({ kind }: { kind: "space" | "screen" }) => {
       </div>
       <button
         type="button"
-        onClick={() => navigate(to)}
+        onClick={() => (to ? navigate(to) : openRecorder())}
         className="h-9 cursor-pointer rounded-lg bg-brand px-4 text-sm font-medium text-white transition-opacity hover:opacity-90"
       >
         {cta}

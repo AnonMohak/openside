@@ -45,6 +45,14 @@ interface LocalMediaContextValue {
   selectMicrophone: (deviceId: string) => Promise<void>;
   selectCamera: (deviceId: string) => Promise<void>;
 
+  /** The live streams right now - unlike the state above, current even
+   *  before the re-render that follows acquiring one. */
+  getStreams: () => {
+    camera: MediaStream | null;
+    mic: MediaStream | null;
+    screen: MediaStream | null;
+  };
+
   /** Prompt for device permissions so the device menus can show labels. */
   ensureDevicePermissions: () => void;
   stopAll: () => void;
@@ -244,6 +252,15 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
     void refreshDevices();
   }, [refreshDevices]);
 
+  const getStreams = useCallback(
+    () => ({
+      camera: cameraRef.current,
+      mic: micRef.current,
+      screen: screenRef.current,
+    }),
+    [],
+  );
+
   const stopAll = useCallback(() => {
     stopStream(cameraRef.current);
     stopStream(micRef.current);
@@ -279,6 +296,7 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
     activeCameraId,
     selectMicrophone,
     selectCamera,
+    getStreams,
     ensureDevicePermissions,
     stopAll,
   };

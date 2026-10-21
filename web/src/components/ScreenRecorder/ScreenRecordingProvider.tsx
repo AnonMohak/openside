@@ -2,9 +2,9 @@
  * ScreenRecordingProvider
  *
  * Runs the single-user screen-recorder orchestration (useScreenRecordingManager)
- * inside the local (unconnected) LiveKit room so it can read the local
- * screen-share / camera / mic tracks, and exposes a tiny context the controls +
- * countdown consume.
+ * over the local screen-share / camera / mic streams, and owns the floating
+ * recorder panel: opening the recorder anywhere in the app shows the panel on
+ * the right, and it stays up across navigation until the user closes it.
  *
  * Recorded tracks:
  *   - combined: screen-share video + mic audio (the master)
@@ -23,11 +23,14 @@ import {
   type ReactNode,
 } from "react";
 import CountdownOverlay from "@/components/Space/recording/CountdownOverlay";
+import ScreenRecorderPanel from "./ScreenRecorderPanel";
 import { useGetMe } from "@/hooks/useUserQuery";
+import { toast } from "@/lib/toast";
 import useScreenRecordingManager, {
   type ScreenRecordingState,
 } from "@/hooks/useScreenRecordingManager";
 import useUnloadWarning from "@/hooks/useUnloadWarning";
+import { usePresence } from "@/hooks/usePresence";
 import type { ScreenStreams } from "@/hooks/useScreenLocalRecording";
 import { useLocalMedia } from "./LocalMediaProvider";
 
@@ -37,10 +40,15 @@ interface RecordingInfo {
 }
 
 export type ScreenRecorderLayout = "screen" | "camera" | "screen-camera";
-type PipSize = "normal" | "big";
-type PipShape = "square" | "rectangle";
+export type PipSize = "normal" | "big";
+export type PipShape = "square" | "circle";
 
 interface ScreenRecordingContextValue {
+  /** Whether the floating recorder panel is showing. */
+  isOpen: boolean;
+  openRecorder: () => void;
+  /** Hides the panel and releases every device. No-op while a take is live. */
+  closeRecorder: () => void;
   recordingState: ScreenRecordingState;
   isActive: boolean;
   recordingDurationMs: number;
@@ -48,7 +56,16 @@ interface ScreenRecordingContextValue {
   pendingUploads: number;
   uploadProgress: number;
   error: string | null;
-  toggleRecording: () => void;
+  completedSessionId: string | null;
+  /** Turns on whatever the layout needs (prompting for the screen), then
+   *  starts the countdown. */
+  startRecording: () => Promise<void>;
+  /** Finish the take and save it. */
+  stopRecording: () => void;
+  pauseRecording: () => void;
+  resumeRecording: () => void;
+  /** Throw the current take away (nothing is saved). */
+  discardRecording: () => Promise<void>;
   /** User-provided title/description saved with the recording. */
   info: RecordingInfo;
   setInfo: (info: RecordingInfo) => void;
@@ -75,17 +92,32 @@ export const useScreenRecordingContext = (): ScreenRecordingContextValue => {
   return ctx;
 };
 
+// Matches the panel's exit animation (usePresence's overlay timing).
+const PANEL_EXIT_MS = 150;
+
 const ACTIVE_STATES: ScreenRecordingState[] = [
   "starting",
   "countdown",
   "recording",
+  "paused",
   "stopping",
   "uploading",
 ];
 
 const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
-  const { screenStream, cameraStream, micStream } = useLocalMedia();
+  const {
+    screenStream,
+    isCameraEnabled,
+    isMicrophoneEnabled,
+    toggleCamera,
+    toggleMicrophone,
+    toggleScreenShare,
+    stopScreenShare,
+    getStreams,
+    stopAll,
+  } = useLocalMedia();
   const { data: user } = useGetMe();
+  const [isOpen, setIsOpen] = useState(false);
 
   // Title/description (held in a ref so the manager reads the latest at start).
   const [info, setInfoState] = useState<RecordingInfo>({
@@ -134,11 +166,14 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     setInfoState(next);
   }, [user?.name]);
 
+  // Reads the live streams (not render state) so a start right after the
+  // screen picker resolves - and the countdown's deferred start - see them.
   const buildStreams = useCallback((): ScreenStreams => {
-    const screenTrack = screenStream?.getVideoTracks()[0];
-    const systemAudio = screenStream?.getAudioTracks()[0];
-    const cameraTrack = cameraStream?.getVideoTracks()[0];
-    const micTrack = micStream?.getAudioTracks()[0];
+    const { screen, camera, mic } = getStreams();
+    const screenTrack = screen?.getVideoTracks()[0];
+    const systemAudio = screen?.getAudioTracks()[0];
+    const cameraTrack = camera?.getVideoTracks()[0];
+    const micTrack = mic?.getAudioTracks()[0];
 
     // combined = screen video + mic + system audio (mic & system are mixed into
     // one track by the recorder). camera = webcam video + mic audio.
@@ -156,7 +191,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       camera: cameraTrack ? new MediaStream(cameraTracks) : null,
       audio: micTrack ? new MediaStream([micTrack]) : null,
     };
-  }, [screenStream, cameraStream, micStream]);
+  }, [getStreams]);
 
   const manager = useScreenRecordingManager({
     buildStreams,
@@ -173,26 +208,121 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   // confirm first while anything is still recording or uploading.
   useUnloadWarning(ACTIVE_STATES.includes(manager.recordingState));
 
-  const toggleRecording = useCallback(() => {
-    if (manager.recordingState === "idle" || manager.recordingState === "complete") {
-      const { combined, camera, audio } = buildStreams();
-      if (!combined && !camera && !audio) {
+  const isActive = ACTIVE_STATES.includes(manager.recordingState);
+  const isCapturing =
+    manager.recordingState === "recording" ||
+    manager.recordingState === "paused";
+
+  // Opening the recorder turns the camera (when the layout shows it) and mic on
+  // once - best-effort; a denied permission just leaves it off.
+  // The panel plays its exit animation before unmounting; the devices are
+  // released after it, so the camera preview doesn't go black mid-fade.
+  const panel = usePresence(isOpen);
+  const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
+    },
+    [],
+  );
+
+  const openRecorder = useCallback(() => {
+    if (releaseTimerRef.current) {
+      clearTimeout(releaseTimerRef.current);
+      releaseTimerRef.current = null;
+    }
+    setIsOpen(true);
+    if (layoutRef.current !== "screen" && !isCameraEnabled) {
+      void toggleCamera().catch(() => undefined);
+    }
+    if (!isMicrophoneEnabled) void toggleMicrophone().catch(() => undefined);
+  }, [isCameraEnabled, isMicrophoneEnabled, toggleCamera, toggleMicrophone]);
+
+  const closeRecorder = useCallback(() => {
+    if (isActive) return;
+    setIsOpen(false);
+    if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
+    releaseTimerRef.current = setTimeout(() => {
+      releaseTimerRef.current = null;
+      stopAll();
+    }, PANEL_EXIT_MS);
+  }, [isActive, stopAll]);
+
+  const startRecording = useCallback(async () => {
+    const state = manager.recordingState;
+    if (state !== "idle" && state !== "complete" && state !== "error") return;
+
+    // Bring up every source the layout records. The screen picker is the
+    // natural "what do you want to record?" step, so it opens on Start.
+    const needsScreen = layoutRef.current !== "camera";
+    const needsCamera = layoutRef.current !== "screen";
+    const live = getStreams();
+    if (needsCamera && !live.camera) {
+      try {
+        await toggleCamera();
+      } catch {
+        toast.error("Couldn't turn on the camera - check the browser's camera permission.");
         return;
       }
     }
+    if (needsScreen && !live.screen) {
+      try {
+        await toggleScreenShare();
+      } catch {
+        // Screen picker dismissed - stay idle.
+        return;
+      }
+    }
+
+    const streams = buildStreams();
+    if (needsScreen && !streams.combined) return;
+    if (needsCamera && !streams.camera) return;
     manager.toggleRecording();
-  }, [manager, buildStreams]);
+  }, [manager, getStreams, toggleCamera, toggleScreenShare, buildStreams]);
+
+  const stopRecording = useCallback(() => {
+    if (isCapturing || manager.recordingState === "countdown") {
+      manager.toggleRecording();
+    }
+  }, [manager, isCapturing]);
+
+  const discardRecording = useCallback(async () => {
+    await manager.discardRecording();
+    void stopScreenShare();
+  }, [manager, stopScreenShare]);
+
+  // Ending the share from the browser's own "Stop sharing" bar ends the take:
+  // the screen is what's being recorded, so there's nothing left to capture.
+  useEffect(() => {
+    if (isCapturing && layout !== "camera" && !screenStream) {
+      manager.toggleRecording();
+    }
+  }, [isCapturing, layout, screenStream, manager]);
+
+  // Saved: release the screen so the browser's sharing indicator goes away.
+  // The camera stays on for the preview until the panel is closed.
+  useEffect(() => {
+    if (manager.recordingState === "complete") void stopScreenShare();
+  }, [manager.recordingState, stopScreenShare]);
 
   const value = useMemo<ScreenRecordingContextValue>(
     () => ({
+      isOpen,
+      openRecorder,
+      closeRecorder,
       recordingState: manager.recordingState,
-      isActive: ACTIVE_STATES.includes(manager.recordingState),
+      isActive,
       recordingDurationMs: manager.recordingDurationMs,
       countdownValue: manager.countdownValue,
       pendingUploads: manager.pendingUploads,
       uploadProgress: manager.uploadProgress,
       error: manager.error,
-      toggleRecording,
+      completedSessionId: manager.completedSessionId,
+      startRecording,
+      stopRecording,
+      pauseRecording: manager.pauseRecording,
+      resumeRecording: manager.resumeRecording,
+      discardRecording,
       info,
       setInfo,
       layout,
@@ -203,8 +333,14 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       setCameraShape,
     }),
     [
+      isOpen,
+      openRecorder,
+      closeRecorder,
       manager,
-      toggleRecording,
+      isActive,
+      startRecording,
+      stopRecording,
+      discardRecording,
       info,
       setInfo,
       layout,
@@ -219,6 +355,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   return (
     <ScreenRecordingContext.Provider value={value}>
       {children}
+      {panel.rendered && <ScreenRecorderPanel isClosing={panel.isClosing} />}
       {manager.recordingState === "countdown" && (
         <CountdownOverlay value={manager.countdownValue} />
       )}

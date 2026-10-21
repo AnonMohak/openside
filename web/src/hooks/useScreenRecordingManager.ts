@@ -9,6 +9,8 @@
  *   4. Stream every chunk through useChunkUploader → R2 (screen endpoints).
  *   5. On stop, drain the upload queue, mark each recording complete, and stop
  *      the session.
+ * Pause/resume pauses the local recorders; discard throws the take away
+ * (queued chunks dropped, session + storage deleted).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +30,7 @@ export type ScreenRecordingState =
   | "starting"
   | "countdown"
   | "recording"
+  | "paused"
   | "stopping"
   | "uploading"
   | "complete"
@@ -57,7 +60,12 @@ interface UseScreenRecordingManagerReturn {
   pendingUploads: number;
   uploadProgress: number;
   error: string | null;
+  /** Session id of the last take that finished saving (for "open it" links). */
+  completedSessionId: string | null;
   toggleRecording: () => void;
+  pauseRecording: () => void;
+  resumeRecording: () => void;
+  discardRecording: () => Promise<void>;
 }
 
 function generateSessionId(): string {
@@ -94,6 +102,9 @@ export default function useScreenRecordingManager({
     useState<ScreenRecordingState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
+  const [completedSessionId, setCompletedSessionId] = useState<string | null>(
+    null,
+  );
 
   // session client id + backend ids.
   const clientSessionIdRef = useRef<string | null>(null);
@@ -105,6 +116,8 @@ export default function useScreenRecordingManager({
   const pendingChunksRef = useRef<
     { trackType: ScreenTrackType; chunk: RecordingChunk }[]
   >([]);
+  // Set while a take is being discarded: its last chunks are thrown away.
+  const discardingRef = useRef(false);
 
   const countdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -131,6 +144,7 @@ export default function useScreenRecordingManager({
 
   const enqueueChunk = useCallback(
     (trackType: ScreenTrackType, chunk: RecordingChunk) => {
+      if (discardingRef.current) return;
       const recordingId = recordingIdsRef.current[trackType];
       const sessionId = sessionIdRef.current;
       if (!recordingId || !sessionId) {
@@ -180,6 +194,8 @@ export default function useScreenRecordingManager({
   const {
     startRecording: startLocal,
     stopRecording: stopLocal,
+    pauseRecording: pauseLocal,
+    resumeRecording: resumeLocal,
     getMaxTrackSize,
   } = recorder;
 
@@ -231,6 +247,7 @@ export default function useScreenRecordingManager({
     try {
       setRecordingState("starting");
       setError(null);
+      setCompletedSessionId(null);
       recordingIdsRef.current = {};
       pendingChunksRef.current = [];
 
@@ -293,8 +310,12 @@ export default function useScreenRecordingManager({
   // stopRecording is defined below the effect, so it's reached through a ref.
   const stopRecordingRef = useRef<(() => Promise<void>) | null>(null);
   const usageWarnedRef = useRef(false);
+  // Paused takes keep heartbeating: the server meters an ACTIVE session either
+  // way, and a forced stop must still reach a paused recorder.
+  const isCapturing =
+    recordingState === "recording" || recordingState === "paused";
   useEffect(() => {
-    if (recordingState !== "recording" || !sessionIdRef.current) return;
+    if (!isCapturing || !sessionIdRef.current) return;
     const sessionId = sessionIdRef.current;
     usageWarnedRef.current = false;
 
@@ -335,22 +356,26 @@ export default function useScreenRecordingManager({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [recordingState]);
+  }, [isCapturing]);
+
+  // Cancelled during the lead-in (before capture began): nothing was recorded,
+  // so delete the session outright instead of leaving an empty STOPPED row
+  // that would later surface as a FAILED recording in the list.
+  const cancelCountdown = useCallback(async () => {
+    clearCountdown();
+    if (sessionIdRef.current) {
+      await api
+        .delete(`/recording/screen/${sessionIdRef.current}`)
+        .catch(() => undefined);
+      sessionIdRef.current = null;
+      clientSessionIdRef.current = null;
+    }
+    setRecordingState("idle");
+  }, [clearCountdown]);
 
   const stopRecording = useCallback(async () => {
-    // Stopped during the lead-in (before capture began): nothing was recorded,
-    // so delete the session outright instead of leaving an empty STOPPED row
-    // that would later surface as a FAILED recording in the list.
     if (recordingState === "countdown") {
-      clearCountdown();
-      if (sessionIdRef.current) {
-        await api
-          .delete(`/recording/screen/${sessionIdRef.current}`)
-          .catch(() => undefined);
-        sessionIdRef.current = null;
-        clientSessionIdRef.current = null;
-      }
-      setRecordingState("idle");
+      await cancelCountdown();
       return;
     }
 
@@ -409,6 +434,7 @@ export default function useScreenRecordingManager({
         );
       }
 
+      setCompletedSessionId(sessionId);
       setRecordingState("complete");
       recordingIdsRef.current = {};
       sessionIdRef.current = null;
@@ -425,7 +451,7 @@ export default function useScreenRecordingManager({
     }
   }, [
     recordingState,
-    clearCountdown,
+    cancelCountdown,
     stopLocal,
     flushPendingChunks,
     uploader,
@@ -438,12 +464,54 @@ export default function useScreenRecordingManager({
     if (["starting", "countdown", "stopping", "uploading"].includes(recordingState)) {
       return;
     }
-    if (recordingState === "recording") {
+    if (recordingState === "recording" || recordingState === "paused") {
       void stopRecording();
       return;
     }
     void startRecording();
   }, [recordingState, startRecording, stopRecording]);
+
+  const pauseRecording = useCallback(() => {
+    if (recordingState !== "recording") return;
+    pauseLocal();
+    setRecordingState("paused");
+  }, [recordingState, pauseLocal]);
+
+  const resumeRecording = useCallback(() => {
+    if (recordingState !== "paused") return;
+    resumeLocal();
+    setRecordingState("recording");
+  }, [recordingState, resumeLocal]);
+
+  // Throw the current take away: stop capture without uploading the tail,
+  // drop whatever is still queued, then delete the session (rows + storage).
+  const discardRecording = useCallback(async () => {
+    if (recordingState === "countdown") {
+      await cancelCountdown();
+      return;
+    }
+    if (recordingState !== "recording" && recordingState !== "paused") return;
+
+    const sessionId = sessionIdRef.current;
+    discardingRef.current = true;
+    setRecordingState("stopping");
+    try {
+      await stopLocal();
+    } catch {
+      /* ignore - the take is being thrown away */
+    }
+    pendingChunksRef.current = [];
+    if (sessionId) {
+      await uploader.discardSession(sessionId);
+      await api.delete(`/recording/screen/${sessionId}`).catch(() => undefined);
+    }
+    recordingIdsRef.current = {};
+    sessionIdRef.current = null;
+    clientSessionIdRef.current = null;
+    discardingRef.current = false;
+    setError(null);
+    setRecordingState("idle");
+  }, [recordingState, cancelCountdown, stopLocal, uploader]);
 
   // Clear timers on unmount.
   useEffect(() => () => clearCountdown(), [clearCountdown]);
@@ -464,6 +532,10 @@ export default function useScreenRecordingManager({
     pendingUploads: uploader.pendingCount,
     uploadProgress,
     error,
+    completedSessionId,
     toggleRecording,
+    pauseRecording,
+    resumeRecording,
+    discardRecording,
   };
 }

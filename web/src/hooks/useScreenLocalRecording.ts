@@ -10,6 +10,11 @@
  * the Space recorder (useLocalRecording) but driven from explicit per-track
  * MediaStreams instead of a single stream. Timing uses performance.now() so a
  * clock adjustment can't corrupt the segment timeline.
+ *
+ * Pausing pauses every recorder at once. MediaRecorder leaves the paused span
+ * out of the encoded media, so chunk timing runs on a "recorded" clock that
+ * stops while paused too - otherwise the finalizer would read the pause as a
+ * capture break and pad it with silence, pushing audio out of sync.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,10 +47,13 @@ interface TrackSize {
 
 interface UseScreenLocalRecordingReturn {
   isRecording: boolean;
+  isPaused: boolean;
   recordingDurationMs: number;
   chunkCounts: Record<ScreenTrackType, number>;
   startRecording: (streams: ScreenStreams) => Promise<void>;
   stopRecording: () => Promise<void>;
+  pauseRecording: () => void;
+  resumeRecording: () => void;
   /** Largest frame size seen on a video track over the whole take (see the
    *  dimension sampler below). Valid until the next startRecording(). */
   getMaxTrackSize: (trackType: ScreenTrackType) => TrackSize | null;
@@ -125,6 +133,7 @@ export default function useScreenLocalRecording(
   } = options;
 
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [recordingDurationMs, setRecordingDurationMs] = useState(0);
   const [chunkCounts, setChunkCounts] = useState<Record<ScreenTrackType, number>>({
     combined: 0,
@@ -135,6 +144,9 @@ export default function useScreenLocalRecording(
   const recordersRef = useRef<Partial<Record<ScreenTrackType, MediaRecorder>>>({});
   const audioContextsRef = useRef<AudioContext[]>([]);
   const startTimeRef = useRef<number>(0);
+  // Paused time so far, and when the current pause began (null while running).
+  const pausedTotalRef = useRef<number>(0);
+  const pausedAtRef = useRef<number | null>(null);
   const sequenceRef = useRef<Record<ScreenTrackType, number>>({
     combined: 0,
     camera: 0,
@@ -146,6 +158,13 @@ export default function useScreenLocalRecording(
     audio: 0,
   });
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Milliseconds of actual capture since start - frozen while paused.
+  const recordedMs = useCallback((): number => {
+    const now = performance.now();
+    const pausedNow = pausedAtRef.current === null ? 0 : now - pausedAtRef.current;
+    return now - startTimeRef.current - pausedTotalRef.current - pausedNow;
+  }, []);
 
   // Live video tracks + the largest frame size each has reported. A screen
   // capture RESIZES mid-recording whenever the shared surface changes shape
@@ -190,9 +209,9 @@ export default function useScreenLocalRecording(
   }, [isRecording, sampleTrackSizes]);
 
   useEffect(() => {
-    if (isRecording) {
+    if (isRecording && !isPaused) {
       durationIntervalRef.current = setInterval(() => {
-        setRecordingDurationMs(performance.now() - startTimeRef.current);
+        setRecordingDurationMs(recordedMs());
       }, 100);
     } else if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
@@ -201,7 +220,7 @@ export default function useScreenLocalRecording(
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
     };
-  }, [isRecording]);
+  }, [isRecording, isPaused, recordedMs]);
 
   const buildRecorder = useCallback(
     (
@@ -213,14 +232,14 @@ export default function useScreenLocalRecording(
 
       recorder.ondataavailable = (event) => {
         if (!event.data || event.data.size === 0) return;
-        const now = performance.now();
+        const now = recordedMs();
         const seq = sequenceRef.current[trackType];
         const chunk: RecordingChunk = {
           blob: event.data,
           sequenceNumber: seq,
-          startMs: chunkStartRef.current[trackType] - startTimeRef.current,
+          startMs: chunkStartRef.current[trackType],
           durationMs: now - chunkStartRef.current[trackType],
-          timestamp: now,
+          timestamp: performance.now(),
         };
         sequenceRef.current[trackType] = seq + 1;
         chunkStartRef.current[trackType] = now;
@@ -234,7 +253,7 @@ export default function useScreenLocalRecording(
 
       return recorder;
     },
-    [onChunkReady, onError],
+    [onChunkReady, onError, recordedMs],
   );
 
   const startRecording = useCallback(
@@ -341,15 +360,17 @@ export default function useScreenLocalRecording(
         recordersRef.current = recorders;
 
         // Start all recorders on the same timeline.
-        const now = performance.now();
-        startTimeRef.current = now;
+        startTimeRef.current = performance.now();
+        pausedTotalRef.current = 0;
+        pausedAtRef.current = null;
         for (const type of TRACK_TYPES) {
-          chunkStartRef.current[type] = now;
+          chunkStartRef.current[type] = 0;
           recorders[type]?.start(chunkIntervalMs);
         }
 
         sampleTrackSizes();
         setRecordingDurationMs(0);
+        setIsPaused(false);
         setIsRecording(true);
         onRecordingStart?.(metadata);
       } catch (error) {
@@ -401,7 +422,13 @@ export default function useScreenLocalRecording(
         stopped += 1;
         if (stopped < active.length) return;
 
+        // Close an open pause so the clock is final for any last chunk.
+        if (pausedAtRef.current !== null) {
+          pausedTotalRef.current += performance.now() - pausedAtRef.current;
+          pausedAtRef.current = null;
+        }
         setIsRecording(false);
+        setIsPaused(false);
         recordersRef.current = {};
         audioContextsRef.current.forEach((c) => void c.close().catch(() => {}));
         audioContextsRef.current = [];
@@ -423,12 +450,37 @@ export default function useScreenLocalRecording(
     });
   }, [isRecording, onRecordingStop, sampleTrackSizes]);
 
+  const pauseRecording = useCallback(() => {
+    if (!isRecording || pausedAtRef.current !== null) return;
+    for (const type of TRACK_TYPES) {
+      const recorder = recordersRef.current[type];
+      if (recorder?.state === "recording") recorder.pause();
+    }
+    pausedAtRef.current = performance.now();
+    setRecordingDurationMs(recordedMs());
+    setIsPaused(true);
+  }, [isRecording, recordedMs]);
+
+  const resumeRecording = useCallback(() => {
+    if (!isRecording || pausedAtRef.current === null) return;
+    pausedTotalRef.current += performance.now() - pausedAtRef.current;
+    pausedAtRef.current = null;
+    for (const type of TRACK_TYPES) {
+      const recorder = recordersRef.current[type];
+      if (recorder?.state === "paused") recorder.resume();
+    }
+    setIsPaused(false);
+  }, [isRecording]);
+
   return {
     isRecording,
+    isPaused,
     recordingDurationMs,
     chunkCounts,
     startRecording,
     stopRecording,
+    pauseRecording,
+    resumeRecording,
     getMaxTrackSize,
   };
 }
