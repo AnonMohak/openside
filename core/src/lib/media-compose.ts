@@ -40,6 +40,7 @@ import { runFfmpeg } from "./ffmpeg-run.ts";
 import {
 	type MediaProbe,
 	type VideoSize,
+	capShortSide,
 	evenDim,
 	probeMedia,
 	sizeFilter,
@@ -363,6 +364,8 @@ export async function composeTimeline(params: {
 	extraFilters: string[];
 	/** Client-reported max frame size, if any (a grown screen surface). */
 	sizeHint: VideoSize | null;
+	/** Scale down so the shorter side is at most this (e.g. 720 for 720p). */
+	maxShortSide?: number;
 	timeoutMs?: number;
 }): Promise<ComposedMaster> {
 	if (params.parts.length === 0) throw new Error("No parts to compose");
@@ -398,6 +401,7 @@ export async function composeTimeline(params: {
 			!acc || size.width * size.height > acc.width * acc.height ? size : acc,
 		null,
 	) ?? { width: 1920, height: 1080 };
+	const target = capShortSide(best, params.maxShortSide);
 
 	return composeVideoTimeline({
 		...params,
@@ -405,7 +409,7 @@ export async function composeTimeline(params: {
 		positions,
 		anyAudio,
 		settings: {
-			target: { width: evenDim(best.width), height: evenDim(best.height) },
+			target,
 			fps: params.fps,
 			crf: params.crf,
 			extraFilters: params.extraFilters,

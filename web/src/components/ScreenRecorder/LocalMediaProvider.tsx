@@ -79,13 +79,16 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
   const micRef = useRef<MediaStream | null>(null);
   const screenRef = useRef<MediaStream | null>(null);
 
-  // Plan-based capture cap (demo 1080p, pro/self-host 4K). Read through a ref
-  // so the capture callback doesn't churn; the server independently enforces
-  // everything that costs money, so this is just honest capture sizing.
+  // Plan-based capture cap (demo 720p / 24fps, pro/self-host 4K / 60fps). Read
+  // through refs so the capture callbacks don't churn; finalization enforces
+  // the same limits on the masters, so this is honest capture sizing. Until
+  // the plan loads, assume the strictest one.
   const { isSignedIn } = useClerkAuth();
   const { data: entitlements } = useEntitlements(isSignedIn === true);
-  const maxVideoHeightRef = useRef(1080);
-  maxVideoHeightRef.current = entitlements?.maxVideoHeight ?? 1080;
+  const maxVideoHeightRef = useRef(720);
+  maxVideoHeightRef.current = entitlements?.maxVideoHeight ?? 720;
+  const maxFpsRef = useRef(24);
+  maxFpsRef.current = entitlements?.maxFps ?? 24;
 
   const setCamera = useCallback((stream: MediaStream | null) => {
     cameraRef.current = stream;
@@ -187,7 +190,8 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
     }
     // audio: true captures tab/system audio when the user grants it; mixed with
     // the mic into the screen ("combined") recording at record time.
-    // Capture height is capped by the plan (demo 1080p, pro/self-host 4K).
+    // Capture height and frame rate are capped by the plan (demo 720p/24fps,
+    // pro/self-host 4K/60fps).
     //
     // displaySurface "monitor": preselect the whole screen in the picker (the
     // user can still choose a tab or window). A tab/window surface RESIZES
@@ -199,7 +203,7 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         displaySurface: "monitor",
-        frameRate: { ideal: 60, max: 60 },
+        frameRate: { ideal: maxFpsRef.current, max: maxFpsRef.current },
         height: { max: maxVideoHeightRef.current },
       },
       audio: true,

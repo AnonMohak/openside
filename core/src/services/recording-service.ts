@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type RecordingType, prisma } from "../db/index.ts";
 import {
-	DEMO_FPS,
 	clampAudioSampleRate,
 	clampFps,
 	clampRecordingMode,
@@ -389,23 +388,26 @@ export async function startRecordingSession(data: StartSessionData) {
 			: data.cloudBackup === true;
 	const cloudBackup = entitlements.cloudBackupAllowed && wantsBackup;
 
-	// Frame rate is chosen ONCE per session by the host and applied to every
-	// participant. Snapshot the host's preference now (clamped to 24/30) so
-	// finalization can normalize all masters to this single constant rate. DEMO
-	// is locked to 24 FPS regardless of the stored preference; only PRO/self-host
-	// may pick 30.
-	const targetFps =
-		entitlements.plan === "demo" ? DEMO_FPS : clampFps(space.host.targetFps);
-	// Demo capture is intentionally fixed (the UI mirrors these values) so
-	// changed/stale user preferences or direct API calls cannot bypass the plan.
-	const videoResolution =
-		entitlements.plan === "demo"
-			? 720
-			: clampVideoResolution(space.host.videoResolution);
-	const audioSampleRate =
-		entitlements.plan === "demo"
-			? 44100
-			: clampAudioSampleRate(space.host.audioSampleRate);
+	// Capture settings are chosen ONCE per session from the host's preferences,
+	// clamped to what their plan allows (DEMO: 720p / 24fps / 44.1kHz), and
+	// applied to every participant. The plan ceiling always wins, so stale
+	// preferences or direct API calls can't bypass it; finalization then
+	// normalizes every master to these values.
+	const targetFps = clampFps(
+		Math.min(clampFps(space.host.targetFps), entitlements.maxFps),
+	);
+	const videoResolution = clampVideoResolution(
+		Math.min(
+			clampVideoResolution(space.host.videoResolution),
+			entitlements.maxVideoHeight,
+		),
+	);
+	const audioSampleRate = clampAudioSampleRate(
+		Math.min(
+			clampAudioSampleRate(space.host.audioSampleRate),
+			entitlements.maxAudioSampleRate,
+		),
+	);
 	const noiseSuppression = space.host.noiseSuppression;
 	const autoGainControl = space.host.autoGainControl;
 	const echoCancellation = space.host.echoCancellation;
@@ -839,6 +841,7 @@ export async function getActiveSessionBySpaceId(spaceId: string) {
 			status: true,
 			createdAt: true,
 			videoResolution: true,
+			targetFps: true,
 			audioSampleRate: true,
 			noiseSuppression: true,
 			autoGainControl: true,
@@ -2285,13 +2288,19 @@ export async function startScreenRecordingSession(
 	// Pinned to the user's infra as of now (see infra-service). Throws
 	// USAGE_EXHAUSTED when that side's metered credit is spent.
 	const selfHosted = await isSelfHostActive(userId);
-	await assertCanRecord(userId, selfHosted);
+	const entitlements = await assertCanRecord(userId, selfHosted);
 
 	return await prisma.recordingSession.create({
 		data: {
 			source: "SCREEN_RECORDER",
 			userId,
 			selfHosted,
+			// The plan's ceilings, stamped so screen finalization enforces the
+			// limits the recording was made under. targetFps is a CAP here (the
+			// screen recorder keeps its capture rate up to it), not a CFR target.
+			videoResolution: entitlements.maxVideoHeight,
+			targetFps: entitlements.maxFps,
+			audioSampleRate: entitlements.maxAudioSampleRate,
 			spaceRecordingSessionId,
 			title: title?.trim() || null,
 			description: description?.trim() || null,

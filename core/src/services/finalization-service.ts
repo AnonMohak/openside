@@ -44,15 +44,18 @@ import {
 import {
 	type AllowedFps,
 	DEFAULT_FPS,
+	clampAudioSampleRate,
 	clampFps,
+	clampVideoResolution,
 } from "../lib/recording-constants.ts";
 import {
 	describeSegmentGaps,
 	findSegmentGaps,
 	waitForLateSegments,
 } from "../lib/segment-gaps.ts";
+import { type MediaProbe, probeMedia } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
-import { sessionNeedsWatermark } from "./entitlements-service.ts";
+import { sessionOutputLimits } from "./entitlements-service.ts";
 import {
 	deleteObjects,
 	getObjectBuffer,
@@ -503,6 +506,8 @@ export async function finalizeTrack(
 				status: true,
 				spaceId: true,
 				targetFps: true,
+				videoResolution: true,
+				audioSampleRate: true,
 				selfHosted: true,
 			},
 		});
@@ -556,9 +561,10 @@ export async function finalizeTrack(
 				spaceId,
 				recordingSessionId,
 				tmpDir: tmp,
+				audioSampleRate: clampAudioSampleRate(session.audioSampleRate),
 			});
 		} else {
-			const watermark = await sessionNeedsWatermark({
+			const { watermark, maxVideoHeight } = await sessionOutputLimits({
 				spaceId,
 				userId: null,
 				selfHosted: session.selfHosted,
@@ -571,6 +577,14 @@ export async function finalizeTrack(
 					tmpDir: tmp,
 					watermark,
 					targetFps: clampFps(session.targetFps),
+					// Cameras follow the session's (plan-capped) resolution; screen
+					// shares only the plan ceiling.
+					maxShortSide: rec.isScreenShare
+						? maxVideoHeight
+						: Math.min(
+								clampVideoResolution(session.videoResolution),
+								maxVideoHeight,
+							),
 				});
 			} catch (error) {
 				// Storage trouble: keep the track PROCESSING and let the job retry
@@ -714,6 +728,11 @@ interface FinalizeRecordingArgs {
 	watermark: boolean;
 	/** Constant frame rate to normalize every video master to (session-level). */
 	targetFps: AllowedFps;
+	/** Resolution cap as the short side: the session's (plan-capped) setting
+	 *  for cameras, the plan ceiling for screen shares. The client caps capture
+	 *  too, but a processed (background effect) track ignores that - this is
+	 *  the guarantee. */
+	maxShortSide: number;
 }
 
 async function upsertFailedParticipantOutput(args: {
@@ -841,6 +860,53 @@ async function downloadParts(
 	return { parts, missing };
 }
 
+interface FileMeta {
+	width: number | null;
+	height: number | null;
+	fps: number | null;
+	durationMs: number;
+	bitrate: number | null;
+	sampleRate: number | null;
+	channels: number | null;
+}
+
+/**
+ * A finished file's stats, from its probe. The fallback only fills what the
+ * container doesn't state (e.g. a remuxed WebM with no duration); video fields
+ * are null on an audio-only file.
+ */
+function describeFile(
+	probe: MediaProbe,
+	opts: {
+		hasVideo: boolean;
+		sizeBytes: number;
+		fallback: Omit<FileMeta, "bitrate">;
+	},
+): FileMeta {
+	const { fallback } = opts;
+	const durationMs = probe.durationMs ?? fallback.durationMs;
+	return {
+		width: opts.hasVideo ? (probe.size?.width ?? fallback.width) : null,
+		height: opts.hasVideo ? (probe.size?.height ?? fallback.height) : null,
+		// Int column; masters are constant-rate at a whole 24/30 anyway.
+		fps: opts.hasVideo
+			? probe.fps
+				? Math.round(probe.fps)
+				: fallback.fps
+			: null,
+		durationMs,
+		bitrate:
+			probe.bitrate ??
+			(durationMs > 0
+				? Math.round((opts.sizeBytes * 8 * 1000) / durationMs)
+				: null),
+		sampleRate: probe.hasAudio
+			? (probe.sampleRate ?? fallback.sampleRate)
+			: null,
+		channels: probe.hasAudio ? (probe.channels ?? fallback.channels) : null,
+	};
+}
+
 async function finalizeRecording({
 	rec,
 	spaceId,
@@ -848,6 +914,7 @@ async function finalizeRecording({
 	tmpDir,
 	watermark,
 	targetFps,
+	maxShortSide,
 }: FinalizeRecordingArgs): Promise<void> {
 	if (rec.segments.length === 0) {
 		// The client can mark a recording "complete" with 0 segments if its very
@@ -925,6 +992,7 @@ async function finalizeRecording({
 			crf: withWatermark ? WATERMARKED_MASTER_CRF : MASTER_CRF,
 			extraFilters: withWatermark ? [WATERMARK_FILTER] : [],
 			sizeHint,
+			maxShortSide,
 		});
 
 	let master: ComposedMaster | null = null;
@@ -1011,6 +1079,21 @@ async function finalizeRecording({
 	await putFileObject(key, masterPath, masterContentType(outExt));
 	const masterMime = masterContentType(outExt);
 	const fileStat = await stat(masterPath);
+	// Everything stored about the file is read back from the file itself - not
+	// the session's requested settings or the browser's start-of-capture
+	// snapshot, which can both differ from what was actually encoded.
+	const fileMeta = describeFile(await probeMedia(masterPath), {
+		hasVideo,
+		sizeBytes: fileStat.size,
+		fallback: {
+			width: geometry?.width ?? rec.width,
+			height: geometry?.height ?? rec.height,
+			fps: master ? targetFps : rec.fps,
+			durationMs,
+			sampleRate: rec.sampleRate,
+			channels: rec.channels,
+		},
+	});
 
 	// 3b. Thumbnail (video tracks only). Always replace any early poster with a
 	// high-quality image from the completed master. If extraction fails, retain
@@ -1033,7 +1116,8 @@ async function finalizeRecording({
 	const alignedGapMs = Math.max(0, (rec.startOffsetMs ?? 0) + timelineOriginMs);
 	let alignedKeyWritten: string | null = null;
 	let alignedFailure: string | null = null;
-	let alignedStat: { size: number } | null = null;
+	let alignedMeta: FileMeta | null = null;
+	let alignedSize = 0;
 	if (hasVideo && alignedGapMs >= ALIGNED_MIN_OFFSET_MS) {
 		const alignedPath = path.join(tmpDir, `${rec.id}-aligned.mp4`);
 		try {
@@ -1071,7 +1155,15 @@ async function finalizeRecording({
 				alignedPath,
 				masterContentType("mp4"),
 			);
-			alignedStat = await stat(alignedPath);
+			alignedSize = (await stat(alignedPath)).size;
+			alignedMeta = describeFile(await probeMedia(alignedPath), {
+				hasVideo,
+				sizeBytes: alignedSize,
+				fallback: {
+					...fileMeta,
+					durationMs: fileMeta.durationMs + alignedGapMs,
+				},
+			});
 		} catch (error) {
 			console.error(`[Finalize] aligned output failed for ${rec.id}:`, error);
 			alignedFailure = errorMessage(error).slice(0, 2000);
@@ -1103,15 +1195,17 @@ async function finalizeRecording({
 			mergedFileKey: key,
 			thumbnailKey: thumbKey,
 			fileSize: BigInt(fileStat.size),
-			durationMs,
+			durationMs: fileMeta.durationMs,
 			mimeType: masterMime,
 			// What the master ACTUALLY contains (a camera track recorded with the
 			// camera off the whole time is audio-only).
 			hasVideo,
 			hasAudio,
-			// The master's REAL geometry (the client's start-of-capture snapshot
-			// is stale once a shared surface resizes).
-			...(geometry ? { width: geometry.width, height: geometry.height } : {}),
+			// The master's REAL geometry and rate (the client's start-of-capture
+			// snapshot is stale once a shared surface resizes or a cap applies).
+			width: fileMeta.width,
+			height: fileMeta.height,
+			fps: fileMeta.fps,
 			processingError,
 		},
 	});
@@ -1123,18 +1217,18 @@ async function finalizeRecording({
 		mode: hasVideo ? ("MIXED" as const) : ("AUDIO_ONLY" as const),
 		targetParticipantId: rec.participantId,
 		sourceRecordingId: rec.id,
-		width: geometry ? geometry.width : rec.width,
-		height: geometry ? geometry.height : rec.height,
-		fps: master && hasVideo ? targetFps : rec.fps,
-		bitrate: rec.bitrate,
-		sampleRate: rec.sampleRate,
-		channels: rec.channels,
+		width: fileMeta.width,
+		height: fileMeta.height,
+		fps: fileMeta.fps,
+		bitrate: fileMeta.bitrate,
+		sampleRate: fileMeta.sampleRate,
+		channels: fileMeta.channels,
 		hasVideo,
 		hasAudio,
 		masterKey: key,
 		thumbnailKey: thumbKey,
 		mimeType: masterMime,
-		durationMs,
+		durationMs: fileMeta.durationMs,
 		fileSize: BigInt(fileStat.size),
 		status: "READY" as const,
 		variant: "RAW" as const,
@@ -1156,24 +1250,25 @@ async function finalizeRecording({
 	}
 
 	if (alignedKeyWritten || alignedFailure) {
-		const alignedOutputData = alignedKeyWritten
-			? {
-					...outputData,
-					masterKey: alignedKeyWritten,
-					mimeType: masterContentType("mp4"),
-					durationMs: durationMs + alignedGapMs,
-					fileSize: BigInt(alignedStat?.size ?? 0),
-					variant: "ALIGNED" as const,
-				}
-			: {
-					...outputData,
-					masterKey: null,
-					durationMs: null,
-					fileSize: null,
-					status: "FAILED" as const,
-					variant: "ALIGNED" as const,
-					errorMessage: alignedFailure,
-				};
+		const alignedOutputData =
+			alignedKeyWritten && alignedMeta
+				? {
+						...outputData,
+						...alignedMeta,
+						masterKey: alignedKeyWritten,
+						mimeType: masterContentType("mp4"),
+						fileSize: BigInt(alignedSize),
+						variant: "ALIGNED" as const,
+					}
+				: {
+						...outputData,
+						masterKey: null,
+						durationMs: null,
+						fileSize: null,
+						status: "FAILED" as const,
+						variant: "ALIGNED" as const,
+						errorMessage: alignedFailure,
+					};
 
 		const existingAlignedOutput = await prisma.finalOutput.findFirst({
 			where: { sourceRecordingId: rec.id, variant: "ALIGNED" },
@@ -1233,6 +1328,9 @@ interface FinalizePcmArgs {
 	spaceId: string;
 	recordingSessionId: string;
 	tmpDir: string;
+	/** The session's (plan-capped) sample rate; a faster capture is resampled
+	 *  down to it. */
+	audioSampleRate: number;
 }
 
 /**
@@ -1472,6 +1570,7 @@ async function finalizePcmRecording({
 	spaceId,
 	recordingSessionId,
 	tmpDir,
+	audioSampleRate,
 }: FinalizePcmArgs): Promise<void> {
 	try {
 		if (rec.segments.length === 0) {
@@ -1531,6 +1630,7 @@ async function finalizePcmRecording({
 			tmpDir,
 			originMs: videoOrigin,
 			maxLeadPadMs: MAX_PCM_LEAD_PAD_MS,
+			maxSampleRate: audioSampleRate,
 			convert: (buffer, from, to) => convertPcm(buffer, from, to, tmpDir),
 		});
 		const { leadPadMs } = format;

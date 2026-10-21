@@ -1,5 +1,5 @@
 import { TrackSource } from "livekit-server-sdk";
-import { prisma } from "../db/index.ts";
+import { type Prisma, prisma } from "../db/index.ts";
 import { getEntitlements } from "./entitlements-service.ts";
 import {
 	invalidateSpaceInfraCache,
@@ -78,6 +78,27 @@ async function findExistingParticipant(
 	return null;
 }
 
+/**
+ * Run `activate` only if the space has a free participant slot, counting and
+ * taking it under one per-space lock - two people joining at the same moment
+ * would otherwise both see a free slot and overfill the plan's cap. Returns
+ * null when the space is full.
+ */
+export function withFreeSlot<T>(
+	spaceId: string,
+	maxParticipants: number,
+	activate: (db: Prisma.TransactionClient) => Promise<T>,
+): Promise<T | null> {
+	return prisma.$transaction(async (tx) => {
+		await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${spaceId}))`;
+		const activeCount = await tx.spaceParticipant.count({
+			where: { spaceId, isActive: true },
+		});
+		if (activeCount >= maxParticipants) return null;
+		return activate(tx);
+	});
+}
+
 export async function joinSpace(data: JoinSpaceData) {
 	const { spaceId, participantSessionId, displayName, userId, isGuest } = data;
 
@@ -141,21 +162,19 @@ export async function joinSpace(data: JoinSpaceData) {
 	// (reload/second tab) already holds their slot and must not be locked out.
 	const wouldTakeNewSlot =
 		!existingParticipant || !existingParticipant.isActive;
-	if (wouldTakeNewSlot) {
-		// Capped by the infra the room actually runs on, not the host's switch.
-		const { maxParticipants } = await getEntitlements(
-			space.hostId,
-			space.selfHosted,
-		);
-		if (maxParticipants !== null) {
-			const activeCount = await prisma.spaceParticipant.count({
-				where: { spaceId, isActive: true },
-			});
-			if (activeCount >= maxParticipants) {
-				throw new Error("SPACE_FULL");
-			}
-		}
-	}
+	// Capped by the infra the room actually runs on, not the host's switch.
+	const maxParticipants = wouldTakeNewSlot
+		? (await getEntitlements(space.hostId, space.selfHosted)).maxParticipants
+		: null;
+	const takeSlot = <T>(
+		activate: (db: Prisma.TransactionClient) => Promise<T>,
+	): Promise<T> =>
+		maxParticipants === null
+			? activate(prisma)
+			: withFreeSlot(spaceId, maxParticipants, activate).then((result) => {
+					if (result === null) throw new Error("SPACE_FULL");
+					return result;
+				});
 
 	const livekitRoomName = space.livekitRoomName || getLiveKitRoomName(spaceId);
 	const legacyGuestIdentity = `guest:${spaceId}:${participantSessionId}`;
@@ -172,28 +191,30 @@ export async function joinSpace(data: JoinSpaceData) {
 				});
 
 	if (existingParticipant) {
-		const updatedParticipant = await prisma.spaceParticipant.update({
-			where: { id: existingParticipant.id },
-			data: {
-				isActive: true,
-				leftAt: null,
-				// Don't overwrite original joinedAt - preserve when user first joined
-				participantSessionId,
-				livekitIdentity,
-				displayName,
-				lastConnectedAt: new Date(),
-				connectionState: "connected",
-			},
-			include: {
-				user: {
-					select: {
-						id: true,
-						name: true,
-						avatar: true,
+		const updatedParticipant = await takeSlot((db) =>
+			db.spaceParticipant.update({
+				where: { id: existingParticipant.id },
+				data: {
+					isActive: true,
+					leftAt: null,
+					// Don't overwrite original joinedAt - preserve when user first joined
+					participantSessionId,
+					livekitIdentity,
+					displayName,
+					lastConnectedAt: new Date(),
+					connectionState: "connected",
+				},
+				include: {
+					user: {
+						select: {
+							id: true,
+							name: true,
+							avatar: true,
+						},
 					},
 				},
-			},
-		});
+			}),
+		);
 
 		const livekit = await generateLiveKitToken({
 			space: { ...space, livekitRoomName },
@@ -209,29 +230,31 @@ export async function joinSpace(data: JoinSpaceData) {
 	}
 
 	// Create new participant
-	const participant = await prisma.spaceParticipant.create({
-		data: {
-			spaceId,
-			participantSessionId,
-			livekitIdentity,
-			displayName,
-			userId: userId || null,
-			isGuest,
-			isActive: true,
-			role: "GUEST",
-			lastConnectedAt: new Date(),
-			connectionState: "connected",
-		},
-		include: {
-			user: {
-				select: {
-					id: true,
-					name: true,
-					avatar: true,
+	const participant = await takeSlot((db) =>
+		db.spaceParticipant.create({
+			data: {
+				spaceId,
+				participantSessionId,
+				livekitIdentity,
+				displayName,
+				userId: userId || null,
+				isGuest,
+				isActive: true,
+				role: "GUEST",
+				lastConnectedAt: new Date(),
+				connectionState: "connected",
+			},
+			include: {
+				user: {
+					select: {
+						id: true,
+						name: true,
+						avatar: true,
+					},
 				},
 			},
-		},
-	});
+		}),
+	);
 
 	const livekit = await generateLiveKitToken({
 		space: { ...space, livekitRoomName },

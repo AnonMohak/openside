@@ -32,6 +32,8 @@ interface RecordingSessionData {
   /** Synced lead-in duration in milliseconds before clients start recording. */
   countdownMs?: number;
   videoResolution: number;
+  /** Session frame rate - cameras are capped to it while recording. */
+  targetFps?: number;
   audioSampleRate: number;
   noiseSuppression: boolean;
   autoGainControl: boolean;

@@ -603,6 +603,8 @@ export async function composePcmTimeline(params: {
 		from: RawAudioFormat,
 		to: RawAudioFormat,
 	) => Promise<Buffer>;
+	/** Resample down to this when the capture ran faster (the plan's cap). */
+	maxSampleRate?: number;
 	toleranceMs?: number;
 }): Promise<
 	RawAudioFormat & {
@@ -614,7 +616,13 @@ export async function composePcmTimeline(params: {
 > {
 	const first = params.segments[0];
 	if (!first) throw new Error("No PCM segments");
-	const format = first.format;
+	const format = {
+		...first.format,
+		sampleRate: Math.min(
+			first.format.sampleRate,
+			params.maxSampleRate ?? Number.POSITIVE_INFINITY,
+		),
+	};
 	const frameBytes = bytesPerFrame(format);
 	const sourcePath = `${params.outPath}.src`;
 

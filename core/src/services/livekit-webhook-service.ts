@@ -1,11 +1,56 @@
 import { prisma } from "../db/index.ts";
+import { probeMedia } from "../lib/video-geometry.ts";
 import { getEgressStatus } from "./egress-service.ts";
+import { getEntitlements } from "./entitlements-service.ts";
 import {
 	listLiveKitParticipantIdentities,
 	liveKitRoomExists,
+	removeLiveKitParticipant,
 } from "./livekit-service.ts";
-import { ensureRecordingController } from "./participant-service.ts";
+import {
+	ensureRecordingController,
+	withFreeSlot,
+} from "./participant-service.ts";
 import { stopActiveSpaceRecordingSessions } from "./recording-service.ts";
+import { objectSize, presignGet } from "./storage-service.ts";
+
+/**
+ * A cloud recording's row is created when its egress STARTS, before the file
+ * exists - so once it's written, read the real stats back from the file.
+ * Best-effort: a probe failure leaves the row READY without them.
+ */
+async function fillCloudFileStats(outputId: string): Promise<void> {
+	const output = await prisma.finalOutput.findUnique({
+		where: { id: outputId },
+		select: { masterKey: true },
+	});
+	if (!output?.masterKey) return;
+	const [probe, size] = await Promise.all([
+		presignGet(output.masterKey).then(probeMedia),
+		objectSize(output.masterKey),
+	]);
+	if (!probe.hasVideo && !probe.hasAudio) return;
+	await prisma.finalOutput.update({
+		where: { id: outputId },
+		data: {
+			hasVideo: probe.hasVideo,
+			hasAudio: probe.hasAudio,
+			width: probe.size?.width ?? null,
+			height: probe.size?.height ?? null,
+			fps: probe.fps ? Math.round(probe.fps) : null,
+			durationMs: probe.durationMs,
+			bitrate: probe.bitrate,
+			sampleRate: probe.sampleRate,
+			channels: probe.channels,
+			...(size !== null ? { fileSize: BigInt(size) } : {}),
+		},
+	});
+}
+
+const fillCloudFileStatsInBackground = (outputId: string) =>
+	void fillCloudFileStats(outputId).catch((error) =>
+		console.error(`[Egress] Failed to read stats for ${outputId}:`, error),
+	);
 
 /**
  * A participant egress finished. Mark the matching CLOUD FinalOutput READY (or
@@ -25,12 +70,12 @@ export async function handleEgressEnded(
 
 	if (!output || output.status === "READY") return;
 
+	const ready = !status || status === "EGRESS_COMPLETE";
 	await prisma.finalOutput.update({
 		where: { id: output.id },
-		data: {
-			status: status && status !== "EGRESS_COMPLETE" ? "FAILED" : "READY",
-		},
+		data: { status: ready ? "READY" : "FAILED" },
 	});
+	if (ready) fillCloudFileStatsInBackground(output.id);
 }
 
 /**
@@ -60,6 +105,7 @@ export async function reconcilePendingEgress() {
 				where: { id: output.id },
 				data: { status: "READY" },
 			});
+			fillCloudFileStatsInBackground(output.id);
 		} else if (status === "EGRESS_FAILED" || status === "NOT_FOUND") {
 			await prisma.finalOutput.update({
 				where: { id: output.id },
@@ -107,14 +153,61 @@ export async function handleParticipantLeft(identity: string | undefined) {
 export async function handleParticipantJoined(identity: string | undefined) {
 	if (!identity) return;
 
+	const presence = {
+		isActive: true,
+		leftAt: null,
+		lastConnectedAt: new Date(),
+		connectionState: "connected",
+	};
+	const participant = await prisma.spaceParticipant.findFirst({
+		where: { livekitIdentity: identity },
+		select: {
+			id: true,
+			spaceId: true,
+			isActive: true,
+			space: {
+				select: { hostId: true, selfHosted: true, livekitRoomName: true },
+			},
+		},
+	});
+	if (!participant) return;
+
+	// Back in the room WITHOUT the join API (an old token is valid for hours):
+	// hold them to the host plan's participant cap like any fresh join, or the
+	// cap is only as strong as the client.
+	if (!participant.isActive) {
+		const { maxParticipants } = await getEntitlements(
+			participant.space.hostId,
+			participant.space.selfHosted,
+		);
+		if (maxParticipants !== null) {
+			const admitted = await withFreeSlot(
+				participant.spaceId,
+				maxParticipants,
+				(db) =>
+					db.spaceParticipant.update({
+						where: { id: participant.id },
+						data: presence,
+					}),
+			);
+			if (admitted === null) {
+				console.warn(
+					`[LiveKit] ${identity} rejoined a full space ${participant.spaceId} - removing`,
+				);
+				await removeLiveKitParticipant({
+					roomName: participant.space.livekitRoomName,
+					identity,
+				}).catch((error) =>
+					console.error(`[LiveKit] failed to remove ${identity}:`, error),
+				);
+			}
+			return;
+		}
+	}
+
 	await prisma.spaceParticipant.updateMany({
 		where: { livekitIdentity: identity },
-		data: {
-			isActive: true,
-			leftAt: null,
-			lastConnectedAt: new Date(),
-			connectionState: "connected",
-		},
+		data: presence,
 	});
 }
 

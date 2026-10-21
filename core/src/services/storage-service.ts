@@ -147,6 +147,19 @@ export async function objectExists(key: string): Promise<boolean> {
 	}
 }
 
+/** An object's size in bytes, or null if it can't be read. */
+export async function objectSize(key: string): Promise<number | null> {
+	try {
+		const r2 = await resolveR2ForRead(key);
+		const res = await r2.client.send(
+			new HeadObjectCommand({ Bucket: r2.bucket, Key: key }),
+		);
+		return res.ContentLength ?? null;
+	} catch {
+		return null;
+	}
+}
+
 /** Download an object into a Buffer (used by finalization). */
 export async function getObjectBuffer(key: string): Promise<Buffer> {
 	const r2 = await resolveR2ForRead(key);

@@ -6,7 +6,8 @@
  *
  * Plans:
  *  - DEMO      free. 15 min lifetime recording credit, watermark, no cloud
- *              backup, 1080p, files auto-delete after 48h.
+ *              backup, 720p / 24fps / 44.1kHz, 2 participants, files
+ *              auto-delete after 48h.
  *  - SELF_HOST free. User's own LiveKit + R2 keys (Settings). No limits, no
  *              watermark, never metered. Derived: DEMO/PRO user with an
  *              enabled, validated SelfHostConfig.
@@ -16,6 +17,7 @@
  */
 
 import { prisma } from "../db/index.ts";
+import { DEMO_FPS } from "../lib/recording-constants.ts";
 
 export type EffectivePlan = "demo" | "pro" | "selfhost";
 
@@ -31,8 +33,12 @@ export interface Entitlements {
 	watermark: boolean;
 	/** Whether the per-session cloud-backup opt-in toggle is available. */
 	cloudBackupAllowed: boolean;
-	/** Max capture resolution (height) the client should record at. */
+	/** Max video resolution, as its short side (720 = 720p). Enforced at
+	 *  capture AND when masters are encoded. */
 	maxVideoHeight: number;
+	/** Max frame rate: Spaces clamp to 24/30 below this, the screen recorder
+	 *  captures up to it. */
+	maxFps: number;
 	maxAudioSampleRate: number;
 	multitrack: boolean;
 	/** Hours before recordings are auto-deleted (null = keep forever). */
@@ -98,6 +104,7 @@ function buildEntitlements(
 			watermark: false,
 			cloudBackupAllowed: true, // their keys, their bill
 			maxVideoHeight: 2160,
+			maxFps: 60,
 			maxAudioSampleRate: 48000,
 			multitrack: true,
 			retentionHours: null,
@@ -114,6 +121,7 @@ function buildEntitlements(
 			watermark: false,
 			cloudBackupAllowed: true, // OFF by default; per-session opt-in
 			maxVideoHeight: 2160,
+			maxFps: 60,
 			maxAudioSampleRate: 48000,
 			multitrack: true,
 			retentionHours: PRO_RETENTION_HOURS,
@@ -128,8 +136,9 @@ function buildEntitlements(
 		resetsAt: null,
 		watermark: true,
 		cloudBackupAllowed: false,
-		maxVideoHeight: 1080,
-		maxAudioSampleRate: 48000,
+		maxVideoHeight: 720,
+		maxFps: DEMO_FPS,
+		maxAudioSampleRate: 44100,
 		multitrack: false,
 		retentionHours: DEMO_RETENTION_HOURS,
 		maxParticipants: DEMO_MAX_PARTICIPANTS,
@@ -175,17 +184,31 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
 	return !!user && isProActive(user);
 }
 
+/** What finalization must enforce on a session's outputs. */
+export interface SessionOutputLimits {
+	watermark: boolean;
+	/** Plan resolution ceiling (short side) - also binds screen shares, which
+	 *  the host's camera preference doesn't. */
+	maxVideoHeight: number;
+}
+
+/** The strictest plan's limits - used when the owner can't be resolved. */
+const FAIL_CLOSED_LIMITS: SessionOutputLimits = {
+	watermark: true,
+	maxVideoHeight: 720,
+};
+
 /**
- * Whether a recording session's outputs must carry the DEMO watermark -
- * decided by the OWNER's plan (space host, or the session's user for screen
- * recordings). Fails closed on lookup errors: better an unexpected watermark
- * than a free unwatermarked export.
+ * The output limits of a recording session - decided by the OWNER's plan
+ * (space host, or the session's user for screen recordings) on the infra the
+ * session ran on. Fails closed on lookup errors: better an unexpected
+ * watermark or a smaller file than a free export beyond the plan.
  */
-export async function sessionNeedsWatermark(owner: {
+export async function sessionOutputLimits(owner: {
 	spaceId: string | null;
 	userId: string | null;
 	selfHosted?: boolean | null;
-}): Promise<boolean> {
+}): Promise<SessionOutputLimits> {
 	try {
 		let ownerUserId = owner.userId;
 		if (owner.spaceId) {
@@ -196,15 +219,27 @@ export async function sessionNeedsWatermark(owner: {
 			ownerUserId = space?.hostId ?? null;
 		}
 
-		if (!ownerUserId) return true;
+		if (!ownerUserId) return FAIL_CLOSED_LIMITS;
 
 		const entitlements = await getEntitlements(ownerUserId, owner.selfHosted);
-		return entitlements.watermark;
+		return {
+			watermark: entitlements.watermark,
+			maxVideoHeight: entitlements.maxVideoHeight,
+		};
 	} catch (error) {
 		console.error(
-			"[Entitlements] watermark lookup failed, defaulting on:",
+			"[Entitlements] output-limit lookup failed, using the strictest plan:",
 			error,
 		);
-		return true;
+		return FAIL_CLOSED_LIMITS;
 	}
+}
+
+/** Whether a recording session's outputs must carry the DEMO watermark. */
+export async function sessionNeedsWatermark(owner: {
+	spaceId: string | null;
+	userId: string | null;
+	selfHosted?: boolean | null;
+}): Promise<boolean> {
+	return (await sessionOutputLimits(owner)).watermark;
 }

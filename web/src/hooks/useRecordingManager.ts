@@ -70,6 +70,7 @@ interface RecordingStartedData {
   /** Lead-in duration broadcast by the server so all clients count down together. */
   countdownMs?: number;
   videoResolution: number;
+  targetFps?: number;
   audioSampleRate: number;
   noiseSuppression: boolean;
   autoGainControl: boolean;
@@ -213,6 +214,7 @@ function startDataFromSession(session: RecordingSession): RecordingStartedData {
     startedAt: new Date(session.startedAt).getTime() + COUNTDOWN_MS,
     countdownMs: COUNTDOWN_MS,
     videoResolution: session.videoResolution ?? 2160,
+    targetFps: session.targetFps,
     audioSampleRate: session.audioSampleRate ?? 48000,
     noiseSuppression: session.noiseSuppression ?? false,
     autoGainControl: session.autoGainControl ?? false,
@@ -925,6 +927,7 @@ export default function useRecordingManager(
         if (!audioOnly) {
           localRef.current.startRecording(timeOriginRef.current, {
             videoResolution: data.videoResolution,
+            targetFps: data.targetFps,
           });
         }
 

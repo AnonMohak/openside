@@ -135,7 +135,11 @@ export async function assertCanRecord(
 	const entitlements = await getEntitlements(ownerUserId, selfHosted);
 	if (!entitlements.metered) return entitlements;
 
-	const usage = await getUsage(ownerUserId);
+	// Judged by the side this recording runs on - getUsage() follows the
+	// owner's CURRENT switch, which would let a platform session start
+	// unmetered while self-host happens to be on.
+	const period = await getOrCreateCurrentPeriod(ownerUserId, entitlements);
+	const usage = toSnapshot(entitlements, period.secondsUsed);
 	if (usage.exhausted) {
 		throw new Error("USAGE_EXHAUSTED");
 	}

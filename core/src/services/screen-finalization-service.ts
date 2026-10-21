@@ -31,7 +31,9 @@ import {
 	waitForLateSegments,
 } from "../lib/segment-gaps.ts";
 import {
+	capShortSide,
 	evenDim,
+	probeMedia,
 	resolveTargetSize,
 	sizeFilter,
 } from "../lib/video-geometry.ts";
@@ -189,6 +191,8 @@ async function stitchMaster(
 	sessionId: string,
 	tmpDir: string,
 	watermark: boolean,
+	/** The plan ceilings stamped on the session at start. */
+	limits: { maxShortSide: number; maxFps: number; sampleRate: number },
 ): Promise<MasterInfo | null> {
 	if (rec.segments.length === 0) {
 		// The client can mark a recording "complete" with 0 segments if its very
@@ -248,8 +252,13 @@ async function stitchMaster(
 	// failed for every H.264 recording). DEMO watermarks burn into the SAME
 	// pass. Audio is re-encoded to AAC because Opus sources can't be copied
 	// into MP4. Audio-only masters keep the cheap WebM remux.
-	const fps = rec.fps && rec.fps >= 10 ? Math.round(rec.fps) : 30;
-	const target = rec.hasVideo ? await resolveTargetSize(rec, rawPath) : null;
+	const fps = Math.min(
+		rec.fps && rec.fps >= 10 ? Math.round(rec.fps) : 30,
+		limits.maxFps,
+	);
+	const target = rec.hasVideo
+		? capShortSide(await resolveTargetSize(rec, rawPath), limits.maxShortSide)
+		: null;
 	let outExt: MasterExt = rec.hasVideo ? "mp4" : "webm";
 	let outPath = path.join(tmpDir, `${rec.id}-master.${outExt}`);
 	let masterPath = outPath;
@@ -292,6 +301,8 @@ async function stitchMaster(
 				"aac",
 				"-b:a",
 				"192k",
+				"-ar",
+				String(limits.sampleRate),
 				outPath,
 			]);
 			encoded = true;
@@ -335,8 +346,11 @@ async function stitchMaster(
 	const contentType = masterContentType(outExt);
 	await putFileObject(key, masterPath, contentType);
 
-	const durationMs = ordered.reduce((sum, s) => sum + (s.durationMs || 0), 0);
 	const fileStat = await stat(masterPath);
+	// The file's own duration - chunk timings are only the browser's estimate.
+	const durationMs =
+		(await probeMedia(masterPath)).durationMs ??
+		ordered.reduce((sum, s) => sum + (s.durationMs || 0), 0);
 
 	await prisma.participantRecording.update({
 		where: { id: rec.id },
@@ -346,10 +360,10 @@ async function stitchMaster(
 			fileSize: BigInt(fileStat.size),
 			durationMs,
 			mimeType: contentType,
-			// The master's REAL geometry (the client's start-of-capture snapshot
-			// is stale once the shared surface resizes).
+			// The master's REAL geometry and rate (the client's start-of-capture
+			// snapshot is stale once the shared surface resizes).
 			...(encoded && target
-				? { width: target.width, height: target.height }
+				? { width: target.width, height: target.height, fps }
 				: {}),
 			processingError: gapNote,
 		},
@@ -361,7 +375,7 @@ async function stitchMaster(
 		key,
 		width: encoded && target ? target.width : rec.width,
 		height: encoded && target ? target.height : rec.height,
-		fps: rec.fps,
+		fps: encoded ? fps : rec.fps,
 		durationMs,
 		// Only a re-encoded master is guaranteed single-geometry; the remux /
 		// raw-concat fallbacks can still carry a resolution switch, so the
@@ -474,7 +488,8 @@ async function composeBoth(
 	const key = screenKey(userId, sessionId, "both", "mp4");
 	await putFileObject(key, outPath, masterContentType("mp4"));
 	console.log(`[ScreenFinalize] composed both for ${sessionId}: ${key}`);
-	return { key, durationMs: screen.durationMs };
+	const { durationMs } = await probeMedia(outPath);
+	return { key, durationMs: durationMs ?? screen.durationMs };
 }
 
 /**
@@ -578,6 +593,11 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 					sessionId,
 					tmp,
 					watermark,
+					{
+						maxShortSide: session.videoResolution,
+						maxFps: session.targetFps,
+						sampleRate: session.audioSampleRate,
+					},
 				);
 				if (master) {
 					masters[master.role] = master;

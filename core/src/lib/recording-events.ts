@@ -21,6 +21,8 @@ export interface RecordingStartedPayload {
 	startedAt: number;
 	countdownMs: number;
 	videoResolution: number;
+	/** Session frame rate - every camera is capped to it at capture. */
+	targetFps: number;
 	audioSampleRate: number;
 	noiseSuppression: boolean;
 	autoGainControl: boolean;
@@ -49,6 +51,7 @@ export function buildRecordingStartedPayload(session: {
 	spaceRecordingSessionId: string;
 	startedAt: Date;
 	videoResolution: number;
+	targetFps: number;
 	audioSampleRate: number;
 	noiseSuppression: boolean;
 	autoGainControl: boolean;
@@ -61,6 +64,7 @@ export function buildRecordingStartedPayload(session: {
 		startedAt: session.startedAt.getTime() + RECORDING_COUNTDOWN_MS,
 		countdownMs: RECORDING_COUNTDOWN_MS,
 		videoResolution: session.videoResolution,
+		targetFps: session.targetFps,
 		audioSampleRate: session.audioSampleRate,
 		noiseSuppression: session.noiseSuppression,
 		autoGainControl: session.autoGainControl,

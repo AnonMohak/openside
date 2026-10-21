@@ -52,7 +52,26 @@ export interface MediaProbe {
 	/** Container duration; null when the header has none (raw MediaRecorder
 	 *  WebM never does). */
 	durationMs: number | null;
+	/** First video stream's frame rate (its "fps", else its "tbr"). */
+	fps: number | null;
+	/** Container's overall bitrate, in bits per second. */
+	bitrate: number | null;
+	/** First audio stream's sample rate (Hz) and channel count. */
+	sampleRate: number | null;
+	channels: number | null;
 }
+
+const CHANNEL_LAYOUTS: Record<string, number> = {
+	mono: 1,
+	stereo: 2,
+	"2.1": 3,
+	quad: 4,
+	"4.0": 4,
+	"5.0": 5,
+	"5.1": 6,
+	"6.1": 7,
+	"7.1": 8,
+};
 
 /**
  * Which streams a file ACTUALLY has. The client's metadata can't be trusted
@@ -77,11 +96,31 @@ export async function probeMedia(file: string): Promise<MediaProbe> {
 					1000,
 			)
 		: null;
+	const fpsMatch = videoLine
+		? (/\b(\d+(?:\.\d+)?) fps\b/.exec(videoLine) ??
+			/\b(\d+(?:\.\d+)?) tbr\b/.exec(videoLine))
+		: null;
+	const fps = fpsMatch ? Number(fpsMatch[1]) : null;
+	const bitrateMatch = /Duration:[^\n]*?bitrate: (\d+) kb\/s/.exec(out);
+	const bitrate = bitrateMatch ? Number(bitrateMatch[1]) * 1000 : null;
+	const audioLine = /Stream #[^\n]*?: Audio:[^\n]*/.exec(out)?.[0] ?? null;
+	const rateMatch = audioLine ? /\b(\d+) Hz\b/.exec(audioLine) : null;
+	const layout = audioLine
+		? /\bHz, ([^,]+),/.exec(audioLine)?.[1]?.trim()
+		: undefined;
+	const channelCount = layout
+		? (CHANNEL_LAYOUTS[layout.replace(/\(.*\)$/, "")] ??
+			Number(/^(\d+) channels/.exec(layout)?.[1]))
+		: Number.NaN;
 	return {
 		hasVideo: videoLine !== null,
 		hasAudio,
 		size: width && height ? { width, height } : null,
 		durationMs,
+		fps: fps && Number.isFinite(fps) ? fps : null,
+		bitrate,
+		sampleRate: rateMatch ? Number(rateMatch[1]) : null,
+		channels: Number.isFinite(channelCount) ? channelCount : null,
 	};
 }
 
@@ -127,6 +166,21 @@ export async function resolveTargetSize(
 	) ?? { width: 1920, height: 1080 };
 
 	return { width: evenDim(best.width), height: evenDim(best.height) };
+}
+
+/** Scale a size down (aspect kept) so its SHORT side is at most `maxShortSide`
+ *  - "720p" means the short side, so a portrait frame is capped the same way. */
+export function capShortSide(
+	size: VideoSize,
+	maxShortSide?: number,
+): VideoSize {
+	const shortSide = Math.min(size.width, size.height);
+	const scale =
+		maxShortSide && shortSide > maxShortSide ? maxShortSide / shortSide : 1;
+	return {
+		width: evenDim(Math.round(size.width * scale)),
+		height: evenDim(Math.round(size.height * scale)),
+	};
 }
 
 /** scale-to-fit + letterbox onto the pinned canvas, so a mid-stream resolution

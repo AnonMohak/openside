@@ -115,6 +115,7 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 								spaceRecordingSessionId: true,
 								startedAt: true,
 								videoResolution: true,
+								targetFps: true,
 								audioSampleRate: true,
 								noiseSuppression: true,
 								autoGainControl: true,

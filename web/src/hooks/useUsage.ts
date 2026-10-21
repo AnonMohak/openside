@@ -26,7 +26,9 @@ interface Entitlements {
   resetsAt: string | null;
   watermark: boolean;
   cloudBackupAllowed: boolean;
+  /** Max resolution as its short side (720 = 720p). */
   maxVideoHeight: number;
+  maxFps: number;
   maxAudioSampleRate: number;
   multitrack: boolean;
   retentionHours: number | null;

@@ -82,8 +82,11 @@ interface UseLocalRecordingOptions {
 }
 
 interface LocalRecordingStartOptions {
-  /** Maximum camera height for this recording session (720, 1080, or 2160). */
+  /** Maximum camera resolution for this recording session, as its short side
+   *  (720, 1080, or 2160). */
   videoResolution?: number;
+  /** The session's frame rate; the camera is capped to it. */
+  targetFps?: number;
 }
 
 interface ScreenRecordingResult {
@@ -163,28 +166,46 @@ function videoBitrateFor(width?: number, height?: number): number {
 const AUDIO_BITRATE = 128000;
 
 /**
- * Cap the camera at the session's resolution. This is the call's own track, so
- * it must keep the call's constraints: applyConstraints REPLACES the whole set,
- * and a bare `{ height }` dropped the 16:9 crop and resolution the call asked
- * for - the camera fell back to its raw frame (portrait on an upright phone
- * camera) for the rest of the call. Leaves a camera already within the cap
- * untouched.
+ * Cap the camera at the session's resolution and frame rate (the host's plan
+ * limits). This is the call's own track, so it must keep the call's
+ * constraints: applyConstraints REPLACES the whole set, and a bare `{ height }`
+ * dropped the 16:9 crop and resolution the call asked for - the camera fell
+ * back to its raw frame (portrait on an upright phone camera) for the rest of
+ * the call. The limit is on the SHORT side, so a portrait camera is capped the
+ * same way. Leaves a camera already within both caps untouched. Finalization
+ * enforces the same limits on the master, so a track that can't be retuned (a
+ * background-effect canvas) still ends up within them.
  */
-async function capCameraHeight(
+async function capCamera(
   track: MediaStreamTrack,
-  maxHeight: number,
+  maxShortSide: number | undefined,
+  maxFps: number | undefined,
 ): Promise<void> {
-  const { width, height } = track.getSettings();
-  if (!width || !height || height <= maxHeight) return;
-  const aspectRatio = width / height;
-  await track
-    .applyConstraints({
+  const { width, height, frameRate } = track.getSettings();
+  if (!width || !height) return;
+  const shortSide = Math.min(width, height);
+  const overSize = !!maxShortSide && shortSide > maxShortSide;
+  const overFps = !!maxFps && !!frameRate && frameRate > maxFps + 0.5;
+  if (!overSize && !overFps) return;
+  const scale = overSize && maxShortSide ? maxShortSide / shortSide : 1;
+  const capWidth = Math.round(width * scale);
+  const capHeight = Math.round(height * scale);
+  try {
+    await track.applyConstraints({
       ...track.getConstraints(),
-      width: { ideal: Math.round(maxHeight * aspectRatio) },
-      height: { ideal: maxHeight, max: maxHeight },
-      aspectRatio: { ideal: aspectRatio },
-    })
-    .catch(() => undefined);
+      ...(overSize
+        ? {
+            width: { ideal: capWidth, max: capWidth },
+            height: { ideal: capHeight, max: capHeight },
+            aspectRatio: { ideal: width / height },
+          }
+        : {}),
+      ...(maxFps ? { frameRate: { ideal: maxFps, max: maxFps } } : {}),
+    });
+  } catch (error) {
+    // The server still downscales the master; this only saves upload size.
+    console.warn("[LocalRecording] couldn't cap the camera:", error);
+  }
 }
 
 function trackIdsOf(tracks: MediaStreamTrack[]): string {
@@ -320,9 +341,9 @@ export default function useLocalRecording(
   const startPart = useCallback(
     async (stream: MediaStream): Promise<RecorderPart> => {
       const videoTrack = stream.getVideoTracks()[0];
-      const maxHeight = startOptionsRef.current.videoResolution;
-      if (videoTrack && maxHeight) {
-        await capCameraHeight(videoTrack, maxHeight);
+      const { videoResolution, targetFps } = startOptionsRef.current;
+      if (videoTrack && (videoResolution || targetFps)) {
+        await capCamera(videoTrack, videoResolution, targetFps);
       }
       const videoSettings = getVideoSettings(stream);
       const audioSettings = getAudioSettings(stream);
