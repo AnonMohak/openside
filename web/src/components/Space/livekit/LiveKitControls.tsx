@@ -24,9 +24,11 @@ import {
   BsFillRecordCircleFill,
 } from "react-icons/bs";
 import {
+  FiArrowUp,
+  FiCheck,
+  FiCheckSquare,
   FiChevronDown,
   FiChevronUp,
-  FiCheckSquare,
   FiExternalLink,
   FiSettings,
   FiSmile,
@@ -265,6 +267,131 @@ const savedCardDismissKey = (sessionId: string) =>
 
 const clampPercent = (value: number) =>
   Math.max(0, Math.min(100, Math.round(value)));
+
+const UPLOAD_RING_RADIUS = 7;
+const UPLOAD_RING_CIRCUMFERENCE = 2 * Math.PI * UPLOAD_RING_RADIUS;
+
+/**
+ * Live upload beside the recording timer: a ring filling with the chunk going
+ * up right now (chunks upload while recording, so it climbs to 100 for each in
+ * turn), and on hover how far this take's upload is overall.
+ */
+const LiveUploadStatus = ({
+  percent,
+  uploaded,
+  total,
+}: {
+  percent: number;
+  uploaded: number;
+  total: number;
+}) => {
+  const waiting = Math.max(0, total - uploaded);
+  const caughtUp = total > 0 && waiting === 0;
+  // More than the one chunk in flight is queued: the uplink is falling behind.
+  const behind = waiting > 1;
+  const overall = total > 0 ? clampPercent((uploaded / total) * 100) : 0;
+  const headline =
+    total === 0
+      ? "Waiting for the first chunk"
+      : caughtUp
+        ? "All chunks uploaded"
+        : behind
+          ? "Upload is catching up"
+          : "Uploading as you record";
+
+  return (
+    <span
+      tabIndex={0}
+      aria-label={`${headline}. Current chunk ${percent}%, ${uploaded} of ${total} chunks uploaded.`}
+      className="group/upload relative flex cursor-default items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/5"
+    >
+      <span
+        className={cn(
+          "relative grid size-[18px] shrink-0 place-items-center transition-colors",
+          behind
+            ? "text-amber-400"
+            : caughtUp
+              ? "text-emerald-500"
+              : "text-foreground",
+        )}
+      >
+        <svg
+          viewBox="0 0 18 18"
+          className="absolute inset-0 size-full -rotate-90"
+          aria-hidden="true"
+        >
+          <circle
+            cx="9"
+            cy="9"
+            r={UPLOAD_RING_RADIUS}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="opacity-20"
+          />
+          <circle
+            cx="9"
+            cy="9"
+            r={UPLOAD_RING_RADIUS}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeDasharray={UPLOAD_RING_CIRCUMFERENCE}
+            strokeDashoffset={UPLOAD_RING_CIRCUMFERENCE * (1 - percent / 100)}
+            className="transition-[stroke-dashoffset] duration-200 ease-out"
+          />
+        </svg>
+        {caughtUp ? (
+          <FiCheck className="size-2.5" strokeWidth={3.5} />
+        ) : (
+          <FiArrowUp className="size-2.5" strokeWidth={3.5} />
+        )}
+      </span>
+      <span className="min-w-[2.25rem] text-left text-sm font-medium tabular-nums text-foreground">
+        {percent}%
+      </span>
+
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute bottom-[calc(100%+0.75rem)] left-0 z-[70] flex w-60 translate-y-1 scale-95 flex-col rounded-xl border border-call-border/80 bg-primary-hover p-3 text-left opacity-0 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45),0_0_0_1px_rgba(0,0,0,0.06)] backdrop-blur-sm transition-[opacity,transform,visibility] duration-150 ease-out group-hover/upload:visible group-hover/upload:translate-y-0 group-hover/upload:scale-100 group-hover/upload:opacity-100 group-focus/upload:visible group-focus/upload:translate-y-0 group-focus/upload:scale-100 group-focus/upload:opacity-100"
+      >
+        <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+          <FiUploadCloud className="size-4 shrink-0 text-foreground/70" />
+          {headline}
+        </span>
+        <span className="mt-3 flex items-center justify-between text-xs text-foreground/60">
+          Current chunk
+          <span className="font-medium tabular-nums text-foreground">
+            {percent}%
+          </span>
+        </span>
+        <span className="mt-1.5 flex items-center justify-between text-xs text-foreground/60">
+          Chunks uploaded
+          <span className="font-medium tabular-nums text-foreground">
+            {uploaded} / {total}
+          </span>
+        </span>
+        <span className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-foreground/10">
+          <span
+            className={cn(
+              "block h-full rounded-full transition-[width] duration-500 ease-out",
+              caughtUp ? "bg-emerald-500" : "bg-brand",
+            )}
+            style={{ width: `${overall}%` }}
+          />
+        </span>
+        {behind && (
+          <span className="mt-2.5 text-[11px] leading-4 text-foreground/50">
+            {waiting - 1} more queued on a slow connection. They keep uploading
+            after you stop.
+          </span>
+        )}
+        <span className="absolute left-[15px] top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-[5px] rotate-45 border-b border-r border-call-border/80 bg-primary-hover" />
+      </span>
+    </span>
+  );
+};
 
 const SavedSessionCard = ({
   spaceId,
@@ -1278,8 +1405,12 @@ const LiveKitControls = ({
     // Failures are announced as toasts (see the recording-failure effect).
     if (recording.recordingState !== "recording") return null;
 
-    const { total, uploaded } = recording.takeChunks;
-    const uploadedOfTotal = `${uploaded} of ${total} chunk${total === 1 ? "" : "s"} uploaded`;
+    // The uploader reads 100 while idle; before this take's first chunk is up
+    // that would claim a finished upload that hasn't started.
+    const uploadPercent =
+      recording.takeChunks.uploaded === 0 && recording.uploadProgress === 100
+        ? 0
+        : recording.uploadProgress;
 
     return (
       <div className="flex items-center gap-1.5">
@@ -1294,25 +1425,12 @@ const LiveKitControls = ({
         >
           {formatRecordingDuration(recording.recordingDurationMs)}
         </span>
-        <span className="mx-1 h-5 w-px bg-foreground/30" />
-        {/* Byte progress of the chunk uploading right now - chunks go up while
-            recording, so it climbs to 100 for each one in turn. */}
-        <span
-          tabIndex={0}
-          className="group/upload relative flex items-center gap-1.5 text-sm font-medium tabular-nums text-foreground outline-none"
-          aria-label={`Uploading ${recording.uploadProgress}%. ${uploadedOfTotal}`}
-        >
-          <FiUploadCloud className="size-[1.125rem]" />
-          <span className="inline-block min-w-[2.5rem] text-left">
-            {recording.uploadProgress}%
-          </span>
-          <span
-            role="tooltip"
-            className="pointer-events-none invisible absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[70] -translate-x-1/2 whitespace-nowrap rounded-lg border border-border bg-popover px-3 py-2 text-xs font-normal leading-5 text-popover-foreground opacity-0 shadow-md group-hover/upload:visible group-hover/upload:opacity-100 group-focus-visible/upload:visible group-focus-visible/upload:opacity-100"
-          >
-            {uploadedOfTotal}
-          </span>
-        </span>
+        <span className="mx-0.5 h-5 w-px bg-foreground/20" />
+        <LiveUploadStatus
+          percent={uploadPercent}
+          uploaded={recording.takeChunks.uploaded}
+          total={recording.takeChunks.total}
+        />
       </div>
     );
   };
