@@ -66,6 +66,8 @@ interface ScreenRecordingContextValue {
   resumeRecording: () => void;
   /** Throw the current take away (nothing is saved). */
   discardRecording: () => Promise<void>;
+  /** Throw the current take away and start over (the screen stays shared). */
+  restartRecording: () => Promise<void>;
   /** User-provided title/description saved with the recording. */
   info: RecordingInfo;
   setInfo: (info: RecordingInfo) => void;
@@ -78,9 +80,8 @@ interface ScreenRecordingContextValue {
   setCameraShape: (shape: PipShape) => void;
 }
 
-const ScreenRecordingContext = createContext<ScreenRecordingContextValue | null>(
-  null,
-);
+const ScreenRecordingContext =
+  createContext<ScreenRecordingContextValue | null>(null);
 
 export const useScreenRecordingContext = (): ScreenRecordingContextValue => {
   const ctx = useContext(ScreenRecordingContext);
@@ -134,7 +135,8 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
 
   // Layout + camera PiP config. Mirrored into refs so the manager reads the
   // latest values when a recording starts (to persist as `composition`).
-  const [layout, setLayoutState] = useState<ScreenRecorderLayout>("screen-camera");
+  const [layout, setLayoutState] =
+    useState<ScreenRecorderLayout>("screen-camera");
   const [cameraSize, setCameraSizeState] = useState<PipSize>("normal");
   const [cameraShape, setCameraShapeState] = useState<PipShape>("square");
   const layoutRef = useRef(layout);
@@ -261,7 +263,9 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       try {
         await toggleCamera();
       } catch {
-        toast.error("Couldn't turn on the camera - check the browser's camera permission.");
+        toast.error(
+          "Couldn't turn on the camera - check the browser's camera permission.",
+        );
         return;
       }
     }
@@ -323,6 +327,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       pauseRecording: manager.pauseRecording,
       resumeRecording: manager.resumeRecording,
       discardRecording,
+      restartRecording: manager.restartRecording,
       info,
       setInfo,
       layout,

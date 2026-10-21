@@ -77,7 +77,9 @@ const LocalMediaProvider = ({ children }: { children: ReactNode }) => {
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
 
-  const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>([]);
+  const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>(
+    [],
+  );
   const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
   const [activeMicrophoneId, setActiveMicrophoneId] = useState("");
   const [activeCameraId, setActiveCameraId] = useState("");

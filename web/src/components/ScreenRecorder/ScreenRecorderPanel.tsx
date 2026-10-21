@@ -1,5 +1,6 @@
 import { backdropMotion, usePresence } from "@/hooks/usePresence";
 import RecorderCameraOverlay from "./RecorderCameraOverlay";
+import RecorderControlsBar from "./RecorderControlsBar";
 import RecorderSettingsOverlay from "./RecorderSettingsOverlay";
 import { useScreenRecordingContext } from "./ScreenRecordingProvider";
 
@@ -36,6 +37,7 @@ const ScreenRecorderPanel = ({ isClosing }: ScreenRecorderPanelProps) => {
       {settings.rendered && (
         <RecorderSettingsOverlay isClosing={settings.isClosing} />
       )}
+      <RecorderControlsBar isClosing={isClosing} />
       <RecorderCameraOverlay isClosing={isClosing} />
     </>
   );

@@ -66,6 +66,8 @@ interface UseScreenRecordingManagerReturn {
   pauseRecording: () => void;
   resumeRecording: () => void;
   discardRecording: () => Promise<void>;
+  /** Throw the current take away and start a fresh one on the same sources. */
+  restartRecording: () => Promise<void>;
 }
 
 function generateSessionId(): string {
@@ -110,7 +112,9 @@ export default function useScreenRecordingManager({
   const clientSessionIdRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const recordingIdsRef = useRef<Partial<Record<ScreenTrackType, string>>>({});
-  const metaRef = useRef<Partial<Record<ScreenTrackType, RecordingMetadata>>>({});
+  const metaRef = useRef<Partial<Record<ScreenTrackType, RecordingMetadata>>>(
+    {},
+  );
 
   // Chunks that arrived before their recording row id existed.
   const pendingChunksRef = useRef<
@@ -119,12 +123,17 @@ export default function useScreenRecordingManager({
   // Set while a take is being discarded: its last chunks are thrown away.
   const discardingRef = useRef(false);
 
-  const countdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
 
   const clearCountdown = useCallback(() => {
     if (countdownTimeoutRef.current) clearTimeout(countdownTimeoutRef.current);
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    if (countdownIntervalRef.current)
+      clearInterval(countdownIntervalRef.current);
     countdownTimeoutRef.current = null;
     countdownIntervalRef.current = null;
     setCountdownValue(null);
@@ -361,17 +370,20 @@ export default function useScreenRecordingManager({
   // Cancelled during the lead-in (before capture began): nothing was recorded,
   // so delete the session outright instead of leaving an empty STOPPED row
   // that would later surface as a FAILED recording in the list.
-  const cancelCountdown = useCallback(async () => {
-    clearCountdown();
-    if (sessionIdRef.current) {
-      await api
-        .delete(`/recording/screen/${sessionIdRef.current}`)
-        .catch(() => undefined);
-      sessionIdRef.current = null;
-      clientSessionIdRef.current = null;
-    }
-    setRecordingState("idle");
-  }, [clearCountdown]);
+  const cancelCountdown = useCallback(
+    async (nextState: ScreenRecordingState = "idle") => {
+      clearCountdown();
+      if (sessionIdRef.current) {
+        await api
+          .delete(`/recording/screen/${sessionIdRef.current}`)
+          .catch(() => undefined);
+        sessionIdRef.current = null;
+        clientSessionIdRef.current = null;
+      }
+      setRecordingState(nextState);
+    },
+    [clearCountdown],
+  );
 
   const stopRecording = useCallback(async () => {
     if (recordingState === "countdown") {
@@ -408,21 +420,21 @@ export default function useScreenRecordingManager({
 
       // Mark each recording complete with its final segment count.
       await Promise.allSettled(
-        (Object.entries(recordingIdsRef.current) as [ScreenTrackType, string][]).map(
-          ([trackType, recordingId]) => {
-            // Report the LARGEST frame size seen, not the one snapshotted at
-            // start: a shared surface resizes mid-capture (tab switch, window
-            // resize), and finalization pins the master to this geometry.
-            const size = getMaxTrackSize(trackType);
-            return api.post(
-              `/recording/screen/recording/${recordingId}/complete`,
-              {
-                expectedSegments: uploader.getUploadedCount(recordingId),
-                ...(size ? { width: size.width, height: size.height } : {}),
-              },
-            );
-          },
-        ),
+        (
+          Object.entries(recordingIdsRef.current) as [ScreenTrackType, string][]
+        ).map(([trackType, recordingId]) => {
+          // Report the LARGEST frame size seen, not the one snapshotted at
+          // start: a shared surface resizes mid-capture (tab switch, window
+          // resize), and finalization pins the master to this geometry.
+          const size = getMaxTrackSize(trackType);
+          return api.post(
+            `/recording/screen/recording/${recordingId}/complete`,
+            {
+              expectedSegments: uploader.getUploadedCount(recordingId),
+              ...(size ? { width: size.width, height: size.height } : {}),
+            },
+          );
+        }),
       );
 
       await stopSession();
@@ -461,7 +473,11 @@ export default function useScreenRecordingManager({
 
   const toggleRecording = useCallback(() => {
     // Ignore presses while a transition is mid-flight.
-    if (["starting", "countdown", "stopping", "uploading"].includes(recordingState)) {
+    if (
+      ["starting", "countdown", "stopping", "uploading"].includes(
+        recordingState,
+      )
+    ) {
       return;
     }
     if (recordingState === "recording" || recordingState === "paused") {
@@ -485,33 +501,54 @@ export default function useScreenRecordingManager({
 
   // Throw the current take away: stop capture without uploading the tail,
   // drop whatever is still queued, then delete the session (rows + storage).
-  const discardRecording = useCallback(async () => {
-    if (recordingState === "countdown") {
-      await cancelCountdown();
+  // A restart goes straight to "starting", so the recorder never flashes idle.
+  const discardTake = useCallback(
+    async (restarting: boolean) => {
+      const nextState = restarting ? "starting" : "idle";
+      if (recordingState === "countdown") {
+        await cancelCountdown(nextState);
+        return;
+      }
+      if (recordingState !== "recording" && recordingState !== "paused") return;
+
+      const sessionId = sessionIdRef.current;
+      discardingRef.current = true;
+      setRecordingState(restarting ? "starting" : "stopping");
+      try {
+        await stopLocal();
+      } catch {
+        /* ignore - the take is being thrown away */
+      }
+      pendingChunksRef.current = [];
+      if (sessionId) {
+        await uploader.discardSession(sessionId);
+        await api
+          .delete(`/recording/screen/${sessionId}`)
+          .catch(() => undefined);
+      }
+      recordingIdsRef.current = {};
+      sessionIdRef.current = null;
+      clientSessionIdRef.current = null;
+      discardingRef.current = false;
+      setError(null);
+      setRecordingState(nextState);
+    },
+    [recordingState, cancelCountdown, stopLocal, uploader],
+  );
+
+  const discardRecording = useCallback(() => discardTake(false), [discardTake]);
+
+  const restartRecording = useCallback(async () => {
+    if (
+      recordingState !== "recording" &&
+      recordingState !== "paused" &&
+      recordingState !== "countdown"
+    ) {
       return;
     }
-    if (recordingState !== "recording" && recordingState !== "paused") return;
-
-    const sessionId = sessionIdRef.current;
-    discardingRef.current = true;
-    setRecordingState("stopping");
-    try {
-      await stopLocal();
-    } catch {
-      /* ignore - the take is being thrown away */
-    }
-    pendingChunksRef.current = [];
-    if (sessionId) {
-      await uploader.discardSession(sessionId);
-      await api.delete(`/recording/screen/${sessionId}`).catch(() => undefined);
-    }
-    recordingIdsRef.current = {};
-    sessionIdRef.current = null;
-    clientSessionIdRef.current = null;
-    discardingRef.current = false;
-    setError(null);
-    setRecordingState("idle");
-  }, [recordingState, cancelCountdown, stopLocal, uploader]);
+    await discardTake(true);
+    void startRecording();
+  }, [recordingState, discardTake, startRecording]);
 
   // Clear timers on unmount.
   useEffect(() => () => clearCountdown(), [clearCountdown]);
@@ -537,5 +574,6 @@ export default function useScreenRecordingManager({
     pauseRecording,
     resumeRecording,
     discardRecording,
+    restartRecording,
   };
 }
