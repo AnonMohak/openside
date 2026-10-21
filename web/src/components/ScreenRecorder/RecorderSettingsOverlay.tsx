@@ -12,7 +12,6 @@ import {
   VideoOff,
 } from "lucide-react";
 import { BsFillRecordCircleFill } from "react-icons/bs";
-import { useNavigate } from "react-router-dom";
 import { cleanDeviceLabel, sortMediaDevices } from "@/lib/mediaDevices";
 import { cn } from "@/lib/utils";
 import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
@@ -72,7 +71,6 @@ interface RecorderSettingsOverlayProps {
 const RecorderSettingsOverlay = ({
   isClosing,
 }: RecorderSettingsOverlayProps) => {
-  const navigate = useNavigate();
   const {
     isCameraEnabled,
     isMicrophoneEnabled,
@@ -87,16 +85,8 @@ const RecorderSettingsOverlay = ({
     selectMicrophone,
     selectCamera,
   } = useLocalMedia();
-  const {
-    closeRecorder,
-    recordingState,
-    completedSessionId,
-    startRecording,
-    layout,
-    setLayout,
-    screenSurface,
-    setScreenSurface,
-  } = useScreenRecordingContext();
+  const { startRecording, layout, setLayout, screenSurface, setScreenSurface } =
+    useScreenRecordingContext();
   const microphoneDevices = sortMediaDevices(rawMicrophoneDevices);
   const cameraDevices = sortMediaDevices(rawCameraDevices);
   const source: RecordSource = layout === "camera" ? "camera" : screenSurface;
@@ -130,7 +120,6 @@ const RecorderSettingsOverlay = ({
   ];
   const cameraId = resolveDeviceId(cameraDevices, activeCameraId);
   const microphoneId = resolveDeviceId(microphoneDevices, activeMicrophoneId);
-  const isComplete = recordingState === "complete" && !!completedSessionId;
 
   // A layout owns its sources: the camera turns on when the layout shows it
   // and off when it doesn't, and "camera only" drops the screen share - so we
@@ -163,12 +152,6 @@ const RecorderSettingsOverlay = ({
     }
     void selectCamera(deviceId).catch(() => undefined);
     if (layout === "screen") handleLayoutChange("screen-camera");
-  };
-
-  const handleViewRecording = () => {
-    if (!completedSessionId) return;
-    navigate(`/dashboard/project/screen/${completedSessionId}`);
-    closeRecorder();
   };
 
   const handleMicrophoneChange = (deviceId: string) => {
@@ -263,16 +246,6 @@ const RecorderSettingsOverlay = ({
           onChange={handleMicrophoneChange}
           className="w-52"
         />
-
-        {isComplete && (
-          <button
-            type="button"
-            onClick={handleViewRecording}
-            className="h-11 cursor-pointer rounded-xl bg-primary px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
-          >
-            View last
-          </button>
-        )}
       </div>
     </div>
   );
