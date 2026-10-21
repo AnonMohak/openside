@@ -814,43 +814,49 @@ const SpaceOutputs = ({
   );
 };
 
+// Boxed exactly like ProjectCard / ScreenRecordingCard: thumbnail, title, meta.
 const SkeletonCard = () => (
   <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-primary p-3">
-    <div className="aspect-video animate-pulse rounded-lg bg-muted" />
+    <div className="skeleton-shimmer aspect-video rounded-lg" />
     <div className="space-y-2 px-1 pb-1">
-      <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+      <div className="skeleton-shimmer h-3.5 w-3/4 rounded" />
+      <div className="skeleton-shimmer h-3 w-1/2 rounded" />
     </div>
   </div>
 );
 
-// Mirrors the projects page: heading + filter button, then one section of
-// cards (labelled for the active filter).
+const SkeletonSection = ({ title }: { title: string }) => (
+  <section className="flex flex-col gap-4">
+    <div className="flex items-center gap-2">
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      <div className="skeleton-shimmer h-5 w-7 rounded-full" />
+    </div>
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <SkeletonCard key={index} />
+      ))}
+    </div>
+  </section>
+);
+
+// Mirrors the projects page: the heading + filter button, then the same
+// sections the filter shows (Space Recordings, Screen recordings).
 const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
   <div
     aria-label="Loading projects"
     className="flex flex-col gap-6 px-2 pb-2 pt-0"
   >
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="space-y-2">
-        <div className="h-6 w-28 animate-pulse rounded-md bg-muted" />
-        <div className="h-3.5 w-64 animate-pulse rounded-md bg-muted" />
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold text-foreground">Projects</h1>
+        <p className="text-sm text-fg-muted">
+          Your recordings, ready to preview and download.
+        </p>
       </div>
-      <div className="h-9 w-40 animate-pulse rounded-lg bg-muted" />
+      <div className="skeleton-shimmer h-9 w-36 rounded-lg" />
     </div>
-    <section className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-foreground">
-          {filter === "screen" ? "Screen Recordings" : "Space Recordings"}
-        </h2>
-        <div className="h-5 w-7 animate-pulse rounded-full bg-muted" />
-      </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-        {Array.from({ length: 8 }).map((_, index) => (
-          <SkeletonCard key={index} />
-        ))}
-      </div>
-    </section>
+    {filter !== "screen" && <SkeletonSection title="Space Recordings" />}
+    {filter !== "space" && <SkeletonSection title="Screen recordings" />}
   </div>
 );
 
