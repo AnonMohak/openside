@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiChevronDown, FiClock, FiLoader, FiMonitor } from "react-icons/fi";
+import { FiChevronDown, FiClock, FiLoader } from "react-icons/fi";
 import {
   useScreenOutputUrl,
   type ScreenOutputKind,
@@ -68,6 +68,8 @@ const ScreenThumbnail = ({ rec }: { rec: ScreenRecording }) => {
   const [poster, setPoster] = useState<string | null>(() =>
     getCachedPoster(posterKey),
   );
+  // A frame (poster or seeked video) is on screen - fades in over the shimmer.
+  const [frameShown, setFrameShown] = useState(false);
   const failed = isError || loadFailed;
   const showVideo = !poster && !!kind && !failed && !!url;
 
@@ -88,19 +90,30 @@ const ScreenThumbnail = ({ rec }: { rec: ScreenRecording }) => {
   };
 
   const handleSeeked = () => {
-    if (videoRef.current) setPoster(capturePoster(posterKey, videoRef.current));
+    setFrameShown(true);
+    // A no-CORS frame can't be read back, so it isn't cached as a poster.
+    if (!corsBlocked && videoRef.current) {
+      setPoster(capturePoster(posterKey, videoRef.current));
+    }
   };
 
-  // Plain gray + icon underneath; the poster/video paints on top once ready. The
-  // same state covers loading, failure, and "no thumbnail" - nothing flashes.
+  // Same as the meeting project cards: a shimmer until the frame has loaded,
+  // then the frame fades in; plain gray when there's nothing to show.
+  const frameClass = cn(
+    "absolute inset-0 h-full w-full object-cover transition-opacity duration-300",
+    frameShown ? "opacity-100" : "opacity-0",
+  );
   return (
-    <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-muted">
-      <FiMonitor className="size-8 text-fg-faint" />
+    <div className="relative aspect-video overflow-hidden rounded-lg bg-muted">
+      {!!kind && !failed && !frameShown && (
+        <div className="skeleton-shimmer absolute inset-0 h-full w-full" />
+      )}
       {poster ? (
         <img
           src={poster}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover"
+          onLoad={() => setFrameShown(true)}
+          className={frameClass}
         />
       ) : showVideo ? (
         <video
@@ -112,9 +125,9 @@ const ScreenThumbnail = ({ rec }: { rec: ScreenRecording }) => {
           preload="metadata"
           crossOrigin={corsBlocked ? undefined : "anonymous"}
           onLoadedMetadata={handleLoadedMetadata}
-          onSeeked={corsBlocked ? undefined : handleSeeked}
+          onSeeked={handleSeeked}
           onError={handleError}
-          className="absolute inset-0 h-full w-full object-cover"
+          className={frameClass}
         />
       ) : null}
     </div>
