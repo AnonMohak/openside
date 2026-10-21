@@ -22,6 +22,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import CountdownOverlay from "@/components/Space/recording/CountdownOverlay";
 import ScreenRecorderPanel from "./ScreenRecorderPanel";
 import { useGetMe } from "@/hooks/useUserQuery";
@@ -320,6 +322,32 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (manager.recordingState === "complete") void stopScreenShare();
   }, [manager.recordingState, stopScreenShare]);
+
+  // Saved and uploaded: open the project in a new tab and put the recorder
+  // away. Long uploads outlast the Stop click's popup allowance, so when the
+  // browser blocks the tab, go there in this one instead.
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const openedSessionRef = useRef<string | null>(null);
+  const { completedSessionId } = manager;
+  useEffect(() => {
+    if (manager.recordingState !== "complete" || !completedSessionId) return;
+    if (openedSessionRef.current === completedSessionId) return;
+    openedSessionRef.current = completedSessionId;
+
+    const path = `/dashboard/project/screen/${completedSessionId}`;
+    void queryClient.invalidateQueries({ queryKey: ["screen-recordings"] });
+    const tab = window.open(path, "_blank");
+    if (tab) tab.opener = null;
+    else navigate(path);
+    closeRecorder();
+  }, [
+    manager.recordingState,
+    completedSessionId,
+    queryClient,
+    navigate,
+    closeRecorder,
+  ]);
 
   const value = useMemo<ScreenRecordingContextValue>(
     () => ({

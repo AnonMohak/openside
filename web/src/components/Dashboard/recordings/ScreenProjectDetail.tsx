@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  FiCheck,
   FiChevronLeft,
   FiEdit2,
   FiLoader,
@@ -61,6 +62,164 @@ const formatClock = (ms?: number) => {
   const m = Math.floor((total % 3600) / 60);
   const sec = String(total % 60).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+};
+
+type ProcessingStage = "recording" | "uploading" | "rendering";
+
+const STAGES: { id: ProcessingStage | "ready"; label: string }[] = [
+  { id: "recording", label: "Recorded" },
+  { id: "uploading", label: "Uploaded" },
+  { id: "rendering", label: "Rendered" },
+  { id: "ready", label: "Ready" },
+];
+
+const STAGE_COPY: Record<ProcessingStage, { title: string; detail: string }> = {
+  recording: {
+    title: "Still recording",
+    detail: "This take is live. It'll start processing once you stop.",
+  },
+  uploading: {
+    title: "Finishing the upload",
+    detail: "Sending the last pieces of your recording.",
+  },
+  rendering: {
+    title: "Rendering your video",
+    detail: "Putting your screen, camera and audio together.",
+  },
+};
+
+// The server exposes no finalize progress, so estimate it from the time since
+// the take stopped on an easing curve scaled to the take's length (longer
+// takes render longer). Capped per stage so the bar never claims completion
+// before the video exists.
+const estimateProgress = (
+  stage: ProcessingStage,
+  stoppedAt: string | null,
+  lengthMs: number,
+  now: number,
+) => {
+  if (stage === "recording" || !stoppedAt) return 0;
+  const elapsed = Math.max(0, now - new Date(stoppedAt).getTime());
+  const tau = Math.max(15_000, lengthMs * 0.4);
+  const cap = stage === "rendering" ? 0.95 : 0.35;
+  return Math.round(Math.min(cap, 1 - Math.exp(-elapsed / tau)) * 100);
+};
+
+const useNow = (intervalMs: number) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+};
+
+// Stand-in for the player while the video is still being made: where it's
+// at, a progress estimate, and that it's fine to leave.
+const ProcessingStagePanel = ({ rec }: { rec: ScreenRecording }) => {
+  const now = useNow(1000);
+  const stage: ProcessingStage =
+    rec.status === "ACTIVE"
+      ? "recording"
+      : rec.status === "STOPPED"
+        ? "uploading"
+        : "rendering";
+  const stageIndex = STAGES.findIndex((item) => item.id === stage);
+  const lengthMs = rec.stoppedAt
+    ? new Date(rec.stoppedAt).getTime() - new Date(rec.startedAt).getTime()
+    : now - new Date(rec.startedAt).getTime();
+  const percent = estimateProgress(stage, rec.stoppedAt, lengthMs, now);
+  const length = formatClock(lengthMs);
+  const copy = STAGE_COPY[stage];
+
+  return (
+    <div className="relative flex aspect-video w-full flex-col items-center justify-center overflow-hidden rounded-2xl bg-primary px-6 ring-1 ring-border/50">
+      {/* Slow sheen so the panel reads as working, not frozen. */}
+      <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-transparent via-foreground/[0.03] to-transparent" />
+
+      <div className="relative flex w-full max-w-sm flex-col items-center text-center">
+        <span className="relative flex size-14 items-center justify-center rounded-2xl bg-background ring-1 ring-border/60">
+          {stage === "recording" ? (
+            <span className="size-3 animate-pulse rounded-full bg-red-500" />
+          ) : (
+            <FiLoader className="size-6 animate-spin text-fg-muted" />
+          )}
+        </span>
+        <p className="mt-4 text-base font-semibold text-foreground">
+          {copy.title}
+        </p>
+        <p className="mt-1 text-sm text-fg-subtle">{copy.detail}</p>
+
+        {stage !== "recording" && (
+          <div className="mt-5 flex w-full items-center gap-3">
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full rounded-full bg-foreground/70 transition-[width] duration-1000 ease-linear"
+                style={{ width: `${Math.max(4, percent)}%` }}
+              />
+            </span>
+            <span className="w-9 text-right text-xs font-medium tabular-nums text-fg-muted">
+              {percent}%
+            </span>
+          </div>
+        )}
+
+        <ol className="mt-6 flex w-full items-center">
+          {STAGES.map((item, index) => {
+            const isDone = index < stageIndex;
+            const isCurrent = index === stageIndex;
+            return (
+              <li
+                key={item.id}
+                className="flex flex-1 items-center last:flex-none"
+              >
+                <span className="flex flex-col items-center gap-1.5">
+                  <span
+                    className={
+                      isDone
+                        ? "flex size-5 items-center justify-center rounded-full bg-foreground text-background"
+                        : isCurrent
+                          ? "flex size-5 items-center justify-center rounded-full ring-2 ring-foreground/70"
+                          : "flex size-5 items-center justify-center rounded-full ring-1 ring-border"
+                    }
+                  >
+                    {isDone ? (
+                      <FiCheck className="size-3" strokeWidth={3} />
+                    ) : isCurrent ? (
+                      <span className="size-1.5 animate-pulse rounded-full bg-foreground" />
+                    ) : null}
+                  </span>
+                  <span
+                    className={
+                      isDone || isCurrent
+                        ? "text-[11px] font-medium text-foreground"
+                        : "text-[11px] text-fg-subtle"
+                    }
+                  >
+                    {item.label}
+                  </span>
+                </span>
+                {index < STAGES.length - 1 && (
+                  <span
+                    className={
+                      isDone
+                        ? "mx-2 mb-5 h-px flex-1 bg-foreground/60"
+                        : "mx-2 mb-5 h-px flex-1 bg-border"
+                    }
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+
+        <p className="mt-6 text-xs text-fg-subtle">
+          {length && <>{length} long · </>}
+          You can leave this page - it keeps going in the background.
+        </p>
+      </div>
+    </div>
+  );
 };
 
 // The project exposes one finished screen video. Prefer the composed output
@@ -285,6 +444,16 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   // active, so incoming comments land in this panel without a refresh.
   useRealtimeRecordingComments(rec?.shareToken, "screen", sessionId);
 
+  // Watching it process? Say so when the video lands.
+  const prevStatusRef = useRef(rec?.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = rec?.status;
+    if (rec?.status === "READY" && prev && prev !== "READY") {
+      toast.success("Your recording is ready");
+    }
+  }, [rec?.status]);
+
   if (isLoading) return <ScreenProjectDetailSkeleton />;
 
   if (!rec) {
@@ -319,7 +488,10 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
       ? "screen"
       : null;
   const recTitle = rec.title || "Untitled recording";
-  const isProcessing = rec.status === "STOPPED" || rec.status === "PROCESSING";
+  const isProcessing =
+    rec.status === "ACTIVE" ||
+    rec.status === "STOPPED" ||
+    rec.status === "PROCESSING";
   const isFailed = rec.status === "FAILED" && !screenVideoKind;
 
   const openRename = () => {
@@ -406,14 +578,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
             {isProcessing && !screenVideoKind ? (
               <section className="flex flex-col gap-4">
-                <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-black text-white/60 ring-1 ring-border/50">
-                  <FiLoader className="size-6 animate-spin" />
-                  <span className="text-sm">Processing your recording…</span>
-                  <span className="px-6 text-center text-xs text-white/40">
-                    Your screen video will be ready shortly. You can leave this
-                    page while it finishes.
-                  </span>
-                </div>
+                <ProcessingStagePanel rec={rec} />
               </section>
             ) : isFailed ? (
               <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/50 bg-primary/60 py-20 text-center">
