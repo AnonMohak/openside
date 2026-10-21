@@ -2,8 +2,9 @@ import "./lib/load-env.ts";
 import { createServer } from "node:http";
 import cors from "cors";
 import express, { type Request, type Response } from "express";
-import { logFfmpegAvailability } from "./lib/ffmpeg-check.ts";
 import { adminRoutes } from "./admin/index.ts";
+import { logFfmpegAvailability } from "./lib/ffmpeg-check.ts";
+import { runDueMaintenance } from "./lib/maintenance.ts";
 import { apiLimiter, getTrustProxyHops } from "./lib/rate-limit.ts";
 import authRouter from "./routes/auth-route.ts";
 import billingRouter from "./routes/billing-route.ts";
@@ -14,83 +15,10 @@ import recordingRouter from "./routes/recording-route.ts";
 import settingsRouter from "./routes/settings-route.ts";
 import spaceRouter from "./routes/space-route.ts";
 import usageRouter from "./routes/usage-route.ts";
-import {
-	reconcileLiveKitState,
-	reconcilePendingEgress,
-} from "./services/livekit-webhook-service.ts";
-import { reconcileStaleRecordingSessions } from "./services/recording-service.ts";
-import { sweepExpiredRecordings } from "./services/retention-service.ts";
-import { sweepActiveRecordingUsage } from "./services/usage-service.ts";
 import { initSocket } from "./sockets/index.ts";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-
-type MaintenanceTask = {
-	name: string;
-	intervalMs: number;
-	run: () => Promise<unknown>;
-	nextRunAt: number;
-	running: boolean;
-};
-
-const maintenanceTasks: MaintenanceTask[] = [
-	{
-		name: "LiveKit reconcile sweep",
-		intervalMs:
-			Number(process.env.LIVEKIT_RECONCILE_INTERVAL_MS) || 5 * 60 * 1000,
-		run: reconcileLiveKitState,
-		nextRunAt: 0,
-		running: false,
-	},
-	{
-		name: "Egress reconcile sweep",
-		intervalMs: Number(process.env.EGRESS_POLL_INTERVAL_MS) || 30 * 1000,
-		run: reconcilePendingEgress,
-		nextRunAt: 0,
-		running: false,
-	},
-	{
-		name: "Recording recovery sweep",
-		intervalMs: Number(process.env.RECORDING_RECOVERY_INTERVAL_MS) || 60 * 1000,
-		run: reconcileStaleRecordingSessions,
-		nextRunAt: 0,
-		running: false,
-	},
-	{
-		name: "Usage metering sweep",
-		intervalMs: Number(process.env.USAGE_SWEEP_INTERVAL_MS) || 60 * 1000,
-		run: sweepActiveRecordingUsage,
-		nextRunAt: 0,
-		running: false,
-	},
-	{
-		name: "Retention sweep",
-		intervalMs:
-			Number(process.env.RETENTION_SWEEP_INTERVAL_MS) || 15 * 60 * 1000,
-		run: sweepExpiredRecordings,
-		nextRunAt: 0,
-		running: false,
-	},
-];
-
-// Run housekeeping opportunistically while real traffic is using the API.
-// With no HTTP or Socket.IO activity, this creates no timers or outbound
-// traffic, allowing Railway Serverless to put the API to sleep.
-function runDueMaintenance(): void {
-	const now = Date.now();
-	for (const task of maintenanceTasks) {
-		if (task.running || now < task.nextRunAt) continue;
-		task.running = true;
-		task.nextRunAt = now + task.intervalMs;
-		void task
-			.run()
-			.catch((error) => console.error(`${task.name} failed:`, error))
-			.finally(() => {
-				task.running = false;
-			});
-	}
-}
 
 // Trust a fixed number of proxy hops so req.ip is the real client behind the
 // platform proxy - required for the per-IP rate limiter to key on the caller
@@ -111,6 +39,10 @@ app.use(
 	}),
 );
 
+// Housekeeping runs opportunistically while real traffic is using the API
+// (see lib/maintenance.ts). With no HTTP or Socket.IO activity, this creates no
+// timers or outbound traffic, allowing Railway Serverless to put the API to
+// sleep - the scheduled `maintenance` service covers that time.
 app.use((_req, _res, next) => {
 	runDueMaintenance();
 	next();

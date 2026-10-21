@@ -12,15 +12,31 @@
  * become black video / silence so the master stays in sync with everyone
  * else's.
  *
- * Every part and filler is encoded with IDENTICAL settings so they can be
- * joined with a stream copy - one encode per frame in total, same as a
- * single-part master.
+ * WHY VIDEO AND AUDIO ARE BUILT SEPARATELY:
+ * Video parts are encoded with IDENTICAL settings and joined with a stream
+ * copy - one encode per frame in total, and every piece is a whole number of
+ * frames, so the cursor is exact. Audio is NOT joined that way: every AAC
+ * piece carries ~21ms of encoder priming, which piles up at each join, and a
+ * recorder's audio drifts against its own video over a long part (see
+ * audio-timeline.ts). So each part's audio is decoded into one raw timeline -
+ * placed at its video piece's exact position, drift-corrected, clipped to the
+ * piece - and encoded once when the video is muxed.
  */
 
-import { spawn } from "node:child_process";
-import { open, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ffmpegPath, withThreadLimit } from "./ffmpeg-path.ts";
+import {
+	type AudioRun,
+	AudioTimelineWriter,
+	type DecodedPartAudio,
+	MASTER_AUDIO_FORMAT,
+	decodePartAudio,
+	placeRun,
+	planAudioRuns,
+	rawAudioInputArgs,
+	runSpanMs,
+} from "./audio-timeline.ts";
+import { runFfmpeg } from "./ffmpeg-run.ts";
 import {
 	type MediaProbe,
 	type VideoSize,
@@ -29,6 +45,8 @@ import {
 	sizeFilter,
 } from "./video-geometry.ts";
 
+export { runFfmpeg } from "./ffmpeg-run.ts";
+
 /** Speed/size trade-off for masters. `medium` ran slower than real time at 4K,
  *  so a one-hour 4K track took hours; `veryfast` is several times quicker at a
  *  visually transparent CRF. */
@@ -36,6 +54,11 @@ const MASTER_X264_PRESET = "veryfast";
 
 /** Gaps shorter than this are timer jitter between parts, not real gaps. */
 const GAP_TOLERANCE_MS = 40;
+
+/** A recorder's own audio timestamps are exact to the ms; a step past this is
+ *  a real dropout inside the part. */
+const PART_AUDIO_JUMP_MS = 40;
+const PART_AUDIO_TOLERANCE_FRAMES = MASTER_AUDIO_FORMAT.sampleRate / 1000;
 
 const MASTER_AUDIO_ARGS = [
 	"-c:a",
@@ -61,35 +84,6 @@ const AUDIO_ONLY_ARGS = [
 
 const SILENCE_SOURCE = "anullsrc=channel_layout=stereo:sample_rate=48000";
 
-export function runFfmpeg(args: string[], timeoutMs?: number): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpegPath, withThreadLimit(args), {
-			stdio: ["ignore", "ignore", "pipe"],
-		});
-		let stderr = "";
-		const timeout = timeoutMs
-			? setTimeout(() => {
-					proc.kill("SIGKILL");
-					reject(new Error(`ffmpeg timed out after ${timeoutMs}ms`));
-				}, timeoutMs)
-			: null;
-		proc.stderr.on("data", (data) => {
-			stderr += data.toString();
-			// Keep only the tail - a multi-hour encode prints a lot of progress.
-			if (stderr.length > 64_000) stderr = stderr.slice(-16_000);
-		});
-		proc.on("error", (error) => {
-			if (timeout) clearTimeout(timeout);
-			reject(error);
-		});
-		proc.on("close", (code) => {
-			if (timeout) clearTimeout(timeout);
-			if (code === 0) resolve();
-			else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-2000)}`));
-		});
-	});
-}
-
 export interface MasterEncodeSettings {
 	/** Pinned output geometry (every frame is scaled/letterboxed onto it). */
 	target: VideoSize;
@@ -100,10 +94,29 @@ export interface MasterEncodeSettings {
 	extraFilters: string[];
 }
 
-function videoArgs(settings: MasterEncodeSettings): string[] {
+/**
+ * `leadMs` (recorder parts only): where the part's first video frame sits after
+ * the recorder started. The piece is re-anchored so t=0 is the recorder start
+ * - the instant the part is placed at and its audio is measured from - with
+ * the first frame held over the lead.
+ */
+function videoArgs(settings: MasterEncodeSettings, leadMs?: number): string[] {
+	const anchor =
+		leadMs === undefined
+			? []
+			: [
+					"setpts=PTS-STARTPTS",
+					...(leadMs >= 1
+						? [
+								`tpad=start_duration=${(leadMs / 1000).toFixed(3)}:start_mode=clone`,
+							]
+						: []),
+				];
 	return [
 		"-vf",
-		[sizeFilter(settings.target), ...settings.extraFilters].join(","),
+		[...anchor, sizeFilter(settings.target), ...settings.extraFilters].join(
+			",",
+		),
 		"-r",
 		String(settings.fps),
 		"-fps_mode",
@@ -127,94 +140,42 @@ function durationArg(ms: number): string {
 	return (Math.max(1, ms) / 1000).toFixed(3);
 }
 
-/**
- * Encode one recorder part to the normalized master format: CFR H.264 at the
- * pinned size + stereo AAC. A part missing a stream gets black video or silence
- * so every piece of the timeline has the same streams. `maxDurationMs` trims the
- * tail that overlaps the next part (a new recorder starts before the old one
- * stops so no audio is lost at the seam).
- */
-export async function encodeMasterPart(params: {
+/** Encode one recorder part's video to the normalized master format. */
+async function encodeVideoPiece(params: {
 	input: string;
-	probe: MediaProbe;
 	settings: MasterEncodeSettings;
 	output: string;
+	/** First video frame's offset from the recorder start (see videoArgs). */
+	leadMs: number;
+	/** Trims the tail that overlaps the next part (a new recorder starts
+	 *  before the old one stops so nothing is lost at the seam). */
 	maxDurationMs?: number;
 	timeoutMs?: number;
 }): Promise<void> {
-	const { input, probe, settings, output } = params;
-	const cap =
-		params.maxDurationMs !== undefined
-			? ["-t", durationArg(params.maxDurationMs)]
-			: [];
-	const tail = [...cap, "-movflags", "+faststart", output];
-	const { width, height } = settings.target;
-
-	let args: string[];
-	if (probe.hasVideo && probe.hasAudio) {
-		args = [
+	await runFfmpeg(
+		[
 			"-y",
 			"-fflags",
 			"+genpts",
 			"-i",
-			input,
+			params.input,
 			"-map",
 			"0:v:0",
-			"-map",
-			"0:a:0",
-			...videoArgs(settings),
-			...MASTER_AUDIO_ARGS,
-			...tail,
-		];
-	} else if (probe.hasVideo) {
-		args = [
-			"-y",
-			"-fflags",
-			"+genpts",
-			"-i",
-			input,
-			"-f",
-			"lavfi",
-			"-i",
-			SILENCE_SOURCE,
-			"-map",
-			"0:v:0",
-			"-map",
-			"1:a:0",
-			...videoArgs(settings),
-			...MASTER_AUDIO_ARGS,
-			"-shortest",
-			...tail,
-		];
-	} else if (probe.hasAudio) {
-		args = [
-			"-y",
-			"-f",
-			"lavfi",
-			"-i",
-			`color=c=black:s=${width}x${height}:r=${settings.fps}`,
-			"-fflags",
-			"+genpts",
-			"-i",
-			input,
-			"-map",
-			"0:v:0",
-			"-map",
-			"1:a:0",
-			...videoArgs(settings),
-			...MASTER_AUDIO_ARGS,
-			"-shortest",
-			...tail,
-		];
-	} else {
-		throw new Error("Part has neither audio nor video");
-	}
-
-	await runFfmpeg(args, params.timeoutMs);
+			"-an",
+			...videoArgs(params.settings, Math.max(0, params.leadMs)),
+			...(params.maxDurationMs !== undefined
+				? ["-t", durationArg(params.maxDurationMs)]
+				: []),
+			"-movflags",
+			"+faststart",
+			params.output,
+		],
+		params.timeoutMs,
+	);
 }
 
-/** Black video + silence, encoded exactly like a master part. */
-export async function encodeMasterFiller(params: {
+/** Black video, encoded exactly like a master piece. */
+async function encodeBlackPiece(params: {
 	durationMs: number;
 	settings: MasterEncodeSettings;
 	output: string;
@@ -226,16 +187,7 @@ export async function encodeMasterFiller(params: {
 		"lavfi",
 		"-i",
 		`color=c=black:s=${width}x${height}:r=${params.settings.fps}`,
-		"-f",
-		"lavfi",
-		"-i",
-		SILENCE_SOURCE,
-		"-map",
-		"0:v:0",
-		"-map",
-		"1:a:0",
 		...videoArgs(params.settings),
-		...MASTER_AUDIO_ARGS,
 		"-t",
 		durationArg(params.durationMs),
 		"-movflags",
@@ -244,43 +196,28 @@ export async function encodeMasterFiller(params: {
 	]);
 }
 
-async function encodeAudioPart(params: {
-	input: string;
-	output: string;
-	maxDurationMs?: number;
-}): Promise<void> {
-	await runFfmpeg([
-		"-y",
-		"-fflags",
-		"+genpts",
-		"-i",
-		params.input,
-		"-map",
-		"0:a:0",
-		"-vn",
-		...AUDIO_ONLY_ARGS,
-		...(params.maxDurationMs !== undefined
-			? ["-t", durationArg(params.maxDurationMs)]
-			: []),
-		params.output,
-	]);
-}
-
-async function encodeAudioFiller(params: {
-	durationMs: number;
-	output: string;
-}): Promise<void> {
-	await runFfmpeg([
-		"-y",
-		"-f",
-		"lavfi",
-		"-i",
-		SILENCE_SOURCE,
-		...AUDIO_ONLY_ARGS,
-		"-t",
-		durationArg(params.durationMs),
-		params.output,
-	]);
+/** Exact frame count of a piece (its CFR duration is frames / fps). */
+async function countVideoFrames(file: string): Promise<number> {
+	const crcPath = `${file}.crc`;
+	try {
+		await runFfmpeg([
+			"-y",
+			"-i",
+			file,
+			"-map",
+			"0:v:0",
+			"-c",
+			"copy",
+			"-f",
+			"framecrc",
+			crcPath,
+		]);
+		const text = await readFile(crcPath, "utf8");
+		return text.split("\n").filter((line) => line && !line.startsWith("#"))
+			.length;
+	} finally {
+		await rm(crcPath, { force: true }).catch(() => undefined);
+	}
 }
 
 /** Join identically-encoded files without re-encoding. */
@@ -308,6 +245,49 @@ export async function concatCopy(
 	]);
 }
 
+/** Video timeline + raw audio timeline → MP4, the audio encoded once. */
+async function muxMaster(params: {
+	videoPath: string;
+	/** Raw MASTER_AUDIO_FORMAT timeline; null = a silent track. */
+	audioPath: string | null;
+	/** Silence before the audio timeline (the aligned variant's lead-in). */
+	audioLeadFrames: number;
+	totalDurationMs: number;
+	output: string;
+}): Promise<void> {
+	const audioInput = params.audioPath
+		? [...rawAudioInputArgs(MASTER_AUDIO_FORMAT), "-i", params.audioPath]
+		: [
+				"-f",
+				"lavfi",
+				"-t",
+				durationArg(params.totalDurationMs),
+				"-i",
+				SILENCE_SOURCE,
+			];
+	const delay =
+		params.audioPath && params.audioLeadFrames > 0
+			? ["-af", `adelay=delays=${params.audioLeadFrames}S:all=1`]
+			: [];
+	await runFfmpeg([
+		"-y",
+		"-i",
+		params.videoPath,
+		...audioInput,
+		"-map",
+		"0:v:0",
+		"-map",
+		"1:a:0",
+		"-c:v",
+		"copy",
+		...delay,
+		...MASTER_AUDIO_ARGS,
+		"-movflags",
+		"+faststart",
+		params.output,
+	]);
+}
+
 export interface TimelinePart {
 	/** Byte-concatenated chunks of one recorder part (starts with a header). */
 	rawPath: string;
@@ -326,6 +306,47 @@ export interface ComposedMaster {
 	/** Parts that couldn't be decoded (e.g. their header chunk never arrived);
 	 *  their span is filled with black/silence instead. */
 	skippedParts: number;
+	/** Video masters: what the master was muxed from, so the aligned variant
+	 *  reuses it (see composeAlignedMaster). */
+	timeline: {
+		settings: MasterEncodeSettings;
+		videoPath: string;
+		audioPath: string | null;
+		frames: number;
+	} | null;
+}
+
+/** Decode a part's audio and plan its runs against the piece's t=0. */
+async function decodeAudioOf(params: {
+	part: TimelinePart;
+	hasVideo: boolean;
+	tmpDir: string;
+	id: string;
+	timeoutMs?: number;
+}): Promise<{ audio: DecodedPartAudio; runs: AudioRun[] } | null> {
+	try {
+		const audio = await decodePartAudio({
+			input: params.part.rawPath,
+			rawPath: path.join(params.tmpDir, `${params.id}.pcm`),
+			tmpDir: params.tmpDir,
+			id: params.id,
+			hasVideo: params.hasVideo,
+			timeoutMs: params.timeoutMs,
+		});
+		if (audio.chunks.length === 0 || audio.frames === 0) {
+			await rm(audio.rawPath, { force: true }).catch(() => undefined);
+			return null;
+		}
+		// ffmpeg reports timestamps from the file's start - the recorder start,
+		// which is the piece's t=0.
+		const runs = planAudioRuns(audio.chunks, MASTER_AUDIO_FORMAT.sampleRate, {
+			jumpMs: PART_AUDIO_JUMP_MS,
+		});
+		return { audio, runs };
+	} catch (error) {
+		console.error(`[Compose] ${params.id}: audio could not be decoded:`, error);
+		return null;
+	}
 }
 
 /**
@@ -344,7 +365,6 @@ export async function composeTimeline(params: {
 	sizeHint: VideoSize | null;
 	timeoutMs?: number;
 }): Promise<ComposedMaster> {
-	const { tmpDir, id } = params;
 	if (params.parts.length === 0) throw new Error("No parts to compose");
 
 	const probes = await Promise.all(
@@ -365,154 +385,398 @@ export async function composeTimeline(params: {
 		positions.push(Math.max(raw, positions[index - 1] ?? 0));
 	}
 
-	let target: VideoSize | null = null;
-	if (anyVideo) {
-		const sizes = probes
-			.map((probe) => probe.size)
-			.filter((size): size is VideoSize => size !== null);
-		if (params.sizeHint) sizes.push(params.sizeHint);
-		const best = sizes.reduce<VideoSize | null>(
-			(acc, size) =>
-				!acc || size.width * size.height > acc.width * acc.height ? size : acc,
-			null,
-		) ?? { width: 1920, height: 1080 };
-		target = { width: evenDim(best.width), height: evenDim(best.height) };
+	if (!anyVideo) {
+		return composeAudioOnly({ ...params, probes, positions });
 	}
 
-	const ext: "mp4" | "webm" = anyVideo ? "mp4" : "webm";
+	const sizes = probes
+		.map((probe) => probe.size)
+		.filter((size): size is VideoSize => size !== null);
+	if (params.sizeHint) sizes.push(params.sizeHint);
+	const best = sizes.reduce<VideoSize | null>(
+		(acc, size) =>
+			!acc || size.width * size.height > acc.width * acc.height ? size : acc,
+		null,
+	) ?? { width: 1920, height: 1080 };
 
-	// One audio-only part: a stream copy keeps the original audio untouched.
-	const onlyPart = params.parts[0];
-	if (!anyVideo && params.parts.length === 1 && onlyPart) {
-		const output = path.join(tmpDir, `${id}-master.webm`);
-		try {
-			await runFfmpeg([
-				"-y",
-				"-fflags",
-				"+genpts",
-				"-i",
-				onlyPart.rawPath,
-				"-map",
-				"0:a:0",
-				"-c",
-				"copy",
-				output,
-			]);
-			const copied = await probeMedia(output);
-			if (copied.hasAudio) {
-				return {
-					path: output,
-					ext,
-					hasVideo: false,
-					hasAudio: true,
-					target: null,
-					durationMs: copied.durationMs ?? 0,
-					skippedParts: 0,
-				};
-			}
-		} catch (error) {
-			console.error(`[Compose] ${id}: audio remux failed, re-encoding:`, error);
-		}
-	}
-	const settings: MasterEncodeSettings | null = target
-		? {
-				target,
-				fps: params.fps,
-				crf: params.crf,
-				extraFilters: params.extraFilters,
-			}
-		: null;
+	return composeVideoTimeline({
+		...params,
+		probes,
+		positions,
+		anyAudio,
+		settings: {
+			target: { width: evenDim(best.width), height: evenDim(best.height) },
+			fps: params.fps,
+			crf: params.crf,
+			extraFilters: params.extraFilters,
+		},
+	});
+}
+
+async function composeVideoTimeline(params: {
+	parts: TimelinePart[];
+	probes: MediaProbe[];
+	positions: number[];
+	settings: MasterEncodeSettings;
+	anyAudio: boolean;
+	tmpDir: string;
+	id: string;
+	timeoutMs?: number;
+}): Promise<ComposedMaster> {
+	const { tmpDir, id, settings } = params;
+	const { sampleRate } = MASTER_AUDIO_FORMAT;
+	const msAt = (frames: number) => (frames * 1000) / settings.fps;
+	const audioFrameAt = (videoFrames: number) =>
+		Math.round((videoFrames * sampleRate) / settings.fps);
 
 	const pieces: string[] = [];
-	let cursorMs = 0;
+	let cursorFrames = 0;
+	let encodedParts = 0;
 	let skippedParts = 0;
 	let fillerIndex = 0;
 
-	const fill = async (durationMs: number) => {
-		const output = path.join(tmpDir, `${id}-fill-${fillerIndex++}.${ext}`);
-		if (settings) {
-			await encodeMasterFiller({ durationMs, settings, output });
-		} else {
-			await encodeAudioFiller({ durationMs, output });
-		}
-		pieces.push(output);
-	};
+	const audioPath = path.join(tmpDir, `${id}-audio.raw`);
+	const writer = params.anyAudio
+		? await AudioTimelineWriter.open(audioPath, MASTER_AUDIO_FORMAT)
+		: null;
 
-	for (const [index, part] of params.parts.entries()) {
-		const probe = probes[index];
-		const position = positions[index] ?? 0;
-		const next = positions[index + 1];
-		const maxDurationMs = next !== undefined ? next - position : undefined;
-		if (!probe || (!probe.hasVideo && !probe.hasAudio)) {
-			skippedParts++;
-			continue;
-		}
-		if (maxDurationMs !== undefined && maxDurationMs < GAP_TOLERANCE_MS) {
-			// The next part started (almost) at the same instant - nothing of
-			// this one survives the overlap.
-			continue;
-		}
+	try {
+		const fill = async (durationMs: number) => {
+			const output = path.join(tmpDir, `${id}-fill-${fillerIndex++}.mp4`);
+			await encodeBlackPiece({ durationMs, settings, output });
+			const frames = await countVideoFrames(output);
+			if (frames <= 0) return;
+			pieces.push(output);
+			cursorFrames += frames;
+		};
 
-		const output = path.join(tmpDir, `${id}-part-${index}.${ext}`);
-		try {
-			if (settings) {
-				await encodeMasterPart({
-					input: part.rawPath,
-					probe,
-					settings,
-					output,
-					maxDurationMs,
-					timeoutMs: params.timeoutMs,
-				});
-			} else {
-				await encodeAudioPart({ input: part.rawPath, output, maxDurationMs });
+		for (const [index, part] of params.parts.entries()) {
+			const probe = params.probes[index];
+			const position = params.positions[index] ?? 0;
+			const next = params.positions[index + 1];
+			const maxDurationMs = next !== undefined ? next - position : undefined;
+			if (!probe || (!probe.hasVideo && !probe.hasAudio)) {
+				skippedParts++;
+				continue;
 			}
-		} catch (error) {
-			console.error(
-				`[Compose] ${id}: part ${index} could not be encoded, filling its span:`,
-				error,
-			);
-			skippedParts++;
-			continue;
+			if (maxDurationMs !== undefined && maxDurationMs < GAP_TOLERANCE_MS) {
+				// The next part started (almost) at the same instant - nothing of
+				// this one survives the overlap.
+				continue;
+			}
+
+			const pieceId = `${id}-part-${index}`;
+			const decoded =
+				probe.hasAudio && writer
+					? await decodeAudioOf({
+							part,
+							hasVideo: probe.hasVideo,
+							tmpDir,
+							id: pieceId,
+							timeoutMs: params.timeoutMs,
+						})
+					: null;
+
+			try {
+				const output = path.join(tmpDir, `${pieceId}.mp4`);
+				let frames = 0;
+				// Where the part's audio ends (from the recorder start), capped at
+				// the next part.
+				const audioEndMs = (decoded?.runs ?? []).reduce(
+					(end, run) => Math.max(end, run.startMs + runSpanMs(run, sampleRate)),
+					0,
+				);
+				const audioLimitMs = Math.min(audioEndMs, maxDurationMs ?? audioEndMs);
+				try {
+					if (probe.hasVideo) {
+						await encodeVideoPiece({
+							input: part.rawPath,
+							settings,
+							output,
+							leadMs: decoded?.audio.videoStartMs ?? 0,
+							maxDurationMs,
+							timeoutMs: params.timeoutMs,
+						});
+					} else {
+						// Camera off for this part: black for as long as its audio runs.
+						if (audioLimitMs < GAP_TOLERANCE_MS) {
+							throw new Error("audio-only part has no usable audio");
+						}
+						await encodeBlackPiece({
+							durationMs: audioLimitMs,
+							settings,
+							output,
+						});
+					}
+					frames = await countVideoFrames(output);
+				} catch (error) {
+					console.error(
+						`[Compose] ${id}: part ${index} could not be encoded, filling its span:`,
+						error,
+					);
+				}
+				if (frames <= 0) {
+					skippedParts++;
+					continue;
+				}
+
+				if (position - msAt(cursorFrames) >= GAP_TOLERANCE_MS) {
+					await fill(position - msAt(cursorFrames));
+				}
+
+				const pieceStart = cursorFrames;
+				pieces.push(output);
+				cursorFrames += frames;
+				encodedParts++;
+
+				// The video stopped before the audio did (the camera died mid-part):
+				// black under the rest of the audio instead of cutting it off.
+				if (audioLimitMs - msAt(frames) >= GAP_TOLERANCE_MS) {
+					await fill(audioLimitMs - msAt(frames));
+				}
+
+				if (writer && decoded) {
+					const startFrame = audioFrameAt(pieceStart);
+					const endFrame = audioFrameAt(cursorFrames);
+					await writer.padTo(startFrame);
+					for (const run of decoded.runs) {
+						await placeRun({
+							writer,
+							sourcePath: decoded.audio.rawPath,
+							run,
+							atFrame:
+								startFrame + Math.round((run.startMs * sampleRate) / 1000),
+							endFrame,
+							toleranceFrames: PART_AUDIO_TOLERANCE_FRAMES,
+							tmpDir,
+						});
+					}
+				}
+			} finally {
+				if (decoded) {
+					await rm(decoded.audio.rawPath, { force: true }).catch(
+						() => undefined,
+					);
+				}
+			}
 		}
 
-		const encoded = await probeMedia(output);
-		const durationMs = encoded.durationMs ?? 0;
-		if (durationMs <= 0) {
-			skippedParts++;
-			continue;
+		if (encodedParts === 0) {
+			throw new Error("No part of the track could be encoded");
 		}
-
-		if (position - cursorMs >= GAP_TOLERANCE_MS) {
-			await fill(position - cursorMs);
-			cursorMs = position;
-		}
-		pieces.push(output);
-		cursorMs += durationMs;
+		await writer?.padTo(audioFrameAt(cursorFrames));
+	} finally {
+		await writer?.close();
 	}
 
-	if (!pieces.some((piece) => piece.includes(`${id}-part-`))) {
+	let videoPath: string;
+	if (pieces.length === 1 && pieces[0]) {
+		videoPath = pieces[0];
+	} else {
+		videoPath = path.join(tmpDir, `${id}-video.mp4`);
+		await concatCopy(pieces, videoPath, path.join(tmpDir, `${id}-list.txt`));
+	}
+
+	const masterPath = path.join(tmpDir, `${id}-master.mp4`);
+	await muxMaster({
+		videoPath,
+		audioPath: writer ? audioPath : null,
+		audioLeadFrames: 0,
+		totalDurationMs: msAt(cursorFrames),
+		output: masterPath,
+	});
+
+	return {
+		path: masterPath,
+		ext: "mp4",
+		hasVideo: true,
+		hasAudio: params.anyAudio,
+		target: settings.target,
+		durationMs: Math.round(msAt(cursorFrames)),
+		skippedParts,
+		timeline: {
+			settings,
+			videoPath,
+			audioPath: writer ? audioPath : null,
+			frames: cursorFrames,
+		},
+	};
+}
+
+async function composeAudioOnly(params: {
+	parts: TimelinePart[];
+	probes: MediaProbe[];
+	positions: number[];
+	tmpDir: string;
+	id: string;
+	timeoutMs?: number;
+}): Promise<ComposedMaster> {
+	const { tmpDir, id } = params;
+	const { sampleRate } = MASTER_AUDIO_FORMAT;
+	const audioPath = path.join(tmpDir, `${id}-audio.raw`);
+	const output = path.join(tmpDir, `${id}-master.webm`);
+	const writer = await AudioTimelineWriter.open(audioPath, MASTER_AUDIO_FORMAT);
+	let placedParts = 0;
+	let skippedParts = 0;
+
+	try {
+		for (const [index, part] of params.parts.entries()) {
+			const position = params.positions[index] ?? 0;
+			const next = params.positions[index + 1];
+			if (!params.probes[index]?.hasAudio) {
+				skippedParts++;
+				continue;
+			}
+			if (next !== undefined && next - position < GAP_TOLERANCE_MS) continue;
+
+			const decoded = await decodeAudioOf({
+				part,
+				hasVideo: false,
+				tmpDir,
+				id: `${id}-part-${index}`,
+				timeoutMs: params.timeoutMs,
+			});
+			if (!decoded) {
+				skippedParts++;
+				continue;
+			}
+
+			try {
+				// One clean part: a stream copy keeps the original audio untouched.
+				if (
+					params.parts.length === 1 &&
+					decoded.runs.length === 1 &&
+					decoded.runs[0]?.ratio === 1
+				) {
+					const remuxed = await remuxAudio(part, output, id);
+					if (remuxed) return remuxed;
+				}
+
+				const startFrame = Math.round((position * sampleRate) / 1000);
+				const endFrame =
+					next !== undefined
+						? Math.round((next * sampleRate) / 1000)
+						: undefined;
+				await writer.padTo(startFrame);
+				for (const run of decoded.runs) {
+					await placeRun({
+						writer,
+						sourcePath: decoded.audio.rawPath,
+						run,
+						atFrame: startFrame + Math.round((run.startMs * sampleRate) / 1000),
+						endFrame,
+						toleranceFrames: PART_AUDIO_TOLERANCE_FRAMES,
+						tmpDir,
+					});
+				}
+				placedParts++;
+			} finally {
+				await rm(decoded.audio.rawPath, { force: true }).catch(() => undefined);
+			}
+		}
+	} finally {
+		await writer.close();
+	}
+
+	if (placedParts === 0) {
 		throw new Error("No part of the track could be encoded");
 	}
+	await runFfmpeg([
+		"-y",
+		...rawAudioInputArgs(MASTER_AUDIO_FORMAT),
+		"-i",
+		audioPath,
+		...AUDIO_ONLY_ARGS,
+		output,
+	]);
+	await rm(audioPath, { force: true }).catch(() => undefined);
 
-	let outputPath: string;
-	if (pieces.length === 1 && pieces[0]) {
-		outputPath = pieces[0];
-	} else {
-		outputPath = path.join(tmpDir, `${id}-master.${ext}`);
-		await concatCopy(pieces, outputPath, path.join(tmpDir, `${id}-list.txt`));
-	}
-
-	const final = await probeMedia(outputPath);
 	return {
-		path: outputPath,
-		ext,
-		hasVideo: anyVideo,
-		hasAudio: anyAudio,
-		target,
-		durationMs: final.durationMs ?? Math.round(cursorMs),
+		path: output,
+		ext: "webm",
+		hasVideo: false,
+		hasAudio: true,
+		target: null,
+		durationMs: Math.round((writer.frames * 1000) / sampleRate),
 		skippedParts,
+		timeline: null,
 	};
+}
+
+async function remuxAudio(
+	part: TimelinePart,
+	output: string,
+	id: string,
+): Promise<ComposedMaster | null> {
+	try {
+		await runFfmpeg([
+			"-y",
+			"-fflags",
+			"+genpts",
+			"-i",
+			part.rawPath,
+			"-map",
+			"0:a:0",
+			"-c",
+			"copy",
+			output,
+		]);
+		const copied = await probeMedia(output);
+		if (!copied.hasAudio) return null;
+		return {
+			path: output,
+			ext: "webm",
+			hasVideo: false,
+			hasAudio: true,
+			target: null,
+			durationMs: copied.durationMs ?? 0,
+			skippedParts: 0,
+			timeline: null,
+		};
+	} catch (error) {
+		console.error(`[Compose] ${id}: audio remux failed, re-encoding:`, error);
+		return null;
+	}
+}
+
+/**
+ * The master with `leadMs` of black/silence in front (a late joiner's "with
+ * space" variant). Reuses the master's video pieces and raw audio: the video
+ * is a stream copy, the audio is shifted sample-exactly and encoded once.
+ */
+export async function composeAlignedMaster(params: {
+	master: ComposedMaster;
+	leadMs: number;
+	tmpDir: string;
+	id: string;
+	output: string;
+}): Promise<void> {
+	const timeline = params.master.timeline;
+	if (!timeline) throw new Error("Master has no video timeline to align");
+	const { settings } = timeline;
+
+	const leadPath = path.join(params.tmpDir, `${params.id}-lead.mp4`);
+	await encodeBlackPiece({
+		durationMs: params.leadMs,
+		settings,
+		output: leadPath,
+	});
+	const leadFrames = await countVideoFrames(leadPath);
+	const videoPath = path.join(params.tmpDir, `${params.id}-aligned-video.mp4`);
+	await concatCopy(
+		[leadPath, timeline.videoPath],
+		videoPath,
+		path.join(params.tmpDir, `${params.id}-aligned-list.txt`),
+	);
+	await muxMaster({
+		videoPath,
+		audioPath: timeline.audioPath,
+		audioLeadFrames: Math.round(
+			(leadFrames * MASTER_AUDIO_FORMAT.sampleRate) / settings.fps,
+		),
+		totalDurationMs: ((leadFrames + timeline.frames) * 1000) / settings.fps,
+		output: params.output,
+	});
 }
 
 /** True when a chunk opens a new container stream (a recorder (re)start). */
@@ -529,95 +793,4 @@ export function startsContainer(chunk: Buffer): boolean {
 	}
 	// MP4 (Chrome/Safari MediaRecorder): the init segment opens with `ftyp`.
 	return chunk.toString("latin1", 4, 8) === "ftyp";
-}
-
-export interface PcmFormat {
-	sampleRate: number;
-	channelCount: number;
-	bitDepth: number;
-}
-
-export interface PcmTimelineSegment {
-	startMs: number;
-	format: PcmFormat;
-	load: () => Promise<Buffer>;
-}
-
-const ZERO_BLOCK = Buffer.alloc(1 << 20);
-
-/**
- * Write raw PCM chunks to `outPath`, each at its own timeline position: a
- * missing chunk or a tab refresh becomes silence instead of pulling everything
- * after it earlier (which is what plain concatenation did - the WAV drifted out
- * of sync with the video after every gap). `leadPadMs` aligns the start with
- * the video master. Chunks within `toleranceMs` of contiguous are appended as-is
- * (that's timestamp rounding, not a gap).
- */
-export async function composePcmTimeline(params: {
-	segments: PcmTimelineSegment[];
-	outPath: string;
-	leadPadMs: number;
-	convert: (buffer: Buffer, from: PcmFormat, to: PcmFormat) => Promise<Buffer>;
-	toleranceMs?: number;
-}): Promise<PcmFormat & { bytes: number }> {
-	const first = params.segments[0];
-	if (!first) throw new Error("No PCM segments");
-	const format = first.format;
-	const frameBytes = (format.bitDepth / 8) * format.channelCount;
-	const toleranceFrames = Math.round(
-		((params.toleranceMs ?? 20) * format.sampleRate) / 1000,
-	);
-
-	const file = await open(params.outPath, "w");
-	let cursorFrames = 0;
-	try {
-		const writeZeros = async (frames: number) => {
-			let remaining = frames * frameBytes;
-			while (remaining > 0) {
-				const size = Math.min(remaining, ZERO_BLOCK.length);
-				await file.write(ZERO_BLOCK, 0, size);
-				remaining -= size;
-			}
-			cursorFrames += frames;
-		};
-
-		for (const segment of params.segments) {
-			let buffer = await segment.load();
-			const sameFormat =
-				segment.format.sampleRate === format.sampleRate &&
-				segment.format.channelCount === format.channelCount &&
-				segment.format.bitDepth === format.bitDepth;
-			if (!sameFormat) {
-				buffer = await params.convert(buffer, segment.format, format);
-			}
-			const frames = Math.floor(buffer.length / frameBytes);
-			if (frames === 0) continue;
-
-			const targetFrames = Math.max(
-				0,
-				Math.round(
-					((params.leadPadMs + segment.startMs - first.startMs) *
-						format.sampleRate) /
-						1000,
-				),
-			);
-
-			let skipFrames = 0;
-			if (targetFrames > cursorFrames + toleranceFrames) {
-				await writeZeros(targetFrames - cursorFrames);
-			} else if (targetFrames < cursorFrames - toleranceFrames) {
-				skipFrames = Math.min(frames, cursorFrames - targetFrames);
-			}
-			if (skipFrames >= frames) continue;
-
-			const start = skipFrames * frameBytes;
-			const end = frames * frameBytes;
-			await file.write(buffer, start, end - start);
-			cursorFrames += frames - skipFrames;
-		}
-	} finally {
-		await file.close();
-	}
-
-	return { ...format, bytes: cursorFrames * frameBytes };
 }

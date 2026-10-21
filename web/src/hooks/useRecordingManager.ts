@@ -1346,14 +1346,14 @@ export default function useRecordingManager(
     handleRecordingStarted(startDataFromSession(active));
   }, [activeRecordingQuery.data, handleRecordingStarted, recordingState]);
 
-  // Missed the socket stop: the poll shows no active session while we're still
-  // capturing (after a short grace for a brand-new take).
+  // Missed the socket stop: the poll shows our session is no longer the active
+  // one while we're still capturing (after a short grace for a brand-new take).
   useEffect(() => {
     if (activeRecordingQuery.isFetching) return;
     if (activeRecordingQuery.isError) return;
-    if (activeRecordingQuery.data) return;
     const current = capturingSessionRef.current ?? activeSessionRef.current;
     if (!current) return;
+    if (activeRecordingQuery.data?.id === current) return;
     if (
       getServerTimeRef.current() -
         (sessionStartedAtRef.current ?? getServerTimeRef.current()) <

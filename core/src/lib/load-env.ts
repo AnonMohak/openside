@@ -13,7 +13,16 @@ function workerEnvFile(): string {
 	return role ? `.env.production-${role}-worker` : ".env.production-worker";
 }
 
-const productionEnv = isWorker ? workerEnvFile() : ".env.production-api";
+const isMaintenance =
+	process.env.OPENSIDE_SERVICE === "maintenance" ||
+	process.env.npm_lifecycle_event?.startsWith("maintenance") ||
+	process.argv.some((arg) => /(?:^|[/\\])maintenance\.(?:ts|js)$/.test(arg));
+
+const productionEnv = isWorker
+	? workerEnvFile()
+	: isMaintenance
+		? ".env.production-maintenance"
+		: ".env.production-api";
 const envFile = nodeEnv === "production" ? productionEnv : ".env.local";
 
 dotenv.config({ path: envFile });

@@ -26,13 +26,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { prisma } from "../db/index.ts";
 import {
-	type ComposedMaster,
-	type MasterEncodeSettings,
-	type PcmFormat,
+	type RawAudioFormat as PcmFormat,
 	composePcmTimeline,
+} from "../lib/audio-timeline.ts";
+import {
+	type ComposedMaster,
+	composeAlignedMaster,
 	composeTimeline,
-	concatCopy,
-	encodeMasterFiller,
 	runFfmpeg,
 	startsContainer,
 } from "../lib/media-compose.ts";
@@ -928,18 +928,9 @@ async function finalizeRecording({
 		});
 
 	let master: ComposedMaster | null = null;
-	let settings: MasterEncodeSettings | null = null;
 	const notes: string[] = [];
 	try {
 		master = await compose(watermark);
-		if (master.target) {
-			settings = {
-				target: master.target,
-				fps: targetFps,
-				crf: watermark ? WATERMARKED_MASTER_CRF : MASTER_CRF,
-				extraFilters: watermark ? [WATERMARK_FILTER] : [],
-			};
-		}
 	} catch (error) {
 		console.error(`[Finalize] ${rec.id}: master encode failed:`, error);
 		if (watermark) {
@@ -947,14 +938,6 @@ async function finalizeRecording({
 			// beats losing the recording.
 			try {
 				master = await compose(false);
-				if (master.target) {
-					settings = {
-						target: master.target,
-						fps: targetFps,
-						crf: MASTER_CRF,
-						extraFilters: [],
-					};
-				}
 			} catch (retryError) {
 				console.error(
 					`[Finalize] ${rec.id}: master encode failed without watermark too:`,
@@ -1054,20 +1037,17 @@ async function finalizeRecording({
 	if (hasVideo && alignedGapMs >= ALIGNED_MIN_OFFSET_MS) {
 		const alignedPath = path.join(tmpDir, `${rec.id}-aligned.mp4`);
 		try {
-			if (settings && outExt === "mp4") {
+			if (master?.timeline && outExt === "mp4") {
 				// The master is our own normalized encode, so a matching black
-				// lead-in joins it with a stream copy - no second full encode.
-				const leadPath = path.join(tmpDir, `${rec.id}-lead.mp4`);
-				await encodeMasterFiller({
-					durationMs: alignedGapMs,
-					settings,
-					output: leadPath,
+				// lead-in joins its video with a stream copy - no second full
+				// encode - and its audio timeline is shifted sample-exactly.
+				await composeAlignedMaster({
+					master,
+					leadMs: alignedGapMs,
+					tmpDir,
+					id: rec.id,
+					output: alignedPath,
 				});
-				await concatCopy(
-					[leadPath, masterPath],
-					alignedPath,
-					path.join(tmpDir, `${rec.id}-aligned-list.txt`),
-				);
 			} else {
 				await createAlignedVideo({
 					inputPath: masterPath,
@@ -1523,40 +1503,37 @@ async function finalizePcmRecording({
 			bitDepth: seg.bitDepth ?? 24,
 		});
 
-		const firstStartMs = ordered[0]?.startMs ?? 0;
 		const videoOrigin = await cameraTimelineOrigin(
 			recordingSessionId,
 			rec.participantId,
 		);
-		const leadPadMs =
-			videoOrigin === null
-				? 0
-				: Math.min(
-						MAX_PCM_LEAD_PAD_MS,
-						Math.max(0, firstStartMs - videoOrigin),
-					);
 
 		const rawPath = path.join(tmpDir, `${rec.id}-raw.pcm`);
 		const wavPath = path.join(tmpDir, `${rec.id}-out.wav`);
 
-		// Each chunk at its own timeline position, streamed straight to disk: a
-		// lost chunk or a refreshed tab becomes silence instead of shifting
-		// everything after it out of sync.
+		// Each run of continuous capture at its measured position, its sample
+		// clock fitted to the system clock the video runs on (streamed to disk):
+		// a lost chunk or a suspended context becomes silence, and an hour-long
+		// take ends as in sync as it started.
 		let missingChunks = 0;
 		const format = await composePcmTimeline({
 			segments: ordered.map((seg) => ({
+				sequenceNumber: seg.sequenceNumber,
 				startMs: seg.startMs,
 				format: formatOf(seg),
 				load: async () => {
 					const buffer = await downloadChunk(seg.assetKey);
 					if (!buffer) missingChunks++;
-					return buffer ?? Buffer.alloc(0);
+					return buffer;
 				},
 			})),
 			outPath: rawPath,
-			leadPadMs,
+			tmpDir,
+			originMs: videoOrigin,
+			maxLeadPadMs: MAX_PCM_LEAD_PAD_MS,
 			convert: (buffer, from, to) => convertPcm(buffer, from, to, tmpDir),
 		});
+		const { leadPadMs } = format;
 		// A re-run must only ever improve the WAV - never rebuild it from a
 		// fraction of its chunks.
 		if (rec.mergedFileKey && missingChunks > 0) {
@@ -1565,10 +1542,6 @@ async function finalizePcmRecording({
 			);
 		}
 		const { sampleRate, channelCount, bitDepth } = format;
-
-		// TODO(drift): the PCM stream (audio-hardware clock) and the video master
-		// (system clock) can drift apart over very long recordings. Not corrected
-		// yet - chunk wall-clock timestamps are too jittery to estimate it from.
 
 		// s24le = signed 24-bit LE, matching our 3-bytes/sample packing. Verify at
 		// runtime and fall back to a hand-written header if the binary differs.
@@ -1629,7 +1602,7 @@ async function finalizePcmRecording({
 		});
 
 		console.log(
-			`[Finalize] PCM ${rec.id}: wrote lossless WAV ${wavKey} (${sampleRate}Hz / 24-bit / ${channelCount}ch, lead ${leadPadMs}ms)`,
+			`[Finalize] PCM ${rec.id}: wrote lossless WAV ${wavKey} (${sampleRate}Hz / 24-bit / ${channelCount}ch, lead ${Math.round(leadPadMs)}ms, ${format.runs} run(s), drift corrected ${format.correctedMs}ms)`,
 		);
 
 		// Back-link to the participant's video output (order-independent).

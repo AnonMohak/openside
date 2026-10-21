@@ -23,10 +23,16 @@
  * call's mic track instead.
  *
  * CLOCK:
- * Chunk timing is derived from the ACTUAL captured sample count against
- * ctx.sampleRate - never a hardcoded requested rate, because hardware may ignore
- * it. Chunk start times are on the recording's timeline (`timeOrigin`, a
- * performance.now() instant), so the finalizer can align the WAV with the video.
+ * Samples are counted at the ACTUAL ctx.sampleRate (hardware may ignore the
+ * requested one), but that count runs on the audio hardware's clock, while the
+ * video and every chunk timestamp run on the system clock - they drift apart,
+ * and a suspended context stops counting altogether. So each chunk is stamped
+ * with where its first sample really sat on the system clock: the smallest
+ * (receipt time - sample position) over the chunk's quanta, which filters out
+ * main-thread delays. When that offset jumps and stays jumped (the context was
+ * suspended), the chunk is cut right there so the new stamp starts exactly at
+ * the break. The finalizer fits these stamps to keep the WAV in sync with the
+ * video for the whole take (see audio-timeline.ts on the server).
  */
 
 import { useCallback, useRef } from "react";
@@ -83,6 +89,23 @@ const FLUSH_INTERVAL_SECONDS = 5;
 /** 2^23 - 1: full-scale for signed 24-bit. */
 const INT24_MAX = 8388607;
 
+/** The sample clock fell this far behind the system clock: lost audio time. */
+const DISCONTINUITY_MS = 150;
+
+/** ...and stayed behind this long (a main-thread stall catches up instantly). */
+const DISCONTINUITY_CONFIRM_MS = 400;
+
+interface PendingBreak {
+  /** Index in the pending frames of the first quantum after the break. */
+  frameIndex: number;
+  /** Pending samples before it. */
+  samplesBefore: number;
+  /** Smallest offset seen since the break. */
+  offsetMs: number;
+  /** When the break was first seen (performance.now()). */
+  seenAt: number;
+}
+
 function isIos(): boolean {
   if (typeof navigator === "undefined") return false;
   return (
@@ -113,8 +136,10 @@ export default function usePcmCapture({
   const emittedSamplesRef = useRef(0);
   const seqRef = useRef(0);
   const timeOriginRef = useRef(0);
-  // Where the first captured sample sits on the recording timeline (ms).
-  const firstSampleMsRef = useRef<number | null>(null);
+  // System-clock time minus sample-clock time for the pending chunk (ms): its
+  // first sample sits at sampleTime + this on the recording timeline.
+  const chunkOffsetRef = useRef<number | null>(null);
+  const pendingBreakRef = useRef<PendingBreak | null>(null);
   const runningRef = useRef(false);
   const onPcmChunkRef = useRef(onPcmChunk);
   onPcmChunkRef.current = onPcmChunk;
@@ -149,11 +174,14 @@ export default function usePcmCapture({
 
     // Use the ACTUAL context sample rate, never a hardcoded 48000.
     const sampleRate = ctx.sampleRate;
-    const startMs =
-      (firstSampleMsRef.current ?? 0) +
-      (emittedSamplesRef.current / sampleRate) * 1000;
+    const startMs = Math.max(
+      0,
+      (emittedSamplesRef.current / sampleRate) * 1000 +
+        (chunkOffsetRef.current ?? 0),
+    );
     const durationMs = (total / sampleRate) * 1000;
     emittedSamplesRef.current += total;
+    chunkOffsetRef.current = null;
 
     const blob = new Blob([bytes], { type: "audio/pcm-raw" });
     onPcmChunkRef.current(blob, {
@@ -166,6 +194,38 @@ export default function usePcmCapture({
     });
     seqRef.current += 1;
   }, []);
+
+  /** Emit everything before a confirmed break as its own chunk; the rest
+   *  starts a new chunk stamped from after the break. */
+  const splitAtBreak = useCallback(
+    (pending: PendingBreak) => {
+      const after = framesRef.current.slice(pending.frameIndex);
+      framesRef.current = framesRef.current.slice(0, pending.frameIndex);
+      const afterSamples = pendingSamplesRef.current - pending.samplesBefore;
+      pendingSamplesRef.current = pending.samplesBefore;
+      flush();
+      framesRef.current = after;
+      pendingSamplesRef.current = afterSamples;
+      chunkOffsetRef.current = pending.offsetMs;
+      pendingBreakRef.current = null;
+    },
+    [flush],
+  );
+
+  /** Flush on stop, honouring a break that was still being confirmed. */
+  const flushAll = useCallback(() => {
+    const pending = pendingBreakRef.current;
+    const chunkOffset = chunkOffsetRef.current;
+    if (
+      pending &&
+      chunkOffset !== null &&
+      pending.offsetMs > chunkOffset + DISCONTINUITY_MS
+    ) {
+      splitAtBreak(pending);
+    }
+    pendingBreakRef.current = null;
+    flush();
+  }, [flush, splitAtBreak]);
 
   /** Open the capture for a source: the call track's clone on iOS, otherwise
    *  our own DSP-free stream on the same device. */
@@ -293,25 +353,56 @@ export default function usePcmCapture({
         seqRef.current = 0;
         framesRef.current = [];
         pendingSamplesRef.current = 0;
-        firstSampleMsRef.current = null;
+        chunkOffsetRef.current = null;
+        pendingBreakRef.current = null;
 
         const flushThreshold = Math.round(
           FLUSH_INTERVAL_SECONDS * ctx.sampleRate,
         );
         node.port.onmessage = (event) => {
           const ch = event.data as Float32Array;
-          if (firstSampleMsRef.current === null) {
-            // This quantum was captured just before it arrived.
-            firstSampleMsRef.current = Math.max(
-              0,
-              performance.now() -
-                timeOriginRef.current -
-                (ch.length / ctx.sampleRate) * 1000,
-            );
-          }
+          const now = performance.now();
           framesRef.current.push(ch);
           pendingSamplesRef.current += ch.length;
-          if (pendingSamplesRef.current >= flushThreshold) flush();
+          // This quantum was complete when posted: its last sample sits at
+          // the sample clock's current end.
+          const sampleMs =
+            ((emittedSamplesRef.current + pendingSamplesRef.current) /
+              ctx.sampleRate) *
+            1000;
+          const offset = now - timeOriginRef.current - sampleMs;
+
+          const chunkOffset = chunkOffsetRef.current;
+          const pending = pendingBreakRef.current;
+          if (chunkOffset === null) {
+            chunkOffsetRef.current = offset;
+          } else if (pending) {
+            pending.offsetMs = Math.min(pending.offsetMs, offset);
+            if (pending.offsetMs <= chunkOffset + DISCONTINUITY_MS) {
+              // The main thread was busy and the backlog caught up - no
+              // audio time was lost.
+              pendingBreakRef.current = null;
+              chunkOffsetRef.current = Math.min(chunkOffset, pending.offsetMs);
+            } else if (now - pending.seenAt >= DISCONTINUITY_CONFIRM_MS) {
+              splitAtBreak(pending);
+            }
+          } else if (offset > chunkOffset + DISCONTINUITY_MS) {
+            pendingBreakRef.current = {
+              frameIndex: framesRef.current.length - 1,
+              samplesBefore: pendingSamplesRef.current - ch.length,
+              offsetMs: offset,
+              seenAt: now,
+            };
+          } else {
+            chunkOffsetRef.current = Math.min(chunkOffset, offset);
+          }
+
+          if (
+            !pendingBreakRef.current &&
+            pendingSamplesRef.current >= flushThreshold
+          ) {
+            flush();
+          }
         };
 
         connectStream(stream);
@@ -324,7 +415,7 @@ export default function usePcmCapture({
         await teardown();
       }
     },
-    [connectStream, flush, onError, openStream, teardown],
+    [connectStream, flush, onError, openStream, splitAtBreak, teardown],
   );
 
   const switchDevice = useCallback(
@@ -364,13 +455,13 @@ export default function usePcmCapture({
 
     // Flush the final partial chunk BEFORE tearing anything down.
     try {
-      flush();
+      flushAll();
     } catch (err) {
       console.error("[PcmCapture] final flush failed:", err);
     }
 
     await teardown();
-  }, [flush, teardown]);
+  }, [flushAll, teardown]);
 
   const getChunkCount = useCallback(() => seqRef.current, []);
   const isRunning = useCallback(() => runningRef.current, []);
