@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Command } from "cmdk";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, FolderOpen, Home, Search, Settings } from "lucide-react";
@@ -7,29 +7,40 @@ import { FiMonitor } from "react-icons/fi";
 import { MdOutlineVideoLabel } from "react-icons/md";
 import generateRoomId from "@/utils/GenerateRoomId";
 import { createIntentKey } from "@/pages/RoomPage";
-import { useScreenRecordings } from "@/hooks/useScreenRecordings";
-import { useGetUserSpaces } from "@/hooks/useSpace";
+import { useProjectSearch } from "@/hooks/useProjectSearch";
 import ScheduleModal from "./ScheduleModal";
 
 const isMac =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** Projects listed before you type; searching covers all of them. */
-const RECENT_PROJECT_LIMIT = 5;
+interface MenuEntry {
+  label: string;
+  icon: ReactNode;
+  keywords?: string[];
+  onSelect: () => void;
+}
+
+/** Case-insensitive substring match on the label or any keyword. */
+const entryMatches = (entry: MenuEntry, query: string) =>
+  !query ||
+  [entry.label, ...(entry.keywords ?? [])].some((text) =>
+    text.toLowerCase().includes(query),
+  );
 
 /**
  * Header search: a ⌘K / Ctrl+K command palette over pages, quick actions and
- * your projects. Renders its own trigger button.
+ * your projects. Projects are searched on the server (titles, takes and the
+ * people in them); actions and pages are filtered here. Renders its own
+ * trigger button.
  */
 const CommandMenu = () => {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [search, setSearch] = useState("");
-  // Same cached queries the projects pages use, so opening this is instant.
-  const { data: spaces = [] } = useGetUserSpaces("hosted");
-  const { data: screenRecordings = [] } = useScreenRecordings();
+  const query = search.trim().toLowerCase();
+  const { data: projects = [], isFetching } = useProjectSearch(search, open);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -55,37 +66,105 @@ const CommandMenu = () => {
     navigate(`/${roomId}`);
   };
 
-  // Meeting projects and screen recordings, newest first.
-  const projects = useMemo(
-    () =>
-      [
-        ...spaces
-          .filter((space) => (space._count?.recordingSessions ?? 0) > 0)
-          .map((space) => ({
-            id: space.id,
-            title: space.title || "Untitled recording",
-            path: `/dashboard/project/${space.id}`,
-            screen: false,
-            at: new Date(space.createdAt ?? 0).getTime(),
-          })),
-        ...screenRecordings.map((recording) => ({
-          id: recording.id,
-          title: recording.title || "Untitled recording",
-          path: `/dashboard/project/screen/${recording.id}`,
-          screen: true,
-          at: new Date(recording.startedAt || recording.createdAt).getTime(),
-        })),
-      ].sort((a, b) => b.at - a.at),
-    [spaces, screenRecordings],
-  );
-  const shownProjects = search.trim()
-    ? projects
-    : projects.slice(0, RECENT_PROJECT_LIMIT);
-
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) setSearch("");
   };
+
+  const actions = (
+    [
+      {
+        label: "New recording",
+        icon: <BsFillRecordCircleFill size={14} className="text-red-500" />,
+        onSelect: () => run(startRecording),
+      },
+      {
+        label: "Schedule a recording",
+        icon: <CalendarDays size={15} />,
+        keywords: ["plan", "later", "invite"],
+        onSelect: () => run(() => setIsScheduleOpen(true)),
+      },
+      {
+        label: "Screen recorder",
+        icon: <FiMonitor size={15} />,
+        onSelect: () => run(() => navigate("/dashboard/screen-recorder")),
+      },
+    ] satisfies MenuEntry[]
+  ).filter((entry) => entryMatches(entry, query));
+
+  const pages = (
+    [
+      {
+        label: "Home",
+        icon: <Home size={15} />,
+        onSelect: () => run(() => navigate("/dashboard/home")),
+      },
+      {
+        label: "Projects",
+        icon: <FolderOpen size={15} />,
+        keywords: ["recordings", "library"],
+        onSelect: () => run(() => navigate("/dashboard/project")),
+      },
+      {
+        label: "Calendar",
+        icon: <CalendarDays size={15} />,
+        keywords: ["upcoming", "sessions"],
+        onSelect: () => run(() => navigate("/dashboard/calendar")),
+      },
+      {
+        label: "Settings",
+        icon: <Settings size={15} />,
+        keywords: ["profile", "billing", "plan"],
+        onSelect: () => run(() => navigate("/dashboard/settings")),
+      },
+    ] satisfies MenuEntry[]
+  ).filter((entry) => entryMatches(entry, query));
+
+  const renderEntries = (entries: MenuEntry[]) =>
+    entries.map((entry) => (
+      <Item
+        key={entry.label}
+        value={entry.label}
+        icon={entry.icon}
+        onSelect={entry.onSelect}
+      >
+        {entry.label}
+      </Item>
+    ));
+
+  const projectGroup = projects.length > 0 && (
+    <Command.Group heading={query ? "Projects" : "Recent projects"}>
+      {projects.map((project) => (
+        <Item
+          key={`${project.kind}:${project.id}`}
+          // Unique value so two projects with the same title don't merge.
+          value={`${project.kind}:${project.id}`}
+          icon={
+            project.kind === "screen" ? (
+              <FiMonitor size={15} />
+            ) : (
+              <MdOutlineVideoLabel size={15} />
+            )
+          }
+          hint={project.match}
+          onSelect={() =>
+            run(() =>
+              navigate(
+                project.kind === "screen"
+                  ? `/dashboard/project/screen/${project.id}`
+                  : `/dashboard/project/${project.id}`,
+              ),
+            )
+          }
+        >
+          {project.title}
+        </Item>
+      ))}
+    </Command.Group>
+  );
+
+  const nothingShown =
+    actions.length === 0 && pages.length === 0 && projects.length === 0;
 
   return (
     <>
@@ -107,6 +186,8 @@ const CommandMenu = () => {
         open={open}
         onOpenChange={handleOpenChange}
         label="Search"
+        // Filtering is ours: projects come back already matched by the server.
+        shouldFilter={false}
         // Radix keeps both mounted until the closed-state animation finishes.
         overlayClassName="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
         contentClassName="fixed left-1/2 top-[18%] z-[110] w-[min(560px,calc(100%-1.5rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-border/50 bg-[#f9f9fb] shadow-2xl shadow-black/30 duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 dark:bg-[#0f0f11]"
@@ -125,93 +206,26 @@ const CommandMenu = () => {
         </div>
 
         <Command.List className="max-h-[360px] overflow-y-auto p-2 scrollbar-hide [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-subtle">
-          <Command.Empty className="py-10 text-center text-sm text-fg-subtle">
-            No results found.
-          </Command.Empty>
+          {nothingShown && (
+            <div className="py-10 text-center text-sm text-fg-subtle">
+              {isFetching ? "Searching…" : "No results found."}
+            </div>
+          )}
 
-          <Command.Group heading="Actions">
-            <Item
-              icon={
-                <BsFillRecordCircleFill size={14} className="text-red-500" />
-              }
-              onSelect={() => run(startRecording)}
-            >
-              New recording
-            </Item>
-            <Item
-              icon={<CalendarDays size={15} />}
-              keywords={["plan", "later", "invite"]}
-              onSelect={() => run(() => setIsScheduleOpen(true))}
-            >
-              Schedule a recording
-            </Item>
-            <Item
-              icon={<FiMonitor size={15} />}
-              onSelect={() => run(() => navigate("/dashboard/screen-recorder"))}
-            >
-              Screen recorder
-            </Item>
-          </Command.Group>
+          {/* Typing usually means looking for a project: those lead. */}
+          {query && projectGroup}
 
-          {shownProjects.length > 0 && (
-            <Command.Group
-              heading={search.trim() ? "Projects" : "Recent projects"}
-            >
-              {shownProjects.map((project) => (
-                <Item
-                  key={project.id}
-                  // Unique value so two projects with the same title don't merge.
-                  value={`${project.title} ${project.id}`}
-                  keywords={
-                    project.screen
-                      ? ["screen recording"]
-                      : ["meeting", "space recording"]
-                  }
-                  icon={
-                    project.screen ? (
-                      <FiMonitor size={15} />
-                    ) : (
-                      <MdOutlineVideoLabel size={15} />
-                    )
-                  }
-                  onSelect={() => run(() => navigate(project.path))}
-                >
-                  {project.title}
-                </Item>
-              ))}
+          {actions.length > 0 && (
+            <Command.Group heading="Actions">
+              {renderEntries(actions)}
             </Command.Group>
           )}
 
-          <Command.Group heading="Pages">
-            <Item
-              icon={<Home size={15} />}
-              onSelect={() => run(() => navigate("/dashboard/home"))}
-            >
-              Home
-            </Item>
-            <Item
-              icon={<FolderOpen size={15} />}
-              keywords={["recordings", "library"]}
-              onSelect={() => run(() => navigate("/dashboard/project"))}
-            >
-              Projects
-            </Item>
-            <Item
-              icon={<CalendarDays size={15} />}
-              keywords={["upcoming", "sessions"]}
-              onSelect={() => run(() => navigate("/dashboard/calendar"))}
-            >
-              Calendar
-            </Item>
-            <Item
-              icon={<Settings size={15} />}
-              keywords={["profile", "billing", "plan"]}
-              onSelect={() => run(() => navigate("/dashboard/settings"))}
-            >
-              Settings
-            </Item>
-          </Command.Group>
+          {!query && projectGroup}
 
+          {pages.length > 0 && (
+            <Command.Group heading="Pages">{renderEntries(pages)}</Command.Group>
+          )}
         </Command.List>
       </Command.Dialog>
 
@@ -226,19 +240,19 @@ const CommandMenu = () => {
 const Item = ({
   icon,
   value,
-  keywords,
+  hint,
   onSelect,
   children,
 }: {
   icon: ReactNode;
-  value?: string;
-  keywords?: string[];
+  value: string;
+  /** Muted trailing text, e.g. why a project matched. */
+  hint?: string | null;
   onSelect: () => void;
   children: ReactNode;
 }) => (
   <Command.Item
     value={value}
-    keywords={keywords}
     onSelect={onSelect}
     className="flex h-10 cursor-pointer items-center gap-3 rounded-lg px-2 text-sm text-foreground data-[selected=true]:bg-muted"
   >
@@ -246,6 +260,11 @@ const Item = ({
       {icon}
     </span>
     <span className="min-w-0 flex-1 truncate">{children}</span>
+    {hint && (
+      <span className="max-w-[40%] shrink-0 truncate text-xs text-fg-subtle">
+        {hint}
+      </span>
+    )}
   </Command.Item>
 );
 

@@ -12,6 +12,7 @@ import finalOutputRouter from "./routes/final-output-route.ts";
 import livekitRouter from "./routes/livekit-route.ts";
 import participantRouter from "./routes/participant-route.ts";
 import recordingRouter from "./routes/recording-route.ts";
+import searchRouter from "./routes/search-route.ts";
 import settingsRouter from "./routes/settings-route.ts";
 import spaceRouter from "./routes/space-route.ts";
 import usageRouter from "./routes/usage-route.ts";
@@ -73,6 +74,7 @@ app.use("/api/space", spaceRouter);
 app.use("/api/participant", participantRouter);
 app.use("/api/output", finalOutputRouter);
 app.use("/api/usage", usageRouter);
+app.use("/api/search", searchRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/admin/v1", adminRoutes);
 
