@@ -33,7 +33,11 @@ import {
 	type DownloadFormat,
 	transcodeToR2,
 } from "./services/download-service.ts";
-import { finalizeSession } from "./services/finalization-service.ts";
+import {
+	finalizeSession,
+	finalizeTrack,
+	requestTrackFinalize,
+} from "./services/finalization-service.ts";
 import { finalizeScreenSession } from "./services/screen-finalization-service.ts";
 
 if (!isQueueConfigured()) {
@@ -59,11 +63,20 @@ if (serverless && process.env.NODE_ENV === "production" && !wakeSecret) {
 	process.exit(1);
 }
 
-async function processFinalizeJob(job: Job<FinalizeJob>): Promise<void> {
-	const { recordingSessionId } = job.data;
+/** Chunks landed while the track was encoding: run it once more. */
+const LATE_CHUNK_RERUN_DELAY_MS = 5000;
+
+async function processFinalizeJob(
+	job: Job<FinalizeJob>,
+): Promise<{ rerun: boolean } | undefined> {
+	const { recordingSessionId, recordingId } = job.data;
 	console.log(
-		`[Worker:finalize] picked job ${job.id} for session ${recordingSessionId}`,
+		`[Worker:finalize] picked job ${job.id} for session ${recordingSessionId}${recordingId ? ` track ${recordingId}` : ""}`,
 	);
+
+	if (recordingId) {
+		return finalizeTrack(recordingSessionId, recordingId);
+	}
 
 	const session = await prisma.recordingSession.findUnique({
 		where: { id: recordingSessionId },
@@ -107,9 +120,10 @@ async function processFinalizeJob(job: Job<FinalizeJob>): Promise<void> {
 	}
 
 	console.log(
-		`[Worker:finalize] routing ${recordingSessionId} to meeting finalizer`,
+		`[Worker:finalize] fanning ${recordingSessionId} out to per-track jobs`,
 	);
 	await finalizeSession(recordingSessionId);
+	return undefined;
 }
 
 async function processTranscodeJob(job: Job<TranscodeJob>): Promise<void> {
@@ -122,7 +136,7 @@ async function processTranscodeJob(job: Job<TranscodeJob>): Promise<void> {
 
 interface QueueDefinition {
 	name: keyof typeof QUEUE_ROLES;
-	process: (job: Job) => Promise<void>;
+	process: (job: Job) => Promise<unknown>;
 	getQueue: () => Queue;
 }
 
@@ -151,9 +165,24 @@ interface Consumers {
 }
 
 function attachWorkerLogs(name: string, worker: Worker): void {
-	worker.on("completed", (job) =>
-		console.log(`[Worker:${name}] completed ${job.id}`, job.data),
-	);
+	worker.on("completed", (job) => {
+		console.log(`[Worker:${name}] completed ${job.id}`, job.data);
+		// A track that got late chunks mid-encode re-queues itself here, after
+		// its job has left the queue - an add from inside the running job would
+		// be deduped against itself.
+		const data = job.data as Partial<FinalizeJob>;
+		const result = job.returnvalue as { rerun?: boolean } | undefined;
+		if (
+			name === FINALIZE_QUEUE &&
+			result?.rerun &&
+			data.recordingSessionId &&
+			data.recordingId
+		) {
+			void requestTrackFinalize(data.recordingSessionId, data.recordingId, {
+				delayMs: LATE_CHUNK_RERUN_DELAY_MS,
+			});
+		}
+	});
 	worker.on("failed", (job, error) =>
 		console.error(`[Worker:${name}] failed ${job?.id}:`, job?.data, error),
 	);
@@ -172,6 +201,10 @@ function createConsumers(): Consumers {
 		const worker = new Worker(definition.name, definition.process, {
 			connection,
 			concurrency,
+			// A multi-hour encode runs in a child process, but a long GC pause or a
+			// big chunk download can still delay the lock renewal; a lost lock
+			// makes BullMQ hand the same job to a second worker mid-encode.
+			lockDuration: 120_000,
 		});
 		attachWorkerLogs(definition.name, worker);
 		consumers.workers.push(worker);
@@ -338,6 +371,9 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 if (serverless) {
 	startWakeServer();
+	// A deploy or crash can leave jobs queued (or stalled mid-encode) with no
+	// wake call coming - drain once at boot so they're picked up now.
+	requestDrain();
 } else {
 	activeConsumers = createConsumers();
 	console.log(

@@ -114,12 +114,9 @@ const ACTIVE_STATES: RecordingState[] = [
 const SCREEN_AUDIO_ATTACH_GRACE_MS = 600;
 
 // Transitional states where a button press should be ignored (mid-flight).
-const BUSY_STATES: RecordingState[] = [
-  "starting",
-  "countdown",
-  "stopping",
-  "uploading",
-];
+// Not "uploading": the previous take keeps uploading in the background while
+// the next one records.
+const BUSY_STATES: RecordingState[] = ["starting", "countdown", "stopping"];
 
 const RecordingProvider = ({
   spaceId,
@@ -184,10 +181,10 @@ const RecordingProvider = ({
     spaceId: spaceId ?? "",
     participantSessionId,
     isHost: canControl,
-    roomId: roomCode,
     cloudBackup: cloudBackupAllowed && cloudBackup,
     getLiveStream,
     cameraEnabled: isCameraEnabled,
+    micEnabled: isMicrophoneEnabled,
     recordingEchoCancellation,
   });
 

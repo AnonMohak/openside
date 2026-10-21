@@ -8,6 +8,11 @@ import {
 	clampVideoResolution,
 } from "../lib/recording-constants.ts";
 import {
+	buildRecordingStartedPayload,
+	publishRecordingStarted,
+	publishRecordingStopped,
+} from "../lib/recording-events.ts";
+import {
 	buildCloudRecordingKey,
 	buildScreenCloudRecordingKey,
 	startParticipantEgress,
@@ -16,6 +21,7 @@ import {
 import {
 	generateEarlyThumbnailFromChunk,
 	maybeFinalizeSession,
+	requestTrackFinalize,
 } from "./finalization-service.ts";
 import {
 	invalidateSpaceInfraCache,
@@ -48,6 +54,9 @@ interface CreateParticipantRecordingData {
 	hasAudio?: boolean;
 	hasVideo?: boolean;
 	startOffsetMs?: number;
+	/** Camera/PCM tracks: continue this participant's existing track for the
+	 *  session (a refreshed tab, a rejoin) instead of starting a second one. */
+	resumable?: boolean;
 }
 
 interface CreateSegmentData {
@@ -99,6 +108,17 @@ function addScreenOutputKeys(keys: Set<string>, outputs: unknown) {
 
 const STALE_RECORDING_UPLOAD_MS =
 	Number(process.env.STALE_RECORDING_UPLOAD_MS) || 10 * 60 * 1000;
+
+/** A track whose creation kept failing during the session may still register
+ *  this long after the stop - its chunks are buffered client-side meanwhile. */
+const LATE_TRACK_GRACE_MS = 15 * 60 * 1000;
+
+/** Chunks of a finalized track are kept this long after its last activity so a
+ *  straggler (e.g. a crashed tab's buffer uploaded later) can still rebuild it. */
+const CHUNK_RETENTION_AFTER_FINALIZE_MS = 24 * 60 * 60 * 1000;
+
+/** Debounce re-finalizing a READY track while a burst of stragglers lands. */
+const STRAGGLER_FINALIZE_DELAY_MS = 30 * 1000;
 
 function hasContiguousSegments(
 	segments: { sequenceNumber: number }[],
@@ -399,11 +419,21 @@ export async function startRecordingSession(data: StartSessionData) {
 		});
 	});
 
+	// Tell every participant to start, from the server, the moment the session
+	// exists - not after the host's own socket relays it (a host with a dropped
+	// socket used to start nobody). The start instant is derived from the stored
+	// startedAt, so every later replay lands on the same timeline.
+	publishRecordingStarted(
+		session.space?.joinCode,
+		buildRecordingStartedPayload(session),
+	);
+
 	// Best-effort per-participant cloud recording via LiveKit egress. Non-fatal:
 	// local (browser) recording is the primary path and is unaffected by failures.
-	// Only when the host opted in for this session AND their plan allows it.
+	// Only when the host opted in for this session AND their plan allows it. In
+	// the background so slow egress start-up can't eat into the 3-2-1 lead-in.
 	if (cloudBackup && space.livekitRoomName) {
-		await startParticipantCloudRecordings({
+		void startParticipantCloudRecordings({
 			roomName: space.livekitRoomName,
 			spaceId,
 			recordingSessionId: session.id,
@@ -545,7 +575,12 @@ export async function stopRecordingSession(sessionId: string) {
 				},
 			},
 		});
-		if (existing) return existing;
+		if (existing) {
+			// Already stopped (another stop path won the race). Re-broadcast so a
+			// client that missed the first stop still finishes its upload.
+			publishRecordingStopped(existing.space?.joinCode, sessionId);
+			return existing;
+		}
 		throw new Error("SESSION_NOT_ACTIVE");
 	}
 
@@ -592,6 +627,11 @@ export async function stopRecordingSession(sessionId: string) {
 			data: { recordingStatus: "STOPPED" },
 		}),
 	]);
+
+	// Every participant stops capturing, flushes and completes their tracks.
+	// Published by the server on EVERY stop path (host, credit exhaustion, space
+	// end), so no participant keeps recording into a stopped session.
+	publishRecordingStopped(updatedSession.space?.joinCode, sessionId);
 
 	// Stop per-participant cloud egresses in the background. The egress_ended
 	// webhook (or its poll fallback) marks each CLOUD output READY.
@@ -768,6 +808,44 @@ export async function getActiveSessionBySpaceId(spaceId: string) {
 
 // ParticipantRecording Operations
 
+const PARTICIPANT_RECORDING_INCLUDE = {
+	participant: {
+		select: {
+			id: true,
+			displayName: true,
+			user: {
+				select: {
+					id: true,
+					name: true,
+					avatar: true,
+				},
+			},
+		},
+	},
+	recordingSession: {
+		select: {
+			id: true,
+			spaceRecordingSessionId: true,
+			spaceId: true,
+		},
+	},
+} as const;
+
+/** Where a resumed track continues: the next free sequence number, and the
+ *  track's own timeline origin (its startOffsetMs) chunk times are relative to. */
+interface RecordingResume {
+	nextSequenceNumber: number;
+	startOffsetMs: number | null;
+}
+
+async function nextSequenceNumber(recordingId: string): Promise<number> {
+	const { _max } = await prisma.recordingSegment.aggregate({
+		where: { participantRecordingId: recordingId },
+		_max: { sequenceNumber: true },
+	});
+	return _max.sequenceNumber === null ? 0 : _max.sequenceNumber + 1;
+}
+
 export async function createParticipantRecording(
 	data: CreateParticipantRecordingData,
 ) {
@@ -776,6 +854,7 @@ export async function createParticipantRecording(
 		participantId,
 		type,
 		isScreenShare,
+		resumable,
 		...metadata
 	} = data;
 
@@ -786,6 +865,7 @@ export async function createParticipantRecording(
 			id: true,
 			status: true,
 			spaceId: true,
+			stoppedAt: true,
 			cloudBackup: true,
 			space: { select: { livekitRoomName: true } },
 		},
@@ -795,13 +875,21 @@ export async function createParticipantRecording(
 		throw new Error("SESSION_NOT_FOUND");
 	}
 
-	if (session.status !== "ACTIVE") {
-		throw new Error("SESSION_NOT_ACTIVE");
-	}
-
 	// This path is space-only; screen recordings use createScreenRecording.
 	if (!session.spaceId) {
 		throw new Error("SESSION_NOT_FOUND");
+	}
+
+	// Shortly after a stop, still accept a track whose creation kept failing
+	// during the session - the client has its chunks buffered and the track
+	// finalizes on its own once they land.
+	const isActive = session.status === "ACTIVE";
+	const inLateGrace =
+		!isActive &&
+		session.stoppedAt !== null &&
+		Date.now() - session.stoppedAt.getTime() <= LATE_TRACK_GRACE_MS;
+	if (!isActive && !inLateGrace) {
+		throw new Error("SESSION_NOT_ACTIVE");
 	}
 
 	// Verify participant exists and belongs to the space
@@ -816,6 +904,47 @@ export async function createParticipantRecording(
 		throw new Error("PARTICIPANT_NOT_FOUND");
 	}
 
+	// One camera track and one PCM track per participant per session. A
+	// refreshed tab, a rejoin, or a retry whose first response was lost gets the
+	// SAME row back and continues its sequence - instead of a second track that
+	// the original never completes and that shows up as a duplicate output.
+	if (resumable && !isScreenShare) {
+		const isPcm = metadata.container === "pcm";
+		const existing = await prisma.participantRecording.findFirst({
+			where: {
+				recordingSessionId,
+				participantId,
+				isScreenShare: false,
+				type,
+				container: isPcm ? "pcm" : { not: "pcm" },
+			},
+			orderBy: { createdAt: "desc" },
+			include: PARTICIPANT_RECORDING_INCLUDE,
+		});
+
+		if (existing) {
+			let recording = existing;
+			// It was completed by the tab that left; this tab keeps recording into
+			// it, so it's open again. Only while ACTIVE - nothing is finalized yet.
+			if (isActive && existing.isComplete) {
+				recording = await prisma.participantRecording.update({
+					where: { id: existing.id },
+					data: {
+						isComplete: false,
+						status: "UPLOADING",
+						expectedSegments: null,
+					},
+					include: PARTICIPANT_RECORDING_INCLUDE,
+				});
+			}
+			const resume: RecordingResume = {
+				nextSequenceNumber: await nextSequenceNumber(existing.id),
+				startOffsetMs: existing.startOffsetMs,
+			};
+			return { ...recording, resume };
+		}
+	}
+
 	// Create participant recording and update participant's hasRecording flag
 	const [recording] = await prisma.$transaction([
 		prisma.participantRecording.create({
@@ -827,28 +956,7 @@ export async function createParticipantRecording(
 				status: "UPLOADING",
 				...metadata,
 			},
-			include: {
-				participant: {
-					select: {
-						id: true,
-						displayName: true,
-						user: {
-							select: {
-								id: true,
-								name: true,
-								avatar: true,
-							},
-						},
-					},
-				},
-				recordingSession: {
-					select: {
-						id: true,
-						spaceRecordingSessionId: true,
-						spaceId: true,
-					},
-				},
-			},
+			include: PARTICIPANT_RECORDING_INCLUDE,
 		}),
 		prisma.spaceParticipant.update({
 			where: { id: participantId },
@@ -863,6 +971,7 @@ export async function createParticipantRecording(
 	// screen ParticipantRecording through here in both cases. Best-effort:
 	// the local screen recording is unaffected if egress can't start.
 	if (
+		isActive &&
 		isScreenShare &&
 		type === "VIDEO" &&
 		session.cloudBackup &&
@@ -885,7 +994,11 @@ export async function createParticipantRecording(
 		);
 	}
 
-	return recording;
+	const resume: RecordingResume = {
+		nextSequenceNumber: 0,
+		startOffsetMs: recording.startOffsetMs,
+	};
+	return { ...recording, resume };
 }
 
 /**
@@ -942,6 +1055,57 @@ async function startScreenShareCloudRecording(params: {
 	});
 }
 
+/**
+ * Flip a track to complete once every chunk the client reported recording
+ * (0..expectedSegments-1) is registered - whichever of the /complete call or
+ * the final chunk lands last. Both call this after their own write commits, so
+ * at least one of them always sees the other's data. The conditional update
+ * makes the flip (and its finalize trigger) happen exactly once.
+ */
+async function tryCompleteRecording(recordingId: string): Promise<boolean> {
+	const rec = await prisma.participantRecording.findUnique({
+		where: { id: recordingId },
+		select: {
+			isComplete: true,
+			status: true,
+			expectedSegments: true,
+			recordingSessionId: true,
+			segments: { select: { sequenceNumber: true } },
+			recordingSession: { select: { source: true } },
+		},
+	});
+	if (!rec || rec.isComplete || rec.expectedSegments === null) return false;
+	if (
+		rec.segments.length < rec.expectedSegments ||
+		!hasContiguousSegments(rec.segments, rec.expectedSegments)
+	) {
+		return false;
+	}
+
+	const flipped = await prisma.participantRecording.updateMany({
+		where: { id: recordingId, isComplete: false },
+		data: {
+			isComplete: true,
+			uploadedSegments: rec.segments.length,
+			...(rec.status === "UPLOADING" ? { status: "UPLOADED" as const } : {}),
+		},
+	});
+	if (flipped.count !== 1) return false;
+
+	if (rec.recordingSession.source === "SCREEN_RECORDER") {
+		void maybeFinalizeScreenSession(rec.recordingSessionId);
+	} else {
+		void maybeFinalizeSession(rec.recordingSessionId);
+	}
+	return true;
+}
+
+/**
+ * The client reports how many chunks it RECORDED (not how many it managed to
+ * upload) right when it stops, without waiting for its upload queue. The track
+ * completes the moment the last of those chunks lands - however long a slow
+ * uplink takes - instead of being cut off at whatever had arrived by a timeout.
+ */
 export async function markRecordingComplete(
 	recordingId: string,
 	expectedSegments: number,
@@ -955,11 +1119,11 @@ export async function markRecordingComplete(
 		where: { id: recordingId },
 		select: {
 			id: true,
-			uploadedSegments: true,
 			status: true,
+			isComplete: true,
+			expectedSegments: true,
 			width: true,
 			height: true,
-			segments: { select: { sequenceNumber: true } },
 		},
 	});
 
@@ -967,15 +1131,13 @@ export async function markRecordingComplete(
 		throw new Error("RECORDING_NOT_FOUND");
 	}
 
-	if (recording.status === "READY") {
-		throw new Error("RECORDING_ALREADY_COMPLETE");
-	}
-
-	const normalizedExpectedSegments = Math.max(0, Math.round(expectedSegments));
-	const actualUploadedSegments = recording.segments.length;
-	const isComplete =
-		actualUploadedSegments >= normalizedExpectedSegments &&
-		hasContiguousSegments(recording.segments, normalizedExpectedSegments);
+	// Never shrink: a tab that left early (or a retried call from an older tab)
+	// can report fewer chunks than the tab that kept recording into this track.
+	const requested = Math.max(0, Math.round(expectedSegments));
+	const nextExpected = Math.max(recording.expectedSegments ?? 0, requested);
+	const raised =
+		recording.expectedSegments !== null &&
+		nextExpected > recording.expectedSegments;
 
 	// Keep the larger of (start snapshot, observed max) - never shrink, so the
 	// finalizer downscales a grown surface instead of cropping it.
@@ -989,15 +1151,23 @@ export async function markRecordingComplete(
 		observedWidth * observedHeight >
 			(recording.width ?? 0) * (recording.height ?? 0);
 
-	const updatedRecording = await prisma.participantRecording.update({
+	await prisma.participantRecording.update({
 		where: { id: recordingId },
 		data: {
-			expectedSegments: normalizedExpectedSegments,
-			uploadedSegments: actualUploadedSegments,
-			isComplete,
-			status: isComplete ? "UPLOADED" : "UPLOADING",
+			expectedSegments: nextExpected,
 			...(grew ? { width: observedWidth, height: observedHeight } : {}),
+			// More chunks are coming for a track that was complete but not yet
+			// claimed by the finalizer - wait for them.
+			...(raised && recording.isComplete && recording.status === "UPLOADED"
+				? { isComplete: false, status: "UPLOADING" as const }
+				: {}),
 		},
+	});
+
+	await tryCompleteRecording(recordingId);
+
+	const updatedRecording = await prisma.participantRecording.findUnique({
+		where: { id: recordingId },
 		include: {
 			participant: {
 				select: {
@@ -1015,14 +1185,70 @@ export async function markRecordingComplete(
 			},
 		},
 	});
+	if (!updatedRecording) {
+		throw new Error("RECORDING_NOT_FOUND");
+	}
+	return updatedRecording;
+}
 
-	// When this recording is fully uploaded, it may be the last one the session
-	// was waiting on - try to kick off finalization (no-op if others are pending).
-	if (isComplete) {
-		void maybeFinalizeSession(updatedRecording.recordingSessionId);
+/**
+ * React to a newly registered chunk: complete the track if it was the last one
+ * missing, or - for a meeting track that already finalized - re-open it so a
+ * straggler (a crashed tab's buffered chunks uploaded later) lands in the
+ * master instead of being silently ignored.
+ */
+async function onSegmentArrived(
+	recordingId: string,
+	sequenceNumber: number,
+): Promise<void> {
+	const rec = await prisma.participantRecording.findUnique({
+		where: { id: recordingId },
+		select: {
+			isComplete: true,
+			status: true,
+			expectedSegments: true,
+			recordingSessionId: true,
+			recordingSession: { select: { source: true } },
+		},
+	});
+	if (!rec) return;
+
+	if (!rec.isComplete) {
+		await tryCompleteRecording(recordingId);
+		return;
 	}
 
-	return updatedRecording;
+	// UPLOADED/PROCESSING tracks pick this chunk up in their pending/running
+	// finalize (a running one re-checks for late chunks when it ends).
+	if (rec.recordingSession.source !== "SPACE") return;
+	if (rec.status !== "READY" && rec.status !== "FAILED") return;
+
+	// Chunk objects already cleaned up: re-stitching would drop everything else.
+	const cleaned = await prisma.recordingSegment.count({
+		where: { participantRecordingId: recordingId, status: "PROCESSED" },
+	});
+	if (cleaned > 0) {
+		console.warn(
+			`[Recording] late chunk ${sequenceNumber} for ${recordingId} arrived after its chunks were cleaned up; keeping the existing master`,
+		);
+		return;
+	}
+
+	const reopened = await prisma.participantRecording.updateMany({
+		where: { id: recordingId, status: { in: ["READY", "FAILED"] } },
+		data: {
+			status: "UPLOADED",
+			expectedSegments: Math.max(rec.expectedSegments ?? 0, sequenceNumber + 1),
+		},
+	});
+	if (reopened.count === 1) {
+		console.log(
+			`[Recording] late chunk ${sequenceNumber} for finalized ${recordingId} - re-finalizing`,
+		);
+		void requestTrackFinalize(rec.recordingSessionId, recordingId, {
+			delayMs: STRAGGLER_FINALIZE_DELAY_MS,
+		});
+	}
 }
 
 // RecordingSegment Operations
@@ -1068,6 +1294,17 @@ export async function createSegment(data: CreateSegmentData) {
 				segmentData.assetKey,
 			);
 		}
+
+		// Never fails the upload - the recovery sweep backstops completion.
+		await onSegmentArrived(
+			participantRecordingId,
+			segmentData.sequenceNumber,
+		).catch((error) =>
+			console.error(
+				`[Recording] post-chunk completion check failed for ${participantRecordingId}:`,
+				error,
+			),
+		);
 
 		return segment;
 	} catch (error) {
@@ -1148,7 +1385,7 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 				none: { lastChunkAt: { gt: cutoff } },
 			},
 		},
-		select: { id: true, spaceId: true },
+		select: { id: true, spaceId: true, space: { select: { joinCode: true } } },
 	});
 
 	if (abandoned.length > 0) {
@@ -1173,29 +1410,43 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 				data: { recordingStatus: "STOPPED" },
 			}),
 		]);
+
+		// Anyone still in the room (e.g. everyone's mic and camera were off)
+		// stops and completes whatever they captured.
+		for (const session of abandoned) {
+			publishRecordingStopped(session.space?.joinCode, session.id);
+		}
 	}
 
+	// Force-complete tracks whose client never reported (closed tab, lost
+	// /complete) - but ONLY once they've stopped making upload progress. A slow
+	// uplink still trickling chunks in long after the stop is not abandoned, and
+	// cutting it off here is what used to truncate the end of recordings.
+	const staleTrack = {
+		isComplete: false,
+		OR: [{ lastChunkAt: null }, { lastChunkAt: { lte: cutoff } }],
+	};
 	const sessions = await prisma.recordingSession.findMany({
 		where: {
 			source: { in: ["SPACE", "SCREEN_RECORDER"] },
 			// READY is included on purpose: a late joiner whose client-side
-			// /complete never lands (drain timeout, a swallowed request, or a
-			// closed tab) leaves their track stuck isComplete:false. Meanwhile the
-			// first participant to finish already flipped the session to READY, so
-			// without READY here that stuck track would never be force-completed
-			// and would never appear in the project. Force-completing it from the
-			// segments actually uploaded lets it finalize like everyone else.
-			status: { in: ["STOPPED", "PROCESSING", "READY"] },
+			// /complete never lands (a swallowed request, or a closed tab) leaves
+			// their track stuck isComplete:false. Meanwhile the first participant
+			// to finish already flipped the session to READY, so without READY
+			// here that stuck track would never be force-completed and would never
+			// appear in the project.
+			status: { in: ["STOPPED", "PROCESSING", "READY", "FAILED"] },
 			stoppedAt: { lte: cutoff },
-			participantRecordings: { some: { isComplete: false } },
+			participantRecordings: { some: staleTrack },
 		},
 		select: {
 			id: true,
 			source: true,
 			participantRecordings: {
-				where: { isComplete: false },
+				where: staleTrack,
 				select: {
 					id: true,
+					expectedSegments: true,
 					segments: { select: { sequenceNumber: true } },
 				},
 			},
@@ -1205,9 +1456,14 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 
 	for (const session of sessions) {
 		for (const recording of session.participantRecordings) {
-			const expectedSegments = observedExpectedSegments(recording.segments);
-			await prisma.participantRecording.update({
-				where: { id: recording.id },
+			// Keep a count the client did report, so the missing tail is recorded
+			// as a gap instead of silently shrinking the expected length.
+			const expectedSegments = Math.max(
+				recording.expectedSegments ?? 0,
+				observedExpectedSegments(recording.segments),
+			);
+			await prisma.participantRecording.updateMany({
+				where: { id: recording.id, isComplete: false },
 				data: {
 					expectedSegments,
 					uploadedSegments: recording.segments.length,
@@ -1228,23 +1484,22 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 		}
 	}
 
-	// Backstop for per-track finalization: a track can reach UPLOADED in the
-	// small window after a finalize run already scanned, so its re-trigger gets
-	// deduped and it's left uploaded-but-unencoded. These aren't caught above
-	// (that pass only looks for isComplete:false), so re-kick any session that
-	// still has an uploaded track waiting. No time cutoff - it's ready now.
+	// Backstop for per-track finalization: re-kick every meeting session with a
+	// track still waiting (UPLOADED) or claimed (PROCESSING). Enqueueing is
+	// deduped per track, so a track whose job is running is left alone, while
+	// one whose worker died mid-encode (deploy, OOM, scale-down) is picked up
+	// again instead of sitting in PROCESSING forever.
 	//
 	// READY is included on purpose: a late joiner finishes uploading AFTER the
-	// first participant's track already flipped the session to READY, and their
-	// finalize re-trigger is deduped against that finished run. Without READY
-	// here, their UPLOADED track would stay orphaned forever and never appear in
-	// the project. finalizeSession only claims UPLOADED tracks and never
-	// downgrades a READY session, so re-kicking it just picks up the straggler.
+	// first participant's track already flipped the session to READY. No time
+	// cutoff - it's ready now.
 	const stuck = await prisma.recordingSession.findMany({
 		where: {
 			source: "SPACE",
-			status: { in: ["STOPPED", "PROCESSING", "READY"] },
-			participantRecordings: { some: { status: "UPLOADED" } },
+			status: { in: ["STOPPED", "PROCESSING", "READY", "FAILED"] },
+			participantRecordings: {
+				some: { status: { in: ["UPLOADED", "PROCESSING"] } },
+			},
 		},
 		select: { id: true },
 		take: 25,
@@ -1252,6 +1507,50 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 
 	for (const session of stuck) {
 		await maybeFinalizeSession(session.id);
+	}
+
+	await cleanupFinalizedChunks();
+}
+
+/**
+ * Delete the raw chunk objects of meeting tracks that finalized and then saw
+ * no activity for a day. Deferred (not done at finalize) so a straggler chunk
+ * can still rebuild a fuller master in the meantime. Cleaned segments are
+ * marked PROCESSED, which also tells a later straggler not to re-stitch.
+ */
+async function cleanupFinalizedChunks(): Promise<void> {
+	const cutoff = new Date(Date.now() - CHUNK_RETENTION_AFTER_FINALIZE_MS);
+	const recordings = await prisma.participantRecording.findMany({
+		where: {
+			status: "READY",
+			updatedAt: { lte: cutoff },
+			OR: [{ lastChunkAt: null }, { lastChunkAt: { lte: cutoff } }],
+			recordingSession: { source: "SPACE" },
+			segments: { some: { status: "UPLOADED" } },
+		},
+		select: {
+			id: true,
+			segments: {
+				where: { status: "UPLOADED" },
+				select: { id: true, assetKey: true },
+			},
+		},
+		take: 10,
+	});
+
+	for (const recording of recordings) {
+		try {
+			await deleteObjects(recording.segments.map((seg) => seg.assetKey));
+			await prisma.recordingSegment.updateMany({
+				where: { id: { in: recording.segments.map((seg) => seg.id) } },
+				data: { status: "PROCESSED" },
+			});
+		} catch (error) {
+			console.error(
+				`[Recording] chunk cleanup failed for ${recording.id} (will retry):`,
+				error,
+			);
+		}
 	}
 }
 

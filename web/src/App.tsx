@@ -14,6 +14,7 @@ import SharedRecordingPage from "@/pages/SharedRecordingPage";
 import MeetingEndedPage from "@/pages/MeetingEndedPage";
 import LocalMediaProvider from "@/components/ScreenRecorder/LocalMediaProvider";
 import ScreenRecordingProvider from "@/components/ScreenRecorder/ScreenRecordingProvider";
+import RecordingChunkDrainer from "@/components/Space/recording/RecordingChunkDrainer";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 const App = () => {
@@ -23,6 +24,7 @@ const App = () => {
     // visible while the user is away from the recorder.
     <LocalMediaProvider>
       <ScreenRecordingProvider>
+        <RecordingChunkDrainer />
         <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route

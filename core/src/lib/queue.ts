@@ -12,7 +12,7 @@
  * is configured AND the worker process is running.
  */
 
-import { type JobsOptions, Queue } from "bullmq";
+import { type Job, type JobsOptions, Queue } from "bullmq";
 import IORedis from "ioredis";
 import type { WorkerRole } from "./worker-role.ts";
 import { wakeWorker } from "./worker-wake.ts";
@@ -30,6 +30,10 @@ export const QUEUE_ROLES = {
 
 export interface FinalizeJob {
 	recordingSessionId: string;
+	/** Meeting tracks finalize one job per track, so a 10-person session encodes
+	 *  in parallel across the worker fleet instead of one track after another.
+	 *  Absent for screen-recorder sessions (composited per session). */
+	recordingId?: string;
 }
 
 export interface TranscodeJob {
@@ -157,6 +161,34 @@ function safeJobId(prefix: string, value: string): string {
 }
 
 /**
+ * BullMQ silently ignores an add whose jobId already exists - including a job
+ * that already FAILED (kept 24h for visibility) or completed. That turned "retry
+ * this" into a no-op for a day. Clear a finished job first; leave waiting,
+ * delayed and active ones alone, since deduping those is the point.
+ * `minFailedAgeMs` throttles re-running something that just failed.
+ */
+async function clearFinishedJob<T>(
+	queue: Queue<T>,
+	jobId: string,
+	minFailedAgeMs = 0,
+): Promise<"clear" | "pending" | "throttled"> {
+	const existing: Job<T> | undefined = await queue.getJob(jobId);
+	if (!existing) return "clear";
+	const state = await existing.getState();
+	if (state === "failed") {
+		const failedAt = existing.finishedOn ?? 0;
+		if (Date.now() - failedAt < minFailedAgeMs) return "throttled";
+		await existing.remove().catch(() => undefined);
+		return "clear";
+	}
+	if (state === "completed") {
+		await existing.remove().catch(() => undefined);
+		return "clear";
+	}
+	return "pending";
+}
+
+/**
  * Enqueue a session finalization. Deduped by jobId so the same session can't be
  * finalized twice concurrently (replaces the old in-memory `inFlight` guard,
  * which broke across multiple API replicas). Returns false if Redis isn't
@@ -168,6 +200,10 @@ export async function enqueueFinalize(
 	if (!isQueueConfigured()) return false;
 	beginProducerOperation();
 	try {
+		await clearFinishedJob(
+			getFinalizeQueue(),
+			safeJobId("finalize", recordingSessionId),
+		);
 		await getFinalizeQueue().add(
 			"finalize",
 			{ recordingSessionId },
@@ -189,6 +225,76 @@ export async function enqueueFinalize(
 	}
 }
 
+export type FinalizeTrackJobState =
+	| "pending"
+	| "failed"
+	| "missing"
+	| "unconfigured";
+
+function finalizeTrackJobId(recordingId: string): string {
+	return safeJobId("finalize-track", recordingId);
+}
+
+/**
+ * Enqueue one meeting track's finalization. Deduped per track: while its job
+ * waits, sits in its delay, or runs, re-adds are ignored. `delayMs` debounces a
+ * burst of late chunks into one re-encode.
+ */
+export async function enqueueFinalizeTrack(
+	recordingSessionId: string,
+	recordingId: string,
+	{ delayMs = 0 }: { delayMs?: number } = {},
+): Promise<boolean> {
+	if (!isQueueConfigured()) return false;
+	beginProducerOperation();
+	try {
+		const queue = getFinalizeQueue();
+		const jobId = finalizeTrackJobId(recordingId);
+		await clearFinishedJob(queue, jobId);
+		await queue.add(
+			"finalize-track",
+			{ recordingSessionId, recordingId },
+			{
+				jobId,
+				...DEFAULT_JOB_OPTS,
+				// Storage hiccups are retried for ~10 minutes before a track is
+				// given up on (chunks stay in R2 either way).
+				attempts: 8,
+				removeOnComplete: true,
+				...(delayMs > 0 ? { delay: delayMs } : {}),
+			},
+		);
+		await wakeWorker(QUEUE_ROLES[FINALIZE_QUEUE]);
+		return true;
+	} finally {
+		endProducerOperation();
+	}
+}
+
+/**
+ * Whether a track's finalize job is still alive. A track left PROCESSING with
+ * no live job lost its worker mid-encode; one whose job FAILED exhausted its
+ * retries (a crash loop) and must not be re-run forever.
+ */
+export async function getFinalizeTrackJobState(
+	recordingId: string,
+): Promise<FinalizeTrackJobState> {
+	if (!isQueueConfigured()) return "unconfigured";
+	beginProducerOperation();
+	try {
+		const job = await getFinalizeQueue().getJob(
+			finalizeTrackJobId(recordingId),
+		);
+		if (!job) return "missing";
+		const state = await job.getState();
+		if (state === "failed") return "failed";
+		if (state === "completed" || state === "unknown") return "missing";
+		return "pending";
+	} finally {
+		endProducerOperation();
+	}
+}
+
 /**
  * Enqueue an on-demand transcode. Deduped by the target R2 key so two requests
  * for the same MP4/MP3/WAV don't double-encode. Returns false if Redis isn't
@@ -198,8 +304,16 @@ export async function enqueueTranscode(job: TranscodeJob): Promise<boolean> {
 	if (!isQueueConfigured()) return false;
 	beginProducerOperation();
 	try {
-		await getTranscodeQueue().add("transcode", job, {
-			jobId: safeJobId("transcode", job.targetKey),
+		const queue = getTranscodeQueue();
+		const jobId = safeJobId("transcode", job.targetKey);
+		// The caller only enqueues when the target file is missing, so a retained
+		// completed job is stale (its output was invalidated) and a failed one
+		// gets another try - throttled so a client polling a broken source
+		// doesn't re-run it every few seconds.
+		const existing = await clearFinishedJob(queue, jobId, 60_000);
+		if (existing === "throttled") return true;
+		await queue.add("transcode", job, {
+			jobId,
 			...DEFAULT_JOB_OPTS,
 		});
 		await wakeWorker(QUEUE_ROLES[TRANSCODE_QUEUE]);

@@ -160,6 +160,16 @@ export interface CreateParticipantRecordingPayload {
   hasAudio?: boolean;
   hasVideo?: boolean;
   startOffsetMs?: number;
+  /** Camera/PCM tracks: continue this participant's existing track for the
+   *  session (a refreshed tab, a rejoin) instead of creating a second one. */
+  resumable?: boolean;
+}
+
+/** Where a (possibly resumed) track continues: the next free sequence number
+ *  and the track's own timeline origin. */
+export interface ParticipantRecordingResume {
+  nextSequenceNumber: number;
+  startOffsetMs: number | null;
 }
 
 export interface PresignSegmentResponse {
@@ -207,7 +217,7 @@ export interface GetSessionsListResponse {
 
 export interface CreateParticipantRecordingResponse {
   success: boolean;
-  data: ParticipantRecording;
+  data: ParticipantRecording & { resume?: ParticipantRecordingResume };
   message: string;
 }
 

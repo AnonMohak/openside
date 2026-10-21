@@ -60,6 +60,27 @@ export function getSupportedVideoMimeTypes(): MimeCandidate[] {
   return [...supported, BROWSER_DEFAULT_CANDIDATE];
 }
 
+/** Audio-only ladder: a camera track recorded while the camera is off (or a
+ *  participant without one) has no video track, and a video mimeType on an
+ *  audio-only stream is rejected by some browsers. */
+const AUDIO_MIME_CANDIDATES: MimeCandidate[] = [
+  { mimeType: "audio/webm;codecs=opus", codec: "opus", container: "webm" },
+  { mimeType: "audio/mp4;codecs=mp4a.40.2", codec: "aac", container: "mp4" },
+  { mimeType: "audio/mp4", codec: "aac", container: "mp4" },
+  { mimeType: "audio/webm", codec: "opus", container: "webm" },
+];
+
+/** Supported audio-only candidates, with the browser-default last resort. */
+export function getSupportedAudioMimeTypes(): MimeCandidate[] {
+  const supported =
+    typeof MediaRecorder === "undefined"
+      ? []
+      : AUDIO_MIME_CANDIDATES.filter((t) =>
+          MediaRecorder.isTypeSupported(t.mimeType),
+        );
+  return [...supported, BROWSER_DEFAULT_CANDIDATE];
+}
+
 /** The single preferred (first supported) candidate - for recorders that don't
  *  run the full fallback loop (e.g. secondary screen-share tracks). */
 export function firstSupportedVideoMime(): MimeCandidate {

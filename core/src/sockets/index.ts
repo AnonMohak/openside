@@ -7,13 +7,22 @@
  * handled by LiveKit, such as recording coordination and upload progress.
  *
  * EVENTS FLOW:
- * - recording-started: Host started recording → all participants start local recording
- * - recording-stopped: Host stopped recording → all participants stop and finalize
+ * - recording-started: the API started a session → all participants start local recording
+ * - recording-stopped: the session stopped → all participants stop and finalize
+ *
+ * Start/stop are published by the server (lib/recording-events) after the
+ * authenticated API call commits - clients can't emit them, so a room code alone
+ * can't start or stop anyone's recording.
  */
 
 import type { Server as HTTPServer } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
 import { prisma } from "../db/index.ts";
+import {
+	type RecordingStartedPayload,
+	buildRecordingStartedPayload,
+	setRecordingEventPublisher,
+} from "../lib/recording-events.ts";
 import { getSessionIdByShareToken } from "../services/recording-service";
 
 type RecordingCommentEvent = {
@@ -40,24 +49,7 @@ export function emitRecordingCommentCreated(
 		.emit("recording-comment-created", comment);
 }
 
-// Recording session data sent to participants
-interface RecordingSessionData {
-	sessionId: string;
-	spaceRecordingSessionId: string;
-	startedAt: number;
-	/** Synced 3-2-1 lead-in (ms) so every client starts capturing together. */
-	countdownMs?: number;
-	videoResolution: number;
-	audioSampleRate: number;
-	noiseSuppression: boolean;
-	autoGainControl: boolean;
-	echoCancellation: boolean;
-	recordingMode: "VIDEO_AND_AUDIO" | "AUDIO_ONLY";
-}
-
 export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
-	const activeRecordingsByRoom = new Map<string, RecordingSessionData>();
-
 	const io = new SocketIOServer(httpServer, {
 		cors: {
 			origin: process.env.WEB_URL || "http://localhost:3000",
@@ -67,6 +59,15 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 		},
 	});
 	socketServer = io;
+
+	setRecordingEventPublisher({
+		started(roomId, payload: RecordingStartedPayload) {
+			io.to(roomId).emit("recording-started", payload);
+		},
+		stopped(roomId, sessionId) {
+			io.to(roomId).emit("recording-stopped", sessionId);
+		},
+	});
 
 	io.on("connection", (socket) => {
 		onActivity?.();
@@ -99,12 +100,8 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 
 			socket.join(roomId);
 
-			const activeRecording = activeRecordingsByRoom.get(roomId);
-			if (activeRecording) {
-				socket.emit("recording-started", activeRecording);
-				return;
-			}
-
+			// Replay a live session to a (re)joining client from the database - the
+			// source of truth - so a stale cache can never restart a stopped take.
 			const activeSession = await prisma.space
 				.findUnique({
 					where: { joinCode: roomId },
@@ -137,21 +134,7 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 			const session = activeSession?.recordingSessions[0];
 			if (!session) return;
 
-			socket.emit("recording-started", {
-				sessionId: session.id,
-				spaceRecordingSessionId: session.spaceRecordingSessionId,
-				startedAt: session.startedAt.getTime() + 3000,
-				countdownMs: 0,
-				videoResolution: session.videoResolution,
-				audioSampleRate: session.audioSampleRate,
-				noiseSuppression: session.noiseSuppression,
-				autoGainControl: session.autoGainControl,
-				echoCancellation: session.echoCancellation,
-				recordingMode:
-					session.recordingMode === "AUDIO_ONLY"
-						? "AUDIO_ONLY"
-						: "VIDEO_AND_AUDIO",
-			});
+			socket.emit("recording-started", buildRecordingStartedPayload(session));
 		});
 
 		socket.on("leave-room", (roomId: string) => {
@@ -183,51 +166,6 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 				ack?.(true);
 			},
 		);
-
-		/**
-		 * EVENT: recording-start
-		 * Host started recording → broadcast to ALL users in room (including sender)
-		 *
-		 * FLOW:
-		 * 1. Host clicks "Start Recording" and calls the API
-		 * 2. API succeeds → Host emits this event
-		 * 3. ALL participants (including host) receive "recording-started"
-		 * 4. Each participant starts their local MediaRecorder
-		 * 5. Chunks are uploaded as they're generated
-		 */
-		socket.on(
-			"recording-start",
-			(roomId: string, data: RecordingSessionData) => {
-				if (!roomId) return;
-
-				activeRecordingsByRoom.set(roomId, data);
-				// Broadcast to ALL users in the room including sender
-				io.to(roomId).emit("recording-started", data);
-			},
-		);
-
-		/**
-		 * EVENT: recording-stop
-		 * Host stopped recording → broadcast to ALL users
-		 *
-		 * FLOW:
-		 * 1. Host clicks "Stop Recording"
-		 * 2. Host emits this event
-		 * 3. ALL participants receive "recording-stopped"
-		 * 4. Each participant stops their MediaRecorder
-		 * 5. Each participant uploads any remaining chunks
-		 * 6. Each participant marks their recording as complete
-		 */
-		socket.on("recording-stop", (roomId: string, sessionId: string) => {
-			if (!roomId) return;
-
-			const activeRecording = activeRecordingsByRoom.get(roomId);
-			if (!activeRecording || activeRecording.sessionId === sessionId) {
-				activeRecordingsByRoom.delete(roomId);
-			}
-			// Broadcast to ALL users in the room including sender
-			io.to(roomId).emit("recording-stopped", sessionId);
-		});
 
 		/**
 		 * EVENT: recording-upload-progress

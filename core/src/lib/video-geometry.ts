@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { ffmpegPath } from "./ffmpeg-path.ts";
 
-interface VideoSize {
+export interface VideoSize {
 	width: number;
 	height: number;
 }
@@ -42,6 +42,47 @@ function ffmpegStderr(args: string[]): Promise<string> {
 			resolve(stderr);
 		});
 	});
+}
+
+export interface MediaProbe {
+	hasVideo: boolean;
+	hasAudio: boolean;
+	/** First video stream's frame size, when there is one. */
+	size: VideoSize | null;
+	/** Container duration; null when the header has none (raw MediaRecorder
+	 *  WebM never does). */
+	durationMs: number | null;
+}
+
+/**
+ * Which streams a file ACTUALLY has. The client's metadata can't be trusted
+ * for this: a camera track recorded with the camera off is audio-only, and a
+ * participant with no mic produces video-only parts.
+ */
+export async function probeMedia(file: string): Promise<MediaProbe> {
+	const out = await ffmpegStderr(["-hide_banner", "-i", file]);
+	const videoLine = /Stream #[^\n]*?: Video:[^\n]*/.exec(out)?.[0] ?? null;
+	const hasAudio = /Stream #[^\n]*?: Audio:/.test(out);
+	const sizeMatch = videoLine
+		? /\b(\d{2,5})x(\d{2,5})\b/.exec(videoLine)
+		: null;
+	const width = sizeMatch ? Number(sizeMatch[1]) : 0;
+	const height = sizeMatch ? Number(sizeMatch[2]) : 0;
+	const durationMatch = /Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(out);
+	const durationMs = durationMatch
+		? Math.round(
+				(Number(durationMatch[1]) * 3600 +
+					Number(durationMatch[2]) * 60 +
+					Number(durationMatch[3])) *
+					1000,
+			)
+		: null;
+	return {
+		hasVideo: videoLine !== null,
+		hasAudio,
+		size: width && height ? { width, height } : null,
+		durationMs,
+	};
 }
 
 /** First video frame size reported in the container header (null if unreadable). */

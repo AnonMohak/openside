@@ -3,17 +3,22 @@
  *
  * PURPOSE:
  * Orchestrates per-participant local recording end-to-end:
- *   - listens for host start/stop over Socket.IO
- *   - records 2 local tracks (combined V+A, audio-only) via useLocalRecording
- *   - registers ParticipantRecording rows
+ *   - starts/stops on the server's recording-started / recording-stopped
+ *     broadcasts (the API publishes them; clients can't)
+ *   - records the camera track (useLocalRecording, in parts that follow
+ *     LiveKit's track changes), the lossless PCM mic, and every screen share
+ *   - registers one ParticipantRecording per track (retrying until it lands)
  *   - streams every chunk through useChunkUploader (IndexedDB → R2 → segment)
- *   - on stop, drains the upload queue and marks each recording complete
+ *   - on stop, reports how many chunks each track RECORDED; the server
+ *     completes the track the moment the last one lands, however slow the
+ *     uplink - nothing is cut off at a timeout
  *
  * FLOW:
- * 1. Host starts → API creates session → socket broadcast "recording-started"
- * 2. Every participant (incl. host) starts local recording + creates recordings
+ * 1. Host starts → API creates session → server broadcasts "recording-started"
+ * 2. Every participant (incl. host) counts down to the same server instant,
+ *    then starts local recording + creates (or, after a refresh, resumes) rows
  * 3. Chunks emitted every 5s → uploaded directly to R2
- * 4. Host stops → socket broadcast → all stop, finish uploads, mark complete
+ * 4. Host stops → server broadcasts → all stop, report counts, finish uploads
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -22,19 +27,24 @@ import { useSocket } from "@/context/socket";
 import { useClockSync } from "@/context/clockSync";
 import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
+import { getMaxBufferedSequence } from "@/lib/recordingDb";
 import { sendUsageHeartbeat } from "./useUsage";
 import useLocalRecording, {
-  RecordingMetadata,
-  StreamType,
+  type LocalChunk,
+  type RecordingMetadata,
 } from "./useLocalRecording";
 import useChunkUploader from "./useChunkUploader";
 import usePcmCapture, { type PcmChunkMeta } from "./usePcmCapture";
 import {
   useStartRecordingSession,
   useStopRecordingSession,
-  useCreateParticipantRecording,
   useGetActiveRecordingSession,
 } from "./useRecording";
+import type {
+  CreateParticipantRecordingPayload,
+  CreateParticipantRecordingResponse,
+  RecordingSession,
+} from "@/types/recordingTypes";
 
 export type RecordingState =
   | "idle"
@@ -49,24 +59,15 @@ export type RecordingState =
 /** Synchronized 3-2-1 lead-in before everyone's recorder actually starts. */
 const COUNTDOWN_MS = 3000;
 
-/** Uploader routing key: the two MediaRecorder streams plus the parallel raw-PCM
- *  mic capture that produces the lossless WAV master. */
-type UploadTrack = StreamType | "pcm";
-
-/** A chunk headed for the uploader. Superset of RecordingChunk that also carries
- *  the PCM audio-format fields - set only on "pcm" chunks, undefined otherwise. */
-type UploadChunk = {
-  blob: Blob;
-  sequenceNumber: number;
-  startMs: number;
-  durationMs: number;
-} & Partial<Pick<PcmChunkMeta, "sampleRate" | "bitDepth" | "channelCount">>;
+/** Uploader routing key per local track. */
+type UploadTrack = "combined" | "screen" | "pcm";
+type TrackKey = "combined" | "pcm" | `screen:${number}`;
 
 interface RecordingStartedData {
   sessionId: string;
   spaceRecordingSessionId: string;
   startedAt: number;
-  /** Lead-in duration broadcast by the host so all clients count down together. */
+  /** Lead-in duration broadcast by the server so all clients count down together. */
   countdownMs?: number;
   videoResolution: number;
   audioSampleRate: number;
@@ -79,31 +80,44 @@ interface RecordingStartedData {
 /** How often the recording host reports metered seconds to the server. */
 const USAGE_HEARTBEAT_MS = 15_000;
 
+/** A late joiner's camera track can attach a beat after the start; wait this
+ *  long for it so their first part has video. (A camera that lands later is
+ *  picked up as a new part anyway - nothing is lost by not waiting longer.) */
+const VIDEO_ATTACH_GRACE_MS = 2000;
+
+/** Coalesce a burst of track changes (camera + background effect) into one
+ *  recorder rotation. */
+const SOURCE_SYNC_DEBOUNCE_MS = 300;
+
+/** Fewer parallel uploads while recording, to leave uplink for the call. */
+const UPLOAD_CONCURRENCY_RECORDING = 2;
+const UPLOAD_CONCURRENCY_DRAINING = 4;
+
+/** Registering a track retries this long (network trouble, a busy API). The
+ *  server accepts late registration for a while after the stop. */
+const CREATE_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+const CREATE_GIVE_UP_AFTER_MS = 14 * 60 * 1000;
+
+/** On leave, wait at most this long for uploads before letting the user go -
+ *  the rest uploads from IndexedDB in the background. */
+const LEAVE_DRAIN_TIMEOUT_MS = 30_000;
+
 interface UseRecordingManagerOptions {
   spaceId: string;
   participantSessionId: string;
   isHost: boolean;
-  roomId: string;
   /** Per-session cloud backup opt-in (PRO/self-host; ignored server-side otherwise). */
   cloudBackup?: boolean;
-  /** Reads the participant's current local A/V MediaStream on demand. Preferred
-   *  over the pushed `setStream` snapshot when starting, because a late joiner's
-   *  camera track can attach a beat after the recorder is asked to start. */
+  /** Reads the participant's current local A/V MediaStream on demand. */
   getLiveStream?: () => MediaStream | null;
-  /** Whether the participant's camera is on - i.e. whether video is expected.
-   *  Lets a late-join start wait briefly for the camera track instead of
-   *  capturing audio-only (or nothing). */
+  /** Whether the participant's camera is on - i.e. whether video is expected. */
   cameraEnabled?: boolean;
+  /** Whether the call mic is unmuted. The lossless PCM track (its own mic
+   *  capture) records silence while the call mic is muted. */
+  micEnabled?: boolean;
   /** Per-participant choice from pre-join: speakers request PCM AEC. */
   recordingEchoCancellation?: boolean;
-  onRecordingStart?: (combinedMeta: RecordingMetadata) => void;
-  onRecordingStop?: (combinedChunks: number) => void;
 }
-
-/** How long a late-join start waits for the camera track to attach before it
- *  gives up and records with whatever's available. Early joiners never hit this
- *  (their track is ready by the time the countdown ends). */
-const VIDEO_ATTACH_GRACE_MS = 8000;
 
 interface UseRecordingManagerReturn {
   recordingState: RecordingState;
@@ -119,7 +133,7 @@ interface UseRecordingManagerReturn {
   combinedChunkIndex: number;
   screenChunkIndex: number;
   pendingUploads: number;
-  /** Byte progress (0-100) of the chunk currently uploading; 100 when idle. */
+  /** Byte progress (0-100) of the chunks uploading right now; 100 when idle. */
   chunkUploadProgress: number;
   /** Seconds left in the synced lead-in (3,2,1), or null when not counting down. */
   countdownValue: number | null;
@@ -128,8 +142,8 @@ interface UseRecordingManagerReturn {
     screenStream?: MediaStream | null,
   ) => Promise<void>;
   stopRecording: () => Promise<void>;
-  /** Flush + upload + complete this participant's own recording immediately
-   *  (e.g. when they leave mid-recording). No-op if not currently recording. */
+  /** Flush + complete this participant's own recording immediately (e.g. when
+   *  they leave mid-recording). No-op if not currently recording. */
   finishLocalRecording: () => Promise<void>;
   setStream: (stream: MediaStream | null) => void;
   setScreenStream: (stream: MediaStream | null) => void;
@@ -137,8 +151,66 @@ interface UseRecordingManagerReturn {
   detachScreenStream: () => Promise<void>;
 }
 
+interface PendingChunk {
+  blob: Blob;
+  sequenceNumber: number;
+  startMs: number;
+  durationMs: number;
+  mimeType: string;
+  sampleRate?: number;
+  bitDepth?: number;
+  channelCount?: number;
+}
+
+/** One local track's path to the server. Chunks are numbered locally from 0;
+ *  `baseSequence`/`baseStartMs` continue a resumed track (a refreshed tab). */
+interface TrackRoute {
+  key: TrackKey;
+  trackType: UploadTrack;
+  sessionId: string;
+  spaceRecordingSessionId: string;
+  recordingId: string | null;
+  baseSequence: number;
+  baseStartMs: number;
+  /** Chunks recorded before the row existed. */
+  pending: PendingChunk[];
+  /** Local chunks recorded so far (highest local sequence + 1). */
+  localCount: number;
+  ready: Promise<string | null>;
+  abandoned: boolean;
+  completed: boolean;
+}
+
 function generateRecordingSessionId(): string {
-  return `rec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `rec_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function liveTracks(stream: MediaStream | null | undefined): MediaStreamTrack[] {
+  return (stream?.getTracks() ?? []).filter(
+    (track) => track.readyState === "live",
+  );
+}
+
+function startDataFromSession(session: RecordingSession): RecordingStartedData {
+  return {
+    sessionId: session.id,
+    spaceRecordingSessionId: session.spaceRecordingSessionId,
+    // The same formula the server broadcasts and replays, so every client
+    // lands on one timeline.
+    startedAt: new Date(session.startedAt).getTime() + COUNTDOWN_MS,
+    countdownMs: COUNTDOWN_MS,
+    videoResolution: session.videoResolution ?? 2160,
+    audioSampleRate: session.audioSampleRate ?? 48000,
+    noiseSuppression: session.noiseSuppression ?? false,
+    autoGainControl: session.autoGainControl ?? false,
+    echoCancellation: session.echoCancellation ?? false,
+    recordingMode:
+      session.recordingMode === "AUDIO_ONLY" ? "AUDIO_ONLY" : "VIDEO_AND_AUDIO",
+  };
 }
 
 export default function useRecordingManager(
@@ -148,35 +220,38 @@ export default function useRecordingManager(
     spaceId,
     participantSessionId,
     isHost,
-    roomId,
     cloudBackup,
     getLiveStream,
     cameraEnabled,
+    micEnabled,
     recordingEchoCancellation,
-    onRecordingStart,
-    onRecordingStop,
   } = options;
 
-  // Kept in refs so beginRecording (which can run async, mid-await) always reads
-  // the freshest getter/intent without being re-created on every render.
-  const getLiveStreamRef = useRef<(() => MediaStream | null) | undefined>(
-    getLiveStream,
-  );
+  // Kept in refs so async flows (which outlive renders) always read the
+  // freshest values.
+  const getLiveStreamRef = useRef(getLiveStream);
   getLiveStreamRef.current = getLiveStream;
-  const cameraEnabledRef = useRef<boolean | undefined>(cameraEnabled);
+  const cameraEnabledRef = useRef(cameraEnabled);
   cameraEnabledRef.current = cameraEnabled;
+  const micEnabledRef = useRef(micEnabled ?? true);
+  micEnabledRef.current = micEnabled ?? true;
   const recordingEchoCancellationRef = useRef(
     recordingEchoCancellation ?? false,
   );
   recordingEchoCancellationRef.current = recordingEchoCancellation ?? false;
-  // Guards against two beginRecording runs overlapping (detection + the
-  // stream-ready retry) and double-creating recording rows.
-  const beginningRef = useRef(false);
+  const spaceIdRef = useRef(spaceId);
+  spaceIdRef.current = spaceId;
+  const participantSessionIdRef = useRef(participantSessionId);
+  participantSessionIdRef.current = participantSessionId;
 
   const socket = useSocket();
   // Server-time helper. All recording timestamps below run through this so every
   // participant is measured on the server's clock, not their own laptop's.
   const { getServerTime, waitUntilSynced } = useClockSync();
+  const getServerTimeRef = useRef(getServerTime);
+  getServerTimeRef.current = getServerTime;
+  const waitUntilSyncedRef = useRef(waitUntilSynced);
+  waitUntilSyncedRef.current = waitUntilSynced;
 
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -185,39 +260,91 @@ export default function useRecordingManager(
   const [spaceRecordingSessionId, setSpaceRecordingSessionId] = useState<
     string | null
   >(null);
-
   const [combinedRecordingId, setCombinedRecordingId] = useState<string | null>(
     null,
   );
   const [screenRecordingId, setScreenRecordingId] = useState<string | null>(
     null,
   );
-
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
   const [sessionElapsedMs, setSessionElapsedMs] = useState(0);
-  const [streamReadyVersion, setStreamReadyVersion] = useState(0);
 
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-  const pendingRecordingStartRef = useRef<RecordingStartedData | null>(null);
   const sessionClockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
-
-  // Countdown timers (the synced 3-2-1 lead-in before recording actually starts).
   const countdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
-  // React state updates are asynchronous, so these refs close the tiny window
-  // where a rapid second press could otherwise create a duplicate request.
   const startRequestInFlightRef = useRef(false);
   const stopRequestInFlightRef = useRef(false);
-  // Guards the screen-attach POST so a re-render can't fire a second one while
-  // the first is still in flight (which otherwise storms /recording/participant).
   const screenAttachInFlightRef = useRef(false);
+
+  /** The session we're counting down to / recording / stopping. */
+  const activeSessionRef = useRef<string | null>(null);
+  /** The session this tab is actually capturing for (set once capture begins). */
+  const capturingSessionRef = useRef<string | null>(null);
+  /** Sessions already stopped here - a stale broadcast or poll never restarts them. */
+  const finishedSessionsRef = useRef<Set<string>>(new Set());
+  const stoppingSessionRef = useRef<string | null>(null);
+  const isCountingDownRef = useRef(false);
+  const beginningRef = useRef(false);
+  const startDataRef = useRef<RecordingStartedData | null>(null);
+  const sessionStartedAtRef = useRef<number | null>(null);
+  /** Server-time lateness of this tab's start, shared by its camera and PCM rows. */
+  const startOffsetMsRef = useRef(0);
+  /** performance.now() at this tab's start - every chunk time is relative to it. */
+  const timeOriginRef = useRef(0);
+  const routesRef = useRef<Map<TrackKey, TrackRoute>>(new Map());
+  const screenKeyRef = useRef<TrackKey | null>(null);
+  const screenMaxSizesRef = useRef<
+    Map<TrackKey, { width: number; height: number }>
+  >(new Map());
+  const pcmSourceTrackIdRef = useRef<string | null>(null);
+  const pcmStartingRef = useRef(false);
+  const sourceSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const releaseRecorderLockRef = useRef<(() => void) | null>(null);
+  // Assigned once handleRecordingStopped exists (below); reached through a ref
+  // by flows that are defined earlier or outlive a render.
+  const handleRecordingStoppedRef = useRef<
+    (stoppedSessionId?: string | null) => Promise<void>
+  >(async () => undefined);
+  /** Resolves once the session being stopped has released its recorders. */
+  const captureStoppedRef = useRef<Promise<void> | null>(null);
+  /** The last stop's completion reports (awaited briefly on leave). */
+  const completionsRef = useRef<Promise<unknown> | null>(null);
+  const pcmStartFailuresRef = useRef(0);
+  const unavailableNotifiedRef = useRef(false);
+  const heartbeatInFlightRef = useRef(false);
+
+  const startSessionMutation = useStartRecordingSession();
+  const stopSessionMutation = useStopRecordingSession(sessionId || "");
+  const activeRecordingQuery = useGetActiveRecordingSession(
+    spaceId,
+    participantSessionId,
+    !!spaceId,
+  );
+
+  const uploader = useChunkUploader(undefined, undefined, {
+    concurrency: UPLOAD_CONCURRENCY_DRAINING,
+  });
+  const uploaderRef = useRef(uploader);
+  uploaderRef.current = uploader;
+
+  // Drain any chunks left over from a previous crashed session on mount.
+  // Ref-gated: the uploader object's identity changes with its state.
+  const resumedOrphansRef = useRef(false);
+  useEffect(() => {
+    if (resumedOrphansRef.current) return;
+    resumedOrphansRef.current = true;
+    void uploader.resumeOrphans();
+  }, [uploader]);
 
   const clearCountdown = useCallback(() => {
     if (countdownTimeoutRef.current) {
@@ -241,146 +368,33 @@ export default function useRecordingManager(
   const startSessionClock = useCallback(
     (startedAt: number) => {
       const updateElapsed = () => {
-        setSessionElapsedMs(Math.max(0, getServerTime() - startedAt));
+        setSessionElapsedMs(
+          Math.max(0, getServerTimeRef.current() - startedAt),
+        );
       };
-
       stopSessionClock();
       updateElapsed();
       sessionClockIntervalRef.current = setInterval(updateElapsed, 500);
     },
-    [stopSessionClock, getServerTime],
+    [stopSessionClock],
   );
 
-  /** True while a synced countdown is pending (recorder hasn't started yet). */
-  const isCountingDownRef = useRef(false);
-  /** Session we're already counting down / recording, to ignore duplicate
-   *  "recording-started" broadcasts that would otherwise restart the countdown. */
-  const activeSessionRef = useRef<string | null>(null);
-  const recordingModeRef = useRef<"VIDEO_AND_AUDIO" | "AUDIO_ONLY">(
-    "VIDEO_AND_AUDIO",
-  );
+  // ── Track routing ─────────────────────────────────────────────────────
 
-  // Mutable copies for use inside callbacks that fire before React state settles.
-  const sessionIdRef = useRef<string | null>(null);
-  const spaceRecordingSessionIdRef = useRef<string | null>(null);
-  const combinedRecordingIdRef = useRef<string | null>(null);
-  const screenRecordingIdRef = useRef<string | null>(null);
-  // The parallel raw-PCM mic recording (its own ParticipantRecording so its
-  // sequence numbers don't collide with the combined track's under the shared
-  // unique [participantRecordingId, sequenceNumber] key). Finalization wraps its
-  // segments in a WAV and links it back to the combined video's output.
-  const pcmRecordingIdRef = useRef<string | null>(null);
-  // Screen recordings from earlier shares in this session that have already
-  // stopped capturing. Each share is its own track; all are completed at stop.
-  const detachedScreenRecordingIdsRef = useRef<string[]>([]);
-  const combinedMetaRef = useRef<RecordingMetadata | null>(null);
-  const screenMetaRef = useRef<RecordingMetadata | null>(null);
-  // Largest frame size each screen recording has reported, keyed by its
-  // ParticipantRecording id. A shared surface RESIZES mid-capture (switching
-  // tabs, resizing the shared window), so the size snapshotted when the share
-  // started is not the geometry finalization must normalize the master to.
-  // Sampled from getSettings() because MediaStreamTrack has no resize event.
-  const screenMaxSizesRef = useRef<
-    Map<string, { width: number; height: number }>
-  >(new Map());
-
-  const sampleScreenSize = useCallback(() => {
-    const recordingId = screenRecordingIdRef.current;
-    const track = screenStreamRef.current?.getVideoTracks()[0];
-    if (!recordingId || !track || track.readyState !== "live") return;
-    const { width, height } = track.getSettings();
-    if (!width || !height) return;
-    const current = screenMaxSizesRef.current.get(recordingId);
-    if (!current || width * height > current.width * current.height) {
-      screenMaxSizesRef.current.set(recordingId, { width, height });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (recordingState !== "recording") return;
-    sampleScreenSize();
-    const interval = setInterval(sampleScreenSize, 1000);
-    return () => clearInterval(interval);
-  }, [recordingState, sampleScreenSize]);
-  const sessionStartedAtRef = useRef<number | null>(null);
-  // Assigned once handleRecordingStopped exists (below); invoked when the
-  // combined encoder dies mid-session so we save the captured footage instead of
-  // losing the whole recording.
-  const onCombinedEncoderFailedRef = useRef<((error: Error) => void) | null>(
-    null,
-  );
-
-  // Chunks that arrived before their ParticipantRecording id existed.
-  const pendingChunksRef = useRef<
-    { streamType: UploadTrack; chunk: UploadChunk }[]
-  >([]);
-
-  const startSessionMutation = useStartRecordingSession();
-  const stopSessionMutation = useStopRecordingSession(sessionId || "");
-  const createParticipantRecordingMutation = useCreateParticipantRecording();
-  // React Query mutation objects change identity on every status flip
-  // (idle -> pending -> error). Hold a stable ref so callbacks that use it don't
-  // themselves change identity - otherwise effects depending on those callbacks
-  // re-fire on every attempt and turn one failure into a request storm.
-  const createParticipantRecordingRef = useRef(createParticipantRecordingMutation);
-  createParticipantRecordingRef.current = createParticipantRecordingMutation;
-  const activeRecordingQuery = useGetActiveRecordingSession(
-    spaceId,
-    participantSessionId,
-    !!spaceId,
-  );
-
-  const uploader = useChunkUploader();
-
-  // Drain any chunks left over from a previous crashed session on mount.
-  // Ref-gated: the uploader object's identity changes with its state, and an
-  // every-render resume can race enqueue into double-queuing a chunk.
-  const resumedOrphansRef = useRef(false);
-  useEffect(() => {
-    if (resumedOrphansRef.current) return;
-    resumedOrphansRef.current = true;
-    void uploader.resumeOrphans();
-  }, [uploader]);
-
-  const enqueueChunk = useCallback(
-    (streamType: UploadTrack, chunk: UploadChunk) => {
-      const participantRecordingId =
-        streamType === "screen"
-          ? screenRecordingIdRef.current
-          : streamType === "pcm"
-            ? pcmRecordingIdRef.current
-            : combinedRecordingIdRef.current;
-
-      if (
-        !participantRecordingId ||
-        !spaceRecordingSessionIdRef.current ||
-        !sessionIdRef.current
-      ) {
-        // Recordings not registered yet - hold and flush later.
-        pendingChunksRef.current.push({ streamType, chunk });
-        return;
-      }
-
-      // PCM is headerless raw audio; the other tracks are WebM from MediaRecorder.
-      const mimeType =
-        streamType === "pcm"
-          ? "audio/pcm-raw"
-          : (streamType === "screen"
-              ? screenMetaRef.current
-              : combinedMetaRef.current
-            )?.mimeType ?? "application/octet-stream";
-
-      void uploader.enqueue({
-        spaceId,
-        spaceRecordingSessionId: spaceRecordingSessionIdRef.current,
-        recordingSessionId: sessionIdRef.current,
-        participantRecordingId,
-        participantSessionId,
-        trackType: streamType,
-        sequenceNumber: chunk.sequenceNumber,
-        startMs: chunk.startMs,
+  const enqueueRouted = useCallback(
+    (route: TrackRoute, chunk: PendingChunk) => {
+      if (!route.recordingId) return;
+      void uploaderRef.current.enqueue({
+        spaceId: spaceIdRef.current,
+        spaceRecordingSessionId: route.spaceRecordingSessionId,
+        recordingSessionId: route.sessionId,
+        participantRecordingId: route.recordingId,
+        participantSessionId: participantSessionIdRef.current,
+        trackType: route.trackType,
+        sequenceNumber: route.baseSequence + chunk.sequenceNumber,
+        startMs: route.baseStartMs + chunk.startMs,
         durationMs: chunk.durationMs,
-        mimeType,
+        mimeType: chunk.mimeType,
         blob: chunk.blob,
         // Only populated for "pcm" - the WAV-header fields the server needs.
         sampleRate: chunk.sampleRate,
@@ -388,70 +402,708 @@ export default function useRecordingManager(
         channelCount: chunk.channelCount,
       });
     },
-    [spaceId, participantSessionId, uploader],
+    [],
   );
 
-  const flushPendingChunks = useCallback(() => {
-    const pending = pendingChunksRef.current;
-    pendingChunksRef.current = [];
-    for (const { streamType, chunk } of pending) {
-      enqueueChunk(streamType, chunk);
-    }
-  }, [enqueueChunk]);
+  /**
+   * Register a track's row - retrying through network trouble - and flush the
+   * chunks it recorded meanwhile. Camera/PCM rows are resumable: a refreshed
+   * tab gets the same row back and continues its sequence past anything the
+   * old tab uploaded or still has buffered.
+   */
+  const registerRoute = useCallback(
+    async (
+      route: TrackRoute,
+      payload: CreateParticipantRecordingPayload,
+    ): Promise<string | null> => {
+      const startedAt = Date.now();
+      let forbidden = 0;
+      for (let attempt = 0; ; attempt++) {
+        if (route.abandoned) return null;
+        try {
+          const { data } = await api.post<CreateParticipantRecordingResponse>(
+            "/recording/participant",
+            payload,
+          );
+          const created = data.data;
+          let baseSequence = 0;
+          let baseStartMs = 0;
+          if (created.resume) {
+            const buffered = await getMaxBufferedSequence(created.id).catch(
+              () => -1,
+            );
+            baseSequence = Math.max(
+              created.resume.nextSequenceNumber,
+              buffered + 1,
+            );
+            if (
+              created.resume.startOffsetMs !== null &&
+              payload.startOffsetMs !== undefined
+            ) {
+              baseStartMs = payload.startOffsetMs - created.resume.startOffsetMs;
+            }
+          }
+          route.recordingId = created.id;
+          route.baseSequence = baseSequence;
+          route.baseStartMs = baseStartMs;
+          const pending = route.pending;
+          route.pending = [];
+          for (const chunk of pending) enqueueRouted(route, chunk);
+          if (route.key === "combined") setCombinedRecordingId(created.id);
+          if (route.key.startsWith("screen:")) setScreenRecordingId(created.id);
+          return created.id;
+        } catch (err) {
+          const status = isAxiosError(err) ? err.response?.status : undefined;
+          // The session is gone / over, or the request is invalid: retrying
+          // can't help.
+          const terminal = status === 400 || status === 404;
+          if (status === 403) forbidden += 1;
+          if (
+            terminal ||
+            forbidden >= 5 ||
+            Date.now() - startedAt > CREATE_GIVE_UP_AFTER_MS
+          ) {
+            console.error(
+              `[RecordingManager] giving up registering ${route.key} (its chunks are lost):`,
+              err,
+            );
+            route.abandoned = true;
+            route.pending = [];
+            return null;
+          }
+          console.warn(
+            `[RecordingManager] registering ${route.key} failed (attempt ${attempt + 1}), retrying:`,
+            err,
+          );
+          await delay(
+            CREATE_RETRY_DELAYS_MS[
+              Math.min(attempt, CREATE_RETRY_DELAYS_MS.length - 1)
+            ] ?? 15000,
+          );
+        }
+      }
+    },
+    [enqueueRouted],
+  );
 
-  // Parallel lossless raw-PCM mic capture. Routed to the uploader under the "pcm"
-  // trackType against its own ParticipantRecording (pcmRecordingIdRef). Its
-  // lifecycle mirrors the combined recorder: started in beginRecording, stopped
-  // in handleRecordingStopped. A failure here is non-fatal - the combined video
-  // (with its lossy Opus audio) is unaffected.
+  const ensureRoute = useCallback(
+    (
+      key: TrackKey,
+      trackType: UploadTrack,
+      buildPayload: () => CreateParticipantRecordingPayload,
+    ): TrackRoute | null => {
+      const existing = routesRef.current.get(key);
+      if (existing) return existing;
+      const data = startDataRef.current;
+      const sessionForRoute = capturingSessionRef.current;
+      if (!data || !sessionForRoute || data.sessionId !== sessionForRoute) {
+        return null;
+      }
+      const route: TrackRoute = {
+        key,
+        trackType,
+        sessionId: data.sessionId,
+        spaceRecordingSessionId: data.spaceRecordingSessionId,
+        recordingId: null,
+        baseSequence: 0,
+        baseStartMs: 0,
+        pending: [],
+        localCount: 0,
+        ready: Promise.resolve(null),
+        abandoned: false,
+        completed: false,
+      };
+      routesRef.current.set(key, route);
+      route.ready = registerRoute(route, buildPayload());
+      return route;
+    },
+    [registerRoute],
+  );
+
+  const routeChunk = useCallback(
+    (key: TrackKey, chunk: PendingChunk) => {
+      const route = routesRef.current.get(key);
+      if (!route) {
+        console.error(`[RecordingManager] chunk for unregistered track ${key}`);
+        return;
+      }
+      route.localCount = Math.max(route.localCount, chunk.sequenceNumber + 1);
+      if (route.abandoned) return;
+      if (route.recordingId) enqueueRouted(route, chunk);
+      else route.pending.push(chunk);
+    },
+    [enqueueRouted],
+  );
+
+  /** Report how many chunks a track recorded. Retries; never blocks on uploads. */
+  const completeRoute = useCallback(
+    async (
+      route: TrackRoute,
+      recordedCount: number,
+      size?: { width: number; height: number },
+    ) => {
+      if (route.completed) return;
+      route.completed = true;
+      const recordingId = route.recordingId ?? (await route.ready);
+      if (!recordingId) return;
+      const expectedSegments =
+        route.baseSequence + Math.max(recordedCount, route.localCount);
+      for (let attempt = 0; attempt < 6; attempt++) {
+        try {
+          await api.post(`/recording/participant/${recordingId}/complete`, {
+            expectedSegments,
+            participantSessionId: participantSessionIdRef.current,
+            spaceId: spaceIdRef.current,
+            ...(size ? { width: size.width, height: size.height } : {}),
+          });
+          return;
+        } catch (err) {
+          const status = isAxiosError(err) ? err.response?.status : undefined;
+          if (status && status >= 400 && status < 500 && status !== 429) {
+            console.error(
+              `[RecordingManager] completing ${route.key} was rejected:`,
+              err,
+            );
+            return;
+          }
+          // The server's recovery sweep completes it anyway if this never
+          // lands - retrying just makes it immediate.
+          await delay(1000 * 2 ** attempt);
+        }
+      }
+    },
+    [],
+  );
+
+  // ── Local capture ────────────────────────────────────────────────────
+
   const pcmCapture = usePcmCapture({
     onPcmChunk: (blob, meta: PcmChunkMeta) => {
-      enqueueChunk("pcm", { blob, ...meta });
+      routeChunk("pcm", {
+        blob,
+        sequenceNumber: meta.sequenceNumber,
+        startMs: meta.startMs,
+        durationMs: meta.durationMs,
+        mimeType: "audio/pcm-raw",
+        sampleRate: meta.sampleRate,
+        bitDepth: meta.bitDepth,
+        channelCount: meta.channelCount,
+      });
     },
     onError: (err) => {
       console.error("[RecordingManager] PCM capture error:", err);
     },
   });
+  const pcmRef = useRef(pcmCapture);
+  pcmRef.current = pcmCapture;
 
-  const {
-    isRecording: isLocalRecording,
-    recordingDurationMs,
-    combinedChunkIndex,
-    screenChunkIndex,
-    startRecording: startLocalRecording,
-    attachScreenRecording: attachLocalScreenRecording,
-    detachScreenRecording: detachLocalScreenRecording,
-    stopRecording: stopLocalRecording,
-  } = useLocalRecording({
-    onCombinedChunkReady: (chunk) => enqueueChunk("combined", chunk),
-    onScreenChunkReady: (chunk) => enqueueChunk("screen", chunk),
-    onRecordingStart: (combinedMeta, screenMeta) => {
-      combinedMetaRef.current = combinedMeta;
-      screenMetaRef.current = screenMeta ?? null;
-      onRecordingStart?.(combinedMeta);
+  const localRecording = useLocalRecording({
+    onCombinedChunkReady: (chunk: LocalChunk) =>
+      routeChunk("combined", chunk),
+    onScreenChunkReady: (shareId, chunk) =>
+      routeChunk(`screen:${shareId}`, chunk),
+    onCombinedPartStart: (metadata: RecordingMetadata) => {
+      // First part creates (or resumes) the camera track's row. Every later
+      // part continues the same row.
+      ensureRoute("combined", "combined", () => ({
+        recordingSessionId: startDataRef.current?.sessionId ?? "",
+        spaceId: spaceIdRef.current,
+        participantSessionId: participantSessionIdRef.current,
+        type: "VIDEO",
+        container: metadata.container,
+        codec: metadata.codec,
+        width: metadata.width,
+        height: metadata.height,
+        fps: metadata.fps,
+        bitrate: metadata.bitrate,
+        sampleRate: metadata.sampleRate,
+        channels: metadata.channels,
+        // It's the camera track even while the camera is off - the finalizer
+        // records what was actually captured.
+        hasAudio: true,
+        hasVideo: true,
+        startOffsetMs: startOffsetMsRef.current,
+        resumable: true,
+      }));
     },
-    onRecordingStop: (combinedChunks) => {
-      onRecordingStop?.(combinedChunks);
+    onCombinedTrackEnded: () => scheduleSourceSyncRef.current(0),
+    onCombinedUnavailable: (err) => {
+      if (unavailableNotifiedRef.current) return;
+      unavailableNotifiedRef.current = true;
+      setError(`Your camera recording couldn't start: ${err.message}`);
+      toast.error(
+        "Your camera recording couldn't start. Your audio is still being recorded.",
+        8000,
+      );
     },
-    onError: (err, streamType) => {
-      setError(`${streamType}: ${err.message}`);
-      setRecordingState("error");
-    },
-    onCombinedEncoderFailedMidSession: (err) => {
-      onCombinedEncoderFailedRef.current?.(err);
+    onScreenError: (shareId, err) => {
+      console.error(`[RecordingManager] screen share ${shareId} recorder failed:`, err);
     },
   });
+  const localRef = useRef(localRecording);
+  localRef.current = localRecording;
+
+  const readLiveStream = useCallback(
+    (): MediaStream | null => getLiveStreamRef.current?.() ?? streamRef.current,
+    [],
+  );
+
+  const startPcm = useCallback(
+    async (mic: MediaStreamTrack) => {
+      const data = startDataRef.current;
+      if (!data || pcmStartingRef.current || pcmRef.current.isRunning()) return;
+      // A mic capture that keeps failing (permission, device busy) isn't
+      // retried on every track change.
+      if (pcmStartFailuresRef.current >= 3) return;
+      pcmStartingRef.current = true;
+      try {
+        // Register first so its chunks can route the moment they exist.
+        const route = ensureRoute("pcm", "pcm", () => ({
+          recordingSessionId: data.sessionId,
+          spaceId: spaceIdRef.current,
+          participantSessionId: participantSessionIdRef.current,
+          type: "AUDIO",
+          // Marks this as the raw-PCM track so finalization wraps it in a WAV.
+          container: "pcm",
+          codec: "pcm_s24le",
+          sampleRate: data.audioSampleRate,
+          channels: 1,
+          hasAudio: true,
+          hasVideo: false,
+          startOffsetMs: startOffsetMsRef.current,
+          resumable: true,
+        }));
+        if (!route) return;
+        pcmSourceTrackIdRef.current = mic.id;
+        await pcmRef.current.start({
+          audioId: mic.getSettings().deviceId,
+          callTrack: mic,
+          sampleRate: data.audioSampleRate === 44100 ? 44100 : 48000,
+          noiseSuppression: data.noiseSuppression,
+          autoGainControl: data.autoGainControl,
+          echoCancellation: recordingEchoCancellationRef.current,
+          timeOrigin: timeOriginRef.current,
+          muted: !micEnabledRef.current,
+        });
+        if (!pcmRef.current.isRunning()) pcmStartFailuresRef.current += 1;
+      } finally {
+        pcmStartingRef.current = false;
+      }
+    },
+    [ensureRoute],
+  );
+
+  /** Point every recorder at the participant's current tracks. */
+  const syncSources = useCallback(() => {
+    const sessionForSync = capturingSessionRef.current;
+    const data = startDataRef.current;
+    if (!sessionForSync || !data || data.sessionId !== sessionForSync) return;
+    const stream = readLiveStream();
+    const live = liveTracks(stream);
+
+    if (data.recordingMode !== "AUDIO_ONLY") {
+      void localRef.current.setCombinedStream(
+        live.length > 0 ? new MediaStream(live) : null,
+      );
+    }
+
+    // The lossless PCM track follows the call's mic.
+    const mic = live.find((track) => track.kind === "audio");
+    if (!mic) return;
+    if (!pcmRef.current.isRunning()) {
+      void startPcm(mic);
+    } else if (pcmSourceTrackIdRef.current !== mic.id) {
+      pcmSourceTrackIdRef.current = mic.id;
+      void pcmRef.current.switchDevice({
+        audioId: mic.getSettings().deviceId,
+        callTrack: mic,
+      });
+    }
+    if (data.recordingMode === "AUDIO_ONLY") setError(null);
+  }, [readLiveStream, startPcm]);
+
+  const scheduleSourceSyncRef = useRef<(delayMs?: number) => void>(
+    () => undefined,
+  );
+  scheduleSourceSyncRef.current = (delayMs = SOURCE_SYNC_DEBOUNCE_MS) => {
+    if (sourceSyncTimerRef.current) clearTimeout(sourceSyncTimerRef.current);
+    sourceSyncTimerRef.current = setTimeout(() => {
+      sourceSyncTimerRef.current = null;
+      syncSources();
+    }, delayMs);
+  };
+
+  // Mirror the call mic's mute onto the PCM track (its own capture would
+  // otherwise keep recording a muted participant).
+  useEffect(() => {
+    pcmRef.current.setMuted(!(micEnabled ?? true));
+  }, [micEnabled]);
 
   const setStream = useCallback((stream: MediaStream | null) => {
     streamRef.current = stream;
-    if (stream && stream.getTracks().length > 0) {
-      setStreamReadyVersion((version) => version + 1);
-    }
+    if (capturingSessionRef.current) scheduleSourceSyncRef.current();
   }, []);
 
   const setScreenStream = useCallback((stream: MediaStream | null) => {
     screenStreamRef.current = stream;
   }, []);
+
+  // LiveKit stops a muted camera's track with track.stop(), which fires no
+  // "ended" event, and a background-effect swap may not re-render the
+  // provider. Compare the recorders' tracks with the live ones every second so
+  // a change is never missed.
+  useEffect(() => {
+    if (recordingState !== "recording") return;
+    const interval = setInterval(() => {
+      const data = startDataRef.current;
+      if (!capturingSessionRef.current || !data) return;
+      if (sourceSyncTimerRef.current) return; // a sync is already scheduled
+      const live = liveTracks(readLiveStream());
+      const liveIds = live
+        .map((track) => track.id)
+        .sort()
+        .join(",");
+      const recordingIds = [...localRef.current.getCombinedTrackIds()]
+        .sort()
+        .join(",");
+      const mic = live.find((track) => track.kind === "audio");
+      const cameraDrift =
+        data.recordingMode !== "AUDIO_ONLY" && liveIds !== recordingIds;
+      const micDrift =
+        !!mic &&
+        (!pcmRef.current.isRunning() || pcmSourceTrackIdRef.current !== mic.id);
+      if (cameraDrift || micDrift) scheduleSourceSyncRef.current(0);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [recordingState, readLiveStream]);
+
+  /** Only one tab records a participant: a newer tab (same participant)
+   *  takes over, and this one stops and completes what it captured. */
+  const acquireRecorderLock = useCallback((sessionForLock: string) => {
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (!locks?.request) return;
+    releaseRecorderLockRef.current?.();
+    void locks
+      .request(
+        `openside-recorder:${participantSessionIdRef.current}`,
+        { steal: true },
+        () =>
+          new Promise<void>((resolve) => {
+            releaseRecorderLockRef.current = resolve;
+          }),
+      )
+      .catch((err: unknown) => {
+        if (
+          err instanceof DOMException &&
+          err.name === "AbortError" &&
+          capturingSessionRef.current === sessionForLock
+        ) {
+          toast.error(
+            "This recording continued in another tab - this tab stopped recording.",
+            8000,
+          );
+          void handleRecordingStoppedRef.current(sessionForLock);
+        }
+      });
+  }, []);
+
+  const releaseRecorderLock = useCallback(() => {
+    releaseRecorderLockRef.current?.();
+    releaseRecorderLockRef.current = null;
+  }, []);
+
+  // ── Start ─────────────────────────────────────────────────────────────
+
+  // The actual recorder start - fires for EVERY participant when the synced
+  // countdown reaches zero.
+  const beginRecording = useCallback(
+    async (data: RecordingStartedData) => {
+      if (beginningRef.current) return;
+      beginningRef.current = true;
+      try {
+        // A previous take still releasing its recorders (we missed its stop).
+        if (captureStoppedRef.current) await captureStoppedRef.current;
+        if (capturingSessionRef.current) return;
+        clearCountdown();
+        isCountingDownRef.current = false;
+        startSessionClock(data.startedAt);
+
+        const audioOnly = data.recordingMode === "AUDIO_ONLY";
+        // Camera on but its track hasn't attached yet (a late joiner): wait
+        // briefly so the first part has video.
+        if (!audioOnly && cameraEnabledRef.current) {
+          const deadline = Date.now() + VIDEO_ATTACH_GRACE_MS;
+          while (
+            Date.now() < deadline &&
+            !liveTracks(readLiveStream()).some((track) => track.kind === "video")
+          ) {
+            await delay(250);
+          }
+        }
+
+        // The session may have been stopped while we waited.
+        if (activeSessionRef.current !== data.sessionId) return;
+
+        // Make sure the clock is synced before we trust it. Bounded so it can
+        // never block the recorder.
+        await waitUntilSyncedRef.current(1500);
+        if (activeSessionRef.current !== data.sessionId) return;
+
+        // "How late am I" on the server's clock, measured at the go instant -
+        // ~0 for on-time participants, the real gap for a late joiner.
+        startOffsetMsRef.current = Math.max(
+          0,
+          getServerTimeRef.current() - data.startedAt,
+        );
+        timeOriginRef.current = performance.now();
+        routesRef.current = new Map();
+        screenKeyRef.current = null;
+        screenMaxSizesRef.current.clear();
+        unavailableNotifiedRef.current = false;
+        pcmStartFailuresRef.current = 0;
+        pcmSourceTrackIdRef.current = null;
+        capturingSessionRef.current = data.sessionId;
+        acquireRecorderLock(data.sessionId);
+        uploaderRef.current.setConcurrency(UPLOAD_CONCURRENCY_RECORDING);
+        setError(null);
+        setStopRequestFailed(false);
+        setRecordingState("recording");
+
+        if (!audioOnly) {
+          localRef.current.startRecording(timeOriginRef.current, {
+            videoResolution: data.videoResolution,
+          });
+        }
+
+        // Starts the camera part and the PCM track from whatever tracks exist
+        // now; tracks that appear later (mic/camera turned on) are picked up
+        // by the same sync as they land.
+        syncSources();
+
+        const hasMic = liveTracks(readLiveStream()).some(
+          (track) => track.kind === "audio",
+        );
+        if (audioOnly && !hasMic) {
+          setError("Recording is active. Turn on your microphone to be captured.");
+        }
+      } catch (err) {
+        console.error("[RecordingManager] start failed:", err);
+        setError(err instanceof Error ? err.message : "Failed to start recording");
+      } finally {
+        beginningRef.current = false;
+      }
+    },
+    [
+      clearCountdown,
+      startSessionClock,
+      readLiveStream,
+      acquireRecorderLock,
+      syncSources,
+    ],
+  );
+
+  // Handle "recording-started" (fires for EVERY participant). Every client
+  // runs the same 3-2-1 lead-in so capture begins in sync for everyone.
+  const handleRecordingStarted = useCallback(
+    (data: RecordingStartedData) => {
+      // Duplicate broadcast for a session we're already handling, or a stale
+      // replay of one we finished.
+      if (activeSessionRef.current === data.sessionId) return;
+      if (finishedSessionsRef.current.has(data.sessionId)) return;
+
+      // A new session while an old one is still capturing means we missed its
+      // stop - stop it first (it completes what it captured).
+      const previous = capturingSessionRef.current;
+      if (previous && previous !== data.sessionId) {
+        void handleRecordingStoppedRef.current(previous);
+      }
+
+      setSessionId(data.sessionId);
+      setSpaceRecordingSessionId(data.spaceRecordingSessionId);
+      setCombinedRecordingId(null);
+      setScreenRecordingId(null);
+      startDataRef.current = data;
+      sessionStartedAtRef.current = data.startedAt;
+      activeSessionRef.current = data.sessionId;
+
+      const countdownMs = data.countdownMs ?? COUNTDOWN_MS;
+      clearCountdown();
+      setError(null);
+
+      const serverNow = getServerTimeRef.current();
+      const delayMs =
+        data.startedAt > serverNow
+          ? Math.min(countdownMs, data.startedAt - serverNow)
+          : 0;
+
+      if (delayMs <= 0) {
+        void beginRecording(data);
+        return;
+      }
+
+      isCountingDownRef.current = true;
+      setRecordingState("countdown");
+      setCountdownValue(Math.max(1, Math.ceil(delayMs / 1000)));
+
+      // Visual tick: 3 → 2 → 1, adjusted for late socket replays.
+      countdownIntervalRef.current = setInterval(() => {
+        const remainingMs = data.startedAt - getServerTimeRef.current();
+        if (remainingMs <= 0) {
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+          return;
+        }
+        setCountdownValue(Math.max(1, Math.ceil(remainingMs / 1000)));
+      }, 250);
+
+      // When the lead-in elapses, everyone's recorder starts together.
+      countdownTimeoutRef.current = setTimeout(() => {
+        void beginRecording(data);
+      }, delayMs);
+    },
+    [beginRecording, clearCountdown],
+  );
+
+  // ── Stop ──────────────────────────────────────────────────────────────
+
+  /**
+   * Stop capturing for `stoppedSessionId` (or the current session), report
+   * every track's recorded chunk count, and keep uploading in the background.
+   * Resolves once capture has stopped and completion is reported - NOT when
+   * the uploads finish.
+   */
+  const handleRecordingStopped = useCallback(
+    async (stoppedSessionId?: string | null) => {
+      const current = activeSessionRef.current ?? capturingSessionRef.current;
+      const target = stoppedSessionId ?? current;
+      if (!target) return;
+      // A stale stop (an earlier session's) must not end the current take.
+      if (stoppedSessionId && current && stoppedSessionId !== current) {
+        if (capturingSessionRef.current !== stoppedSessionId) return;
+      }
+      if (stoppingSessionRef.current === target) return;
+      finishedSessionsRef.current.add(target);
+      // Not a session this tab is counting down to or capturing - nothing to do.
+      if (
+        activeSessionRef.current !== target &&
+        capturingSessionRef.current !== target
+      ) {
+        return;
+      }
+
+      // Stopped during the lead-in (before capture began): just cancel.
+      if (isCountingDownRef.current && activeSessionRef.current === target) {
+        isCountingDownRef.current = false;
+        activeSessionRef.current = null;
+        stopSessionClock();
+        clearCountdown();
+        setRecordingState("complete");
+        return;
+      }
+
+      if (capturingSessionRef.current !== target) {
+        // Never got to capture (start still settling, or failed): cancel it.
+        if (activeSessionRef.current === target) activeSessionRef.current = null;
+        stopSessionClock();
+        clearCountdown();
+        setError(null);
+        setRecordingState("complete");
+        return;
+      }
+
+      stoppingSessionRef.current = target;
+      // A newer take may already be counting down (we missed this one's stop):
+      // never overwrite its UI state from here.
+      const ownsUi = () =>
+        !activeSessionRef.current || activeSessionRef.current === target;
+      let markCaptureStopped: () => void = () => undefined;
+      captureStoppedRef.current = new Promise<void>((resolve) => {
+        markCaptureStopped = resolve;
+      });
+      try {
+        // Freeze the elapsed timer the instant we start stopping.
+        if (ownsUi()) {
+          stopSessionClock();
+          setRecordingState("stopping");
+        }
+        if (sourceSyncTimerRef.current) {
+          clearTimeout(sourceSyncTimerRef.current);
+          sourceSyncTimerRef.current = null;
+        }
+
+        const { combinedChunks, screen } = await localRef.current.stopRecording();
+        // stop() flushes the final partial PCM chunk before closing.
+        await pcmRef.current.stop();
+        const pcmChunks = pcmRef.current.getChunkCount();
+        // This take's routes - read before a newer take can replace them.
+        const routes = routesRef.current;
+        capturingSessionRef.current = null;
+        if (activeSessionRef.current === target) activeSessionRef.current = null;
+        releaseRecorderLock();
+        markCaptureStopped();
+
+        // Report what each track RECORDED, right away. The server completes a
+        // track when its last chunk lands, however long the upload takes.
+        const completions: Promise<void>[] = [];
+        const combinedRoute = routes.get("combined");
+        if (combinedRoute) {
+          completions.push(completeRoute(combinedRoute, combinedChunks));
+        }
+        const pcmRoute = routes.get("pcm");
+        if (pcmRoute) completions.push(completeRoute(pcmRoute, pcmChunks));
+        for (const route of routes.values()) {
+          if (!route.key.startsWith("screen:") || route.completed) continue;
+          const count =
+            screen && `screen:${screen.shareId}` === route.key
+              ? screen.chunkCount
+              : route.localCount;
+          completions.push(
+            completeRoute(route, count, screenMaxSizesRef.current.get(route.key)),
+          );
+        }
+        screenKeyRef.current = null;
+
+        if (ownsUi()) {
+          uploaderRef.current.setConcurrency(UPLOAD_CONCURRENCY_DRAINING);
+          setRecordingState("uploading");
+        }
+        // Not awaited: a track whose registration is still retrying would hold
+        // the stop up. They land on their own.
+        completionsRef.current = Promise.allSettled(completions);
+
+        // Uploads finish in the background; the UI shows progress meanwhile.
+        void uploaderRef.current
+          .waitUntilDrained(Number.POSITIVE_INFINITY)
+          .then(() => {
+            if (stoppingSessionRef.current === target) {
+              stoppingSessionRef.current = null;
+            }
+            // A newer take may already be running - don't clobber its state.
+            if (!activeSessionRef.current && !capturingSessionRef.current) {
+              setRecordingState("complete");
+            }
+          });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to stop recording";
+        console.error("[RecordingManager] stop failed:", err);
+        if (ownsUi()) {
+          setError(message);
+          setRecordingState("error");
+        }
+        if (stoppingSessionRef.current === target) {
+          stoppingSessionRef.current = null;
+        }
+      } finally {
+        markCaptureStopped();
+        captureStoppedRef.current = null;
+      }
+    },
+    [clearCountdown, completeRoute, releaseRecorderLock, stopSessionClock],
+  );
+  handleRecordingStoppedRef.current = handleRecordingStopped;
 
   // HOST: Start recording
   const startRecording = useCallback(
@@ -471,42 +1123,21 @@ export default function useRecordingManager(
         setError(null);
         setStopRequestFailed(false);
 
-        const newSpaceRecordingSessionId = generateRecordingSessionId();
-
         const session = await startSessionMutation.mutateAsync({
           spaceId,
-          spaceRecordingSessionId: newSpaceRecordingSessionId,
+          spaceRecordingSessionId: generateRecordingSessionId(),
           participantSessionId,
           cloudBackup: cloudBackup === true,
         });
 
-        setSessionId(session.id);
-        setSpaceRecordingSessionId(session.spaceRecordingSessionId);
-
         streamRef.current = stream;
         screenStreamRef.current = screenStream ?? null;
 
-        // The broadcast target must be on the server clock - every other client
-        // counts down to it against their own synced clocks. Ensure we're synced
-        // before stamping it (bounded so it can't hang the start).
-        await waitUntilSynced(1500);
-
-        socket?.emit("recording-start", roomId, {
-          sessionId: session.id,
-          spaceRecordingSessionId: session.spaceRecordingSessionId,
-          // Server-time target so every client counts down to the same instant.
-          startedAt: getServerTime() + COUNTDOWN_MS,
-          countdownMs: COUNTDOWN_MS,
-          videoResolution: session.videoResolution ?? 2160,
-          audioSampleRate: session.audioSampleRate ?? 48000,
-          noiseSuppression: session.noiseSuppression ?? false,
-          autoGainControl: session.autoGainControl ?? false,
-          echoCancellation: session.echoCancellation ?? false,
-          recordingMode:
-            session.recordingMode === "AUDIO_ONLY"
-              ? "AUDIO_ONLY"
-              : "VIDEO_AND_AUDIO",
-        });
+        // The server already broadcast the start to the room. Start here too,
+        // from the response - a host whose socket is down still records (the
+        // broadcast arriving later is deduped).
+        await waitUntilSyncedRef.current(1500);
+        handleRecordingStarted(startDataFromSession(session));
       } catch (err) {
         // Out of metered recording credit - surface the upgrade CTA instead of
         // a generic failure. The server is the authority on remaining minutes.
@@ -536,11 +1167,8 @@ export default function useRecordingManager(
       participantSessionId,
       stopRequestFailed,
       startSessionMutation,
-      socket,
-      roomId,
       cloudBackup,
-      getServerTime,
-      waitUntilSynced,
+      handleRecordingStarted,
     ],
   );
 
@@ -549,15 +1177,20 @@ export default function useRecordingManager(
     if (!isHost || !sessionId || stopRequestInFlightRef.current) return;
 
     stopRequestInFlightRef.current = true;
+    const stoppingSession = sessionId;
     try {
       setRecordingState("stopping");
-      socket?.emit("recording-stop", roomId, sessionId);
+      // The server stops the session and broadcasts the stop to everyone.
       await stopSessionMutation.mutateAsync({ spaceId, participantSessionId });
       setStopRequestFailed(false);
+      // Stop here right away too (the broadcast echo is deduped).
+      await handleRecordingStopped(stoppingSession);
     } catch (err) {
+      // Nothing stopped - the take is still running everywhere. Say so and let
+      // the host retry.
       setError(err instanceof Error ? err.message : "Failed to stop");
       setStopRequestFailed(true);
-      setRecordingState("error");
+      setRecordingState(capturingSessionRef.current ? "recording" : "error");
     } finally {
       stopRequestInFlightRef.current = false;
     }
@@ -567,280 +1200,39 @@ export default function useRecordingManager(
     spaceId,
     participantSessionId,
     stopSessionMutation,
-    socket,
-    roomId,
+    handleRecordingStopped,
   ]);
 
-  // The actual recorder start - fires for EVERY participant when the synced
-  // countdown reaches zero.
-  const beginRecording = useCallback(
-    async (data: RecordingStartedData) => {
-      // Don't let two starts overlap (detection + the stream-ready retry both
-      // fire) and double-create rows, and don't restart an active recorder.
-      if (beginningRef.current || isLocalRecording) return;
-      beginningRef.current = true;
+  // ── Screen share ──────────────────────────────────────────────────────
 
-      clearCountdown();
-      isCountingDownRef.current = false;
-      pendingRecordingStartRef.current = null;
-      startSessionClock(data.startedAt);
+  const sampleScreenSize = useCallback(() => {
+    const key = screenKeyRef.current;
+    const track = screenStreamRef.current?.getVideoTracks()[0];
+    if (!key || !track || track.readyState !== "live") return;
+    const { width, height } = track.getSettings();
+    if (!width || !height) return;
+    const current = screenMaxSizesRef.current.get(key);
+    if (!current || width * height > current.width * current.height) {
+      screenMaxSizesRef.current.set(key, { width, height });
+    }
+  }, []);
 
-      // Prefer reading the live stream on demand over the pushed snapshot - a
-      // late joiner's camera track can attach a beat after we're asked to start.
-      const readStream = (): MediaStream | null =>
-        getLiveStreamRef.current?.() ?? streamRef.current;
-
-      let stream = readStream();
-
-      // Camera is on but its track hasn't attached yet: wait briefly for it
-      // instead of capturing audio-only (video would be lost for the whole
-      // session) or parking forever on a fragile effect chain. This is THE
-      // late-joiner fix - it resolves instantly once the video track is present.
-      const audioOnly = data.recordingMode === "AUDIO_ONLY";
-      if (
-        !audioOnly &&
-        cameraEnabledRef.current &&
-        (!stream || stream.getVideoTracks().length === 0)
-      ) {
-        const deadline = Date.now() + VIDEO_ATTACH_GRACE_MS;
-        while (Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          const next = readStream();
-          if (next && next.getVideoTracks().length > 0) {
-            stream = next;
-            break;
-          }
-          stream = next ?? stream;
-        }
-      }
-
-      // The session may have been stopped while we waited for the camera.
-      if (activeSessionRef.current !== data.sessionId) {
-        beginningRef.current = false;
-        return;
-      }
-
-      // Camera and mic can both be off at start - record anyway with an empty
-      // stream. The participant may turn one on mid-session; until then the
-      // capture is blank, which is on them to handle.
-      if (!stream) {
-        stream = new MediaStream();
-      }
-
-      if (audioOnly && stream.getAudioTracks().length === 0) {
-        pendingRecordingStartRef.current = data;
-        beginningRef.current = false;
-        setError("Recording is active. Turn on your microphone to be captured.");
-        setRecordingState("recording");
-        return;
-      }
-
-      try {
-        // Make sure the clock is synced before we trust it. Normally it synced
-        // long ago (on room join); this only matters for a start that races the
-        // very first handshake. Bounded so it can never block the recorder.
-        await waitUntilSynced(1500);
-
-        // Measure "how late am I" at the exact "go" instant - BEFORE starting the
-        // recorder. The recorder takes ~100-300ms to wake up; reading the clock
-        // after that await would wrongly count the warm-up as lateness, so even
-        // on-time participants would show a small offset. Capturing it here, on
-        // the server's clock, gives a true lead-in: ~0 for on-time participants,
-        // the real gap for a late joiner.
-        const startOffsetMs = Math.max(0, getServerTime() - data.startedAt);
-
-        // Audio-only sessions use only the lossless PCM path. They never start
-        // a MediaRecorder or a screen recorder, so no video is finalized.
-        if (audioOnly) {
-          setError(null);
-          setRecordingState("recording");
-          const micTrack = stream.getAudioTracks()[0];
-          const pcmRecording =
-            await createParticipantRecordingMutation.mutateAsync({
-              recordingSessionId: data.sessionId,
-              spaceId,
-              participantSessionId,
-              type: "AUDIO",
-              container: "pcm",
-              codec: "pcm_s24le",
-              sampleRate: data.audioSampleRate,
-              channels: 1,
-              hasAudio: true,
-              hasVideo: false,
-              startOffsetMs,
-            });
-          pcmRecordingIdRef.current = pcmRecording.id;
-          await pcmCapture.start({
-            audioId: micTrack.getSettings().deviceId,
-            sampleRate: data.audioSampleRate === 44100 ? 44100 : 48000,
-            noiseSuppression: data.noiseSuppression,
-            autoGainControl: data.autoGainControl,
-            echoCancellation: recordingEchoCancellationRef.current,
-          });
-          flushPendingChunks();
-          return;
-        }
-
-        // Start local recording - populates the combined metadata ref.
-        await startLocalRecording(stream, screenStreamRef.current, {
-          videoResolution: data.videoResolution,
-        });
-
-        const combinedMeta = combinedMetaRef.current;
-        const screenMeta = screenMetaRef.current;
-        if (!combinedMeta) {
-          throw new Error("Recording metadata not available");
-        }
-
-        // Capture has begun - flip the UI to "recording" NOW, before the
-        // (possibly slow) row-creation calls. Chunks buffer in pendingChunksRef
-        // and flush once the recording ids exist below. Clear any earlier
-        // "turn on your mic or camera" notice from a parked start that has now
-        // resolved (e.g. a late joiner whose video track just landed).
-        setError(null);
-        setRecordingState("recording");
-
-        // Create the combined master ParticipantRecording. MP3/WAV are extracted
-        // from this master on demand at download time, so there's no separate
-        // audio recording.
-        const combinedRecording =
-          await createParticipantRecordingMutation.mutateAsync({
-            recordingSessionId: data.sessionId,
-            spaceId,
-            participantSessionId,
-            type: "VIDEO",
-            container: combinedMeta.container,
-            codec: combinedMeta.codec,
-            width: combinedMeta.width,
-            height: combinedMeta.height,
-            fps: combinedMeta.fps,
-            bitrate: combinedMeta.bitrate,
-            sampleRate: combinedMeta.sampleRate,
-            channels: combinedMeta.channels,
-            hasAudio: true,
-            hasVideo: true,
-            startOffsetMs,
-          });
-
-        let screenRecording: { id: string } | null = null;
-        if (screenMeta) {
-          screenRecording =
-            await createParticipantRecordingMutation.mutateAsync({
-              recordingSessionId: data.sessionId,
-              spaceId,
-              participantSessionId,
-              type: "VIDEO",
-              isScreenShare: true,
-              container: screenMeta.container,
-              codec: screenMeta.codec,
-              width: screenMeta.width,
-              height: screenMeta.height,
-              fps: screenMeta.fps,
-              bitrate: screenMeta.bitrate,
-              sampleRate: screenMeta.sampleRate,
-              channels: screenMeta.channels,
-              hasAudio: screenMeta.hasAudio,
-              hasVideo: true,
-              startOffsetMs,
-            });
-        }
-
-        combinedRecordingIdRef.current = combinedRecording.id;
-        screenRecordingIdRef.current = screenRecording?.id ?? null;
-        setCombinedRecordingId(combinedRecording.id);
-        setScreenRecordingId(screenRecording?.id ?? null);
-
-        // Parallel lossless raw-PCM mic track. Only when the captured stream
-        // actually has a mic - a camera-only participant has nothing to capture.
-        // This is its own ParticipantRecording (type AUDIO, container "pcm") so
-        // its sequence numbers can't collide with the combined track's. Set the
-        // id BEFORE start() so any early chunk flushes to the right recording; a
-        // failure just means this participant has no separate WAV (non-fatal).
-        const micTrack = stream.getAudioTracks()[0];
-        if (micTrack) {
-          try {
-            const pcmRecording =
-              await createParticipantRecordingMutation.mutateAsync({
-                recordingSessionId: data.sessionId,
-                spaceId,
-                participantSessionId,
-                type: "AUDIO",
-                // Marks this as the raw-PCM track so finalization wraps it in a
-                // WAV instead of treating it as a normal WebM audio master.
-                container: "pcm",
-                codec: "pcm_s24le",
-                sampleRate: data.audioSampleRate,
-                channels: 1,
-                hasAudio: true,
-                hasVideo: false,
-                startOffsetMs,
-              });
-            pcmRecordingIdRef.current = pcmRecording.id;
-            await pcmCapture.start({
-              audioId: micTrack.getSettings().deviceId,
-              sampleRate: data.audioSampleRate === 44100 ? 44100 : 48000,
-              noiseSuppression: data.noiseSuppression,
-              autoGainControl: data.autoGainControl,
-              echoCancellation: recordingEchoCancellationRef.current,
-            });
-          } catch (pcmErr) {
-            console.error(
-              "[RecordingManager] PCM capture failed to start (continuing without lossless audio):",
-              pcmErr,
-            );
-            pcmRecordingIdRef.current = null;
-          }
-        }
-
-        // Flush any chunks that arrived before ids were ready.
-        flushPendingChunks();
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to start recording";
-        console.error("[RecordingManager] start failed:", err);
-        setError(message);
-        setRecordingState("error");
-        activeSessionRef.current = data.sessionId;
-        pendingRecordingStartRef.current = data;
-        try {
-          await stopLocalRecording();
-        } catch {
-          /* ignore */
-        }
-        try {
-          await pcmCapture.stop();
-        } catch {
-          /* ignore */
-        }
-        pcmRecordingIdRef.current = null;
-      } finally {
-        beginningRef.current = false;
-      }
-    },
-    [
-      spaceId,
-      participantSessionId,
-      isLocalRecording,
-      startLocalRecording,
-      stopLocalRecording,
-      createParticipantRecordingMutation,
-      flushPendingChunks,
-      clearCountdown,
-      startSessionClock,
-      getServerTime,
-      waitUntilSynced,
-      pcmCapture,
-    ],
-  );
+  // A shared surface RESIZES mid-capture (switching tabs, resizing the shared
+  // window), so finalization needs the largest size seen, not the first.
+  useEffect(() => {
+    if (recordingState !== "recording") return;
+    const interval = setInterval(sampleScreenSize, 1000);
+    return () => clearInterval(interval);
+  }, [recordingState, sampleScreenSize]);
 
   const attachScreenStream = useCallback(
     async (screenStream: MediaStream) => {
+      const data = startDataRef.current;
       if (
-        recordingState !== "recording" ||
-        recordingModeRef.current === "AUDIO_ONLY" ||
-        !sessionIdRef.current ||
-        !spaceRecordingSessionIdRef.current ||
-        screenRecordingIdRef.current ||
+        !capturingSessionRef.current ||
+        !data ||
+        data.recordingMode === "AUDIO_ONLY" ||
+        screenKeyRef.current ||
         screenAttachInFlightRef.current ||
         screenStream.getVideoTracks().length === 0
       ) {
@@ -849,381 +1241,148 @@ export default function useRecordingManager(
 
       screenAttachInFlightRef.current = true;
       try {
-        const screenMeta = await attachLocalScreenRecording(screenStream);
-        if (!screenMeta) return;
-        screenMetaRef.current = screenMeta;
+        const attached = await localRef.current.attachScreenRecording(
+          screenStream,
+        );
+        if (!attached) return;
+        const { shareId, metadata } = attached;
+        const key: TrackKey = `screen:${shareId}`;
 
         // Screen share can begin well after the session start, so its own
         // server-time offset places it correctly on the timeline too.
-        const screenStartedAt = getServerTime();
         const startOffsetMs = sessionStartedAtRef.current
-          ? Math.max(0, screenStartedAt - sessionStartedAtRef.current)
+          ? Math.max(0, getServerTimeRef.current() - sessionStartedAtRef.current)
           : 0;
 
-        const screenRecording =
-          await createParticipantRecordingRef.current.mutateAsync({
-            recordingSessionId: sessionIdRef.current,
-            spaceId,
-            participantSessionId,
-            type: "VIDEO",
-            isScreenShare: true,
-            container: screenMeta.container,
-            codec: screenMeta.codec,
-            width: screenMeta.width,
-            height: screenMeta.height,
-            fps: screenMeta.fps,
-            bitrate: screenMeta.bitrate,
-            sampleRate: screenMeta.sampleRate,
-            channels: screenMeta.channels,
-            hasAudio: screenMeta.hasAudio,
-            hasVideo: true,
-            startOffsetMs,
-          });
-
-        screenRecordingIdRef.current = screenRecording.id;
-        setScreenRecordingId(screenRecording.id);
-        flushPendingChunks();
+        screenKeyRef.current = key;
+        ensureRoute(key, "screen", () => ({
+          recordingSessionId: data.sessionId,
+          spaceId: spaceIdRef.current,
+          participantSessionId: participantSessionIdRef.current,
+          type: "VIDEO",
+          isScreenShare: true,
+          container: metadata.container,
+          codec: metadata.codec,
+          width: metadata.width,
+          height: metadata.height,
+          fps: metadata.fps,
+          bitrate: metadata.bitrate,
+          sampleRate: metadata.sampleRate,
+          channels: metadata.channels,
+          hasAudio: metadata.hasAudio,
+          hasVideo: true,
+          startOffsetMs,
+        }));
+        sampleScreenSize();
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to attach screen share";
         console.error("[RecordingManager] screen attach failed:", err);
-        setError(message);
       } finally {
         screenAttachInFlightRef.current = false;
       }
     },
-    [
-      recordingState,
-      attachLocalScreenRecording,
-      flushPendingChunks,
-      participantSessionId,
-      spaceId,
-      getServerTime,
-    ],
+    [ensureRoute, sampleScreenSize],
   );
 
   // Screen share ended (but the meeting recording continues). Stop the screen
-  // recorder, flush its final chunk, and free the slot so a LATER share records
-  // as its own track. The stopped recording's id is kept so it gets completed at
-  // session stop alongside everything else.
+  // recorder, flush its final chunk, and complete that share's track so a
+  // LATER share records as its own track.
   const detachScreenStream = useCallback(async () => {
-    const endedScreenId = screenRecordingIdRef.current;
-    if (!endedScreenId) return;
+    sampleScreenSize();
+    let result: { shareId: number; chunkCount: number } | null = null;
     try {
-      await detachLocalScreenRecording();
-      flushPendingChunks();
+      result = await localRef.current.detachScreenRecording();
     } catch (err) {
       console.error("[RecordingManager] screen detach failed:", err);
     }
-    detachedScreenRecordingIdsRef.current.push(endedScreenId);
-    screenRecordingIdRef.current = null;
-    screenMetaRef.current = null;
+    if (!result) return;
+    const key: TrackKey = `screen:${result.shareId}`;
+    if (screenKeyRef.current === key) screenKeyRef.current = null;
+    const route = routesRef.current.get(key);
+    if (route) {
+      void completeRoute(
+        route,
+        result.chunkCount,
+        screenMaxSizesRef.current.get(key),
+      );
+    }
     setScreenRecordingId(null);
-  }, [detachLocalScreenRecording, flushPendingChunks]);
+  }, [completeRoute, sampleScreenSize]);
 
-  // Handle "recording-started" socket event (fires for EVERY participant).
-  // We don't start recording immediately - instead every client runs the same
-  // 3-2-1 lead-in so the actual capture begins in sync for everyone.
-  const handleRecordingStarted = useCallback(
-    (data: RecordingStartedData) => {
-      // Ignore duplicate broadcasts for a session we're already handling -
-      // otherwise the countdown restarts (3,2,1 … 3 again).
-      if (activeSessionRef.current === data.sessionId) return;
+  // ── Lifecycle wiring ──────────────────────────────────────────────────
 
-      setSessionId(data.sessionId);
-      setSpaceRecordingSessionId(data.spaceRecordingSessionId);
-      sessionIdRef.current = data.sessionId;
-      spaceRecordingSessionIdRef.current = data.spaceRecordingSessionId;
-      sessionStartedAtRef.current = data.startedAt;
-
-      activeSessionRef.current = data.sessionId;
-      recordingModeRef.current = data.recordingMode;
-
-      const countdownMs = data.countdownMs ?? COUNTDOWN_MS;
-
-      clearCountdown();
-      setError(null);
-
-      const serverNow = getServerTime();
-      const delayMs =
-        data.startedAt > serverNow
-          ? Math.min(countdownMs, data.startedAt - serverNow)
-          : 0;
-
-      if (delayMs <= 0) {
-        void beginRecording(data);
-        return;
-      }
-
-      isCountingDownRef.current = true;
-      setRecordingState("countdown");
-      setCountdownValue(Math.max(1, Math.ceil(delayMs / 1000)));
-
-      // Visual tick: 3 → 2 → 1, adjusted for late socket replays.
-      countdownIntervalRef.current = setInterval(() => {
-        const remainingMs = data.startedAt - getServerTime();
-        if (remainingMs <= 0) {
-          if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current);
-            countdownIntervalRef.current = null;
-          }
-          return;
-        }
-        setCountdownValue(Math.max(1, Math.ceil(remainingMs / 1000)));
-      }, 250);
-
-      // When the lead-in elapses, everyone's recorder starts together.
-      countdownTimeoutRef.current = setTimeout(() => {
-        void beginRecording(data);
-      }, delayMs);
-    },
-    [beginRecording, clearCountdown, getServerTime],
-  );
-
-  // Handle "recording-stopped" socket event
-  const handleRecordingStopped = useCallback(async () => {
-    // Stopped during the lead-in (before capture began): just cancel cleanly.
-    if (isCountingDownRef.current) {
-      isCountingDownRef.current = false;
-      activeSessionRef.current = null;
-      pendingRecordingStartRef.current = null;
-      stopSessionClock();
-      clearCountdown();
-      setRecordingState("complete");
-      return;
-    }
-
-    if (!isLocalRecording && !pcmRecordingIdRef.current) {
-      pendingRecordingStartRef.current = null;
-      activeSessionRef.current = null;
-      stopSessionClock();
-      setError(null);
-      setRecordingState("complete");
-      return;
-    }
-
-    try {
-      // Freeze the elapsed timer the instant we start stopping. The remaining
-      // work (draining uploads, marking complete) can take seconds and must not
-      // keep the clock ticking after the user hit stop.
-      stopSessionClock();
-      setRecordingState("stopping");
-      if (isLocalRecording) await stopLocalRecording();
-      // Stop the parallel PCM capture too - stop() flushes its final partial
-      // chunk (through onPcmChunk -> enqueueChunk) before closing the context.
-      await pcmCapture.stop();
-
-      // Flush stragglers, then wait for the upload queue to drain.
-      flushPendingChunks();
-      setRecordingState("uploading");
-      const drained = await uploader.waitUntilDrained();
-      if (!drained) {
-        // A straggler chunk never finished uploading. Do NOT bail here: bailing
-        // would skip the /complete calls below, leaving this recording stuck at
-        // "uploading" forever (expectedSegments never set) so it never finalizes
-        // or shows up. Instead mark it complete with whatever DID upload - the
-        // finalizer salvages over any gap. This is the difference between a late
-        // joiner's track appearing vs. silently vanishing.
-        console.warn(
-          "[RecordingManager] upload queue didn't fully drain; completing with the segments that uploaded (finalizer salvages the rest)",
-        );
-      }
-
-      // Mark each recording complete with its final segment count.
-      const completions: Promise<unknown>[] = [];
-      if (combinedRecordingIdRef.current) {
-        completions.push(
-          api.post(
-            `/recording/participant/${combinedRecordingIdRef.current}/complete`,
-            {
-              expectedSegments: uploader.getUploadedCount(
-                combinedRecordingIdRef.current,
-              ),
-              participantSessionId,
-              spaceId,
-            },
-          ),
-        );
-      }
-      // Complete the parallel PCM recording (if any) so its WAV gets finalized.
-      if (pcmRecordingIdRef.current) {
-        completions.push(
-          api.post(
-            `/recording/participant/${pcmRecordingIdRef.current}/complete`,
-            {
-              expectedSegments: uploader.getUploadedCount(
-                pcmRecordingIdRef.current,
-              ),
-              participantSessionId,
-              spaceId,
-            },
-          ),
-        );
-      }
-      // Complete every screen recording from this session - the one still
-      // sharing (if any) plus any earlier shares that already stopped.
-      const allScreenIds = [
-        ...detachedScreenRecordingIdsRef.current,
-        ...(screenRecordingIdRef.current ? [screenRecordingIdRef.current] : []),
-      ];
-      // Sample once more while the share is still live, so a resize in the
-      // final second still reaches the finalizer.
-      sampleScreenSize();
-      for (const screenId of allScreenIds) {
-        const size = screenMaxSizesRef.current.get(screenId);
-        completions.push(
-          api.post(`/recording/participant/${screenId}/complete`, {
-            expectedSegments: uploader.getUploadedCount(screenId),
-            participantSessionId,
-            spaceId,
-            // The LARGEST frame size this share reported, not the one
-            // snapshotted when it started - finalization pins the master to it.
-            ...(size ? { width: size.width, height: size.height } : {}),
-          }),
-        );
-      }
-      await Promise.allSettled(completions);
-
-      setRecordingState("complete");
-      stopSessionClock();
-
-      // Reset ids so a subsequent session starts clean.
-      combinedRecordingIdRef.current = null;
-      screenRecordingIdRef.current = null;
-      pcmRecordingIdRef.current = null;
-      detachedScreenRecordingIdsRef.current = [];
-      screenMaxSizesRef.current.clear();
-      sessionStartedAtRef.current = null;
-      activeSessionRef.current = null;
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to stop recording";
-      console.error("[RecordingManager] stop failed:", err);
-      setError(message);
-      setRecordingState("error");
-    }
-  }, [
-    isLocalRecording,
-    stopLocalRecording,
-    pcmCapture,
-    flushPendingChunks,
-    uploader,
-    participantSessionId,
-    spaceId,
-    clearCountdown,
-    stopSessionClock,
-    sampleScreenSize,
-  ]);
-
-  // Finalize THIS participant's own recording on demand - used when leaving the
-  // space mid-recording so their captured-so-far footage is flushed, uploaded,
-  // and marked complete instead of being abandoned when the tab unmounts. Same
-  // work as reacting to the host's stop; a no-op if we aren't recording.
+  // Finalize THIS participant's own recording on demand - used when leaving
+  // the space mid-recording. Waits briefly for uploads; anything left keeps
+  // uploading from IndexedDB in the background.
   const finishLocalRecording = useCallback(async () => {
-    await handleRecordingStopped();
+    const current = capturingSessionRef.current ?? activeSessionRef.current;
+    if (!current) return;
+    await handleRecordingStopped(current);
+    // Give the completion reports a moment to land before the page goes.
+    await Promise.race([completionsRef.current, delay(5000)]);
+    await uploaderRef.current.waitUntilDrained(LEAVE_DRAIN_TIMEOUT_MS);
   }, [handleRecordingStopped]);
 
-  // The stop handler legitimately changes as recording/uploader callbacks get
-  // refreshed. The usage heartbeat must not treat that as a reason to recreate
-  // its interval - the duration timer alone re-renders this hook every 100ms.
-  // Read the latest handler through a ref when a heartbeat exhausts credit.
-  const handleRecordingStoppedRef = useRef(handleRecordingStopped);
-  handleRecordingStoppedRef.current = handleRecordingStopped;
-  const heartbeatInFlightRef = useRef(false);
-
-  // Mid-session encoder failure: the combined codec died after capturing data,
-  // so it can't be switched without corrupting the file. Warn (non-fatal) and
-  // run the normal stop/save path so everything captured so far is finalized.
-  onCombinedEncoderFailedRef.current = (error: Error) => {
-    console.warn("[RecordingManager] combined encoder failed mid-session:", error);
-    toast.error(
-      "Your recording hit an encoder error and was stopped early - everything captured up to that point was saved.",
-      8000,
-    );
-    void handleRecordingStoppedRef.current();
-  };
-
-  // Clear any pending countdown timers if the component unmounts mid-lead-in.
+  // Clear timers on unmount.
   useEffect(
     () => () => {
       clearCountdown();
       stopSessionClock();
+      if (sourceSyncTimerRef.current) clearTimeout(sourceSyncTimerRef.current);
+      releaseRecorderLockRef.current?.();
     },
     [clearCountdown, stopSessionClock],
   );
 
+  // Missed the socket start (joined during the take, socket reconnecting, or
+  // between takes): the 5s active-session poll starts it.
   useEffect(() => {
     const active = activeRecordingQuery.data;
     if (!active) return;
     if (activeSessionRef.current === active.id) return;
-    if (recordingState !== "idle" && recordingState !== "error") return;
-
-    handleRecordingStarted({
-      sessionId: active.id,
-      spaceRecordingSessionId: active.spaceRecordingSessionId,
-      startedAt: new Date(active.startedAt).getTime() + COUNTDOWN_MS,
-      countdownMs: 0,
-      videoResolution: active.videoResolution ?? 2160,
-      audioSampleRate: active.audioSampleRate ?? 48000,
-      noiseSuppression: active.noiseSuppression ?? false,
-      autoGainControl: active.autoGainControl ?? false,
-      echoCancellation: active.echoCancellation ?? false,
-      recordingMode:
-        active.recordingMode === "AUDIO_ONLY" ? "AUDIO_ONLY" : "VIDEO_AND_AUDIO",
-    });
+    if (finishedSessionsRef.current.has(active.id)) return;
+    if (!["idle", "error", "complete", "uploading"].includes(recordingState)) {
+      return;
+    }
+    handleRecordingStarted(startDataFromSession(active));
   }, [activeRecordingQuery.data, handleRecordingStarted, recordingState]);
 
+  // Missed the socket stop: the poll shows no active session while we're still
+  // capturing (after a short grace for a brand-new take).
   useEffect(() => {
     if (activeRecordingQuery.isFetching) return;
     if (activeRecordingQuery.isError) return;
     if (activeRecordingQuery.data) return;
-    if (!activeSessionRef.current) return;
-    if (getServerTime() - (sessionStartedAtRef.current ?? getServerTime()) < 5000) {
-      return;
-    }
+    const current = capturingSessionRef.current ?? activeSessionRef.current;
+    if (!current) return;
     if (
-      recordingState !== "countdown" &&
-      recordingState !== "recording" &&
-      recordingState !== "error"
+      getServerTimeRef.current() -
+        (sessionStartedAtRef.current ?? getServerTimeRef.current()) <
+      5000
     ) {
       return;
     }
-
-    void handleRecordingStopped();
+    if (!["countdown", "recording", "error"].includes(recordingState)) return;
+    void handleRecordingStopped(current);
   }, [
     activeRecordingQuery.data,
     activeRecordingQuery.isError,
     activeRecordingQuery.isFetching,
     handleRecordingStopped,
     recordingState,
-    getServerTime,
   ]);
-
-  useEffect(() => {
-    const pending = pendingRecordingStartRef.current;
-    const stream = streamRef.current;
-    if (
-      !pending ||
-      activeSessionRef.current !== pending.sessionId ||
-      !stream ||
-      stream.getTracks().length === 0
-    ) {
-      return;
-    }
-
-    void beginRecording(pending);
-  }, [beginRecording, streamReadyVersion]);
 
   // Socket wiring
   useEffect(() => {
     if (!socket) return;
-
-    socket.on("recording-started", handleRecordingStarted);
-    socket.on("recording-stopped", handleRecordingStopped);
-
+    const onStarted = (data: RecordingStartedData) =>
+      handleRecordingStarted(data);
+    const onStopped = (stoppedSessionId: string) =>
+      void handleRecordingStopped(stoppedSessionId);
+    socket.on("recording-started", onStarted);
+    socket.on("recording-stopped", onStopped);
     return () => {
-      socket.off("recording-started", handleRecordingStarted);
-      socket.off("recording-stopped", handleRecordingStopped);
+      socket.off("recording-started", onStarted);
+      socket.off("recording-stopped", onStopped);
     };
   }, [socket, handleRecordingStarted, handleRecordingStopped]);
 
@@ -1252,10 +1411,8 @@ export default function useRecordingManager(
             "Recording credit used up - recording stopped. Everything captured was saved. Upgrade to Pro for 20 hours every month.",
             10000,
           );
-          // The server already stopped the session; broadcast so every
-          // participant stops, uploads, and completes their track now.
-          socket?.emit("recording-stop", roomId, sessionId);
-          void handleRecordingStoppedRef.current();
+          // The server already stopped the session and told every participant.
+          void handleRecordingStoppedRef.current(sessionId);
           return;
         }
 
@@ -1283,26 +1440,20 @@ export default function useRecordingManager(
       cancelled = true;
       clearInterval(interval);
     };
-  }, [
-    recordingState,
-    isHost,
-    sessionId,
-    socket,
-    roomId,
-  ]);
+  }, [recordingState, isHost, sessionId]);
 
   return {
     recordingState,
     isRecording: recordingState === "recording",
-    recordingDurationMs: sessionElapsedMs || recordingDurationMs,
+    recordingDurationMs: sessionElapsedMs || localRecording.recordingDurationMs,
     error,
     stopRequestFailed,
     sessionId,
     spaceRecordingSessionId,
     combinedRecordingId,
     screenRecordingId,
-    combinedChunkIndex,
-    screenChunkIndex,
+    combinedChunkIndex: localRecording.combinedChunkIndex,
+    screenChunkIndex: localRecording.screenChunkIndex,
     pendingUploads: uploader.pendingCount,
     chunkUploadProgress: uploader.chunkProgress,
     countdownValue,

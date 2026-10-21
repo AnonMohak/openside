@@ -732,6 +732,7 @@ export async function createParticipantRecordingController(
 			hasAudio,
 			hasVideo,
 			startOffsetMs,
+			resumable,
 		} = req.body;
 
 		if (!recordingSessionId || typeof recordingSessionId !== "string") {
@@ -816,6 +817,7 @@ export async function createParticipantRecordingController(
 				typeof startOffsetMs === "number" && Number.isFinite(startOffsetMs)
 					? Math.max(0, Math.round(startOffsetMs))
 					: undefined,
+			resumable: resumable === true,
 		});
 
 		res.status(201).json({

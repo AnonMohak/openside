@@ -81,7 +81,20 @@ function createStore(db: IDBDatabase): void {
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
-  dbPromise = new Promise((resolve, reject) => {
+  // A connection the browser closed (another tab upgrading the DB, storage
+  // pressure) must not be reused - every later transaction would throw.
+  const watch = (db: IDBDatabase) => {
+    db.onversionchange = () => {
+      db.close();
+      dbPromise = null;
+    };
+    db.onclose = () => {
+      dbPromise = null;
+    };
+    return db;
+  };
+
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME);
 
     // Fires only for a brand-new DB (version 0 -> 1).
@@ -90,7 +103,7 @@ function openDb(): Promise<IDBDatabase> {
     request.onsuccess = () => {
       const db = request.result;
       if (db.objectStoreNames.contains(STORE)) {
-        resolve(db);
+        resolve(watch(db));
         return;
       }
       // Store missing on an existing DB: bump the version to create it.
@@ -98,13 +111,18 @@ function openDb(): Promise<IDBDatabase> {
       db.close();
       const upgrade = indexedDB.open(DB_NAME, nextVersion);
       upgrade.onupgradeneeded = () => createStore(upgrade.result);
-      upgrade.onsuccess = () => resolve(upgrade.result);
+      upgrade.onsuccess = () => resolve(watch(upgrade.result));
       upgrade.onerror = () => reject(upgrade.error);
     };
     request.onerror = () => reject(request.error);
   });
 
-  return dbPromise;
+  dbPromise = opening;
+  // A failed open (private mode, blocked storage) is retried next time.
+  opening.catch(() => {
+    if (dbPromise === opening) dbPromise = null;
+  });
+  return opening;
 }
 
 function tx(
@@ -136,6 +154,35 @@ export async function putChunk(chunk: BufferedChunk): Promise<void> {
 export async function deleteChunk(id: string): Promise<void> {
   const db = await openDb();
   await promisifyRequest(tx(db, "readwrite").delete(id));
+}
+
+/** Whether a chunk is still buffered (another tab may have uploaded it). */
+export async function hasChunk(id: string): Promise<boolean> {
+  const db = await openDb();
+  const key = await promisifyRequest(tx(db, "readonly").getKey(id));
+  return key !== undefined;
+}
+
+/**
+ * Highest sequence number still buffered for a recording, or -1. A refreshed
+ * tab continuing a track must number its chunks past these - they belong to
+ * the previous tab and haven't uploaded yet.
+ */
+export async function getMaxBufferedSequence(
+  participantRecordingId: string,
+): Promise<number> {
+  const db = await openDb();
+  const keys = await promisifyRequest(
+    tx(db, "readonly")
+      .index("byRecording")
+      .getAllKeys(IDBKeyRange.only(participantRecordingId)),
+  );
+  let max = -1;
+  for (const key of keys) {
+    const seq = Number(String(key).split(":").pop());
+    if (Number.isFinite(seq) && seq > max) max = seq;
+  }
+  return max;
 }
 
 /** All buffered chunks, oldest first (by sequence/created order). */

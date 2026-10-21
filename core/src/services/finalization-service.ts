@@ -1,29 +1,46 @@
 /**
- * Finalization worker (in-process).
+ * Meeting finalization.
  *
- * When a recording session has stopped and every participant recording has
- * finished uploading, we stitch each recording's chunks into a single master
- * file and register a downloadable FinalOutput.
+ * Each participant track (camera, PCM mic, every screen share) finalizes on its
+ * own as soon as all of its chunks are in - one queue job per track, so a big
+ * meeting encodes in parallel and one slow or broken track never holds up the
+ * rest. A track's chunks are byte-fragments of one or more recorder "parts"
+ * (see lib/media-compose.ts); they're laid out on the track's timeline and
+ * encoded to a CFR H.264/AAC master (audio-only tracks stay WebM).
  *
- * HOW THE STITCH WORKS:
- * MediaRecorder timeslices are byte-fragments of ONE continuous WebM stream, so
- * concatenating the chunk bytes in sequence order reconstructs the original
- * file. We then run a fast `ffmpeg -c copy` remux to write a proper seekable
- * header/duration (no re-encode). MP4/MP3/WAV are derived on demand at download
- * time, not here, to keep finalization cheap.
- *
- * This runs inside the Express process via child_process. It's structured so it
- * can later move to a dedicated queue/worker without touching callers.
+ * A track is never left PROCESSING by a dead worker (the next run takes it
+ * over), never downgraded from READY by a failed re-run, and re-finalized when
+ * a straggler chunk lands after it was already built.
  */
 
-import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { appendFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import {
+	appendFile,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { prisma } from "../db/index.ts";
-import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
-import { enqueueFinalize, isQueueConfigured } from "../lib/queue.ts";
+import {
+	type ComposedMaster,
+	type MasterEncodeSettings,
+	type PcmFormat,
+	composePcmTimeline,
+	composeTimeline,
+	concatCopy,
+	encodeMasterFiller,
+	runFfmpeg,
+	startsContainer,
+} from "../lib/media-compose.ts";
+import {
+	enqueueFinalizeTrack,
+	getFinalizeTrackJobState,
+	isQueueConfigured,
+} from "../lib/queue.ts";
 import {
 	type AllowedFps,
 	DEFAULT_FPS,
@@ -34,7 +51,6 @@ import {
 	findSegmentGaps,
 	waitForLateSegments,
 } from "../lib/segment-gaps.ts";
-import { resolveTargetSize, sizeFilter } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
 import {
@@ -43,40 +59,57 @@ import {
 	putFileObject,
 } from "./storage-service.ts";
 
-// Local guard against the same session being finalized twice concurrently
-// WITHIN one process. The authoritative, cross-replica dedup is the BullMQ jobId
-// (see enqueueFinalize); this just protects the in-process fallback path.
+// In-process guard per track. Across processes, the queue's per-track jobId is
+// the dedup: at most one job per track waits or runs at a time.
 const inFlight = new Set<string>();
 
 // Minimum join delay before we bother generating an aligned ("with space")
 // variant. Below this, the gap is just recorder-startup/measurement noise - not
-// a real late join - so padding it would only burn a full re-encode for a sliver
-// of black nobody needs. Genuine latecomers are seconds late, well above this.
+// a real late join - so padding it would only add black nobody needs. Genuine
+// latecomers are seconds late, well above this.
 const ALIGNED_MIN_OFFSET_MS = 500;
 
+/** Re-run delay when chunks landed while a track was encoding. */
+const LATE_CHUNK_RERUN_DELAY_MS = 5000;
+
+/** Master CRF (veryfast). DEMO masters carry a watermark and use a lighter one. */
+const MASTER_CRF = 18;
+const WATERMARKED_MASTER_CRF = 20;
+
+function trackKey(recordingId: string): string {
+	return `track:${recordingId}`;
+}
+
 /**
- * Kick off finalization the right way. Callers should use this instead of
- * calling finalizeSession directly.
- *
- * Fallback policy: run finalization in-process ONLY when no queue is configured
- * (local dev / not-yet-migrated deploy). When a queue IS configured but the
- * enqueue fails (Redis outage), we deliberately do NOT run ffmpeg in-process -
- * doing so would dump heavy encode load onto every API replica at once, exactly
- * what the queue exists to prevent. The session is left for finalization
- * recovery to retry later.
+ * Reading a chunk failed for a reason worth retrying (R2 or network trouble),
+ * as opposed to the object really being gone. The job is retried instead of
+ * failing a track for good while its chunks are still sitting in storage.
  */
-async function triggerFinalize(recordingSessionId: string): Promise<void> {
-	if (!isQueueConfigured()) {
-		void finalizeSession(recordingSessionId);
-		return;
-	}
-	try {
-		await enqueueFinalize(recordingSessionId);
-	} catch (error) {
-		console.error(
-			"[Finalize] enqueue failed (queue configured); leaving for recovery:",
-			error,
-		);
+class TransientFinalizeError extends Error {}
+
+function isMissingObject(error: unknown): boolean {
+	const e = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+	return (
+		e?.name === "NoSuchKey" ||
+		e?.name === "NotFound" ||
+		e?.$metadata?.httpStatusCode === 404
+	);
+}
+
+/** A chunk's bytes, or null if the object is gone (it becomes a gap). */
+async function downloadChunk(key: string): Promise<Buffer | null> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await getObjectBuffer(key);
+		} catch (error) {
+			if (isMissingObject(error)) return null;
+			if (attempt >= 2) {
+				throw new TransientFinalizeError(
+					`Chunk download failed: ${errorMessage(error)}`,
+				);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+		}
 	}
 }
 
@@ -84,8 +117,8 @@ type TrackKind = "combined" | "audio" | `screen-${string}`;
 
 function recordingTrackKind(rec: {
 	id: string;
+	type: "AUDIO" | "VIDEO";
 	hasVideo: boolean;
-	hasAudio: boolean;
 	isScreenShare: boolean;
 }): TrackKind {
 	// A screen share lives under the SAME participant/session prefix as that
@@ -93,18 +126,14 @@ function recordingTrackKind(rec: {
 	// master/aligned/thumb keys would overwrite the camera's (and each other's when
 	// there are multiple shares). Scope every screen share by its recording id.
 	if (rec.isScreenShare) return `screen-${rec.id}`;
-	return rec.hasVideo ? "combined" : "audio";
+	// By the track's TYPE, not whether video was captured: a camera track
+	// recorded with the camera off is still the camera track, and its key must
+	// not move when a re-run finds video in it.
+	return rec.type === "VIDEO" || rec.hasVideo ? "combined" : "audio";
 }
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-// Video masters are now CFR-normalized H.264/MP4 (see finalizeRecording); only
-// audio-only masters stay WebM. The extension is passed in so keys, content
-// types, and mimeType stay in lockstep with what was actually written.
-function masterExt(hasVideo: boolean): "mp4" | "webm" {
-	return hasVideo ? "mp4" : "webm";
 }
 
 function masterContentType(ext: "mp4" | "webm"): string {
@@ -263,23 +292,6 @@ export async function generateEarlyThumbnailFromChunk(params: {
 	}
 }
 
-function runFfmpeg(args: string[]): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpegPath, withThreadLimit(args), {
-			stdio: ["ignore", "ignore", "pipe"],
-		});
-		let stderr = "";
-		proc.stderr.on("data", (data) => {
-			stderr += data.toString();
-		});
-		proc.on("error", reject);
-		proc.on("close", (code) => {
-			if (code === 0) resolve();
-			else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-2000)}`));
-		});
-	});
-}
-
 async function readyOutputCount(recordingSessionId: string): Promise<number> {
 	return prisma.finalOutput.count({
 		where: { recordingSessionId, status: "READY", masterKey: { not: null } },
@@ -287,9 +299,10 @@ async function readyOutputCount(recordingSessionId: string): Promise<number> {
 }
 
 /**
- * Trigger finalization IF the session has stopped and at least one track has
- * finished uploading. Tracks finalize independently - we no longer wait for
- * every participant. Safe to call repeatedly (on every track completion).
+ * Kick finalization for every meeting track that's ready. Safe to call
+ * repeatedly (every track completion, every sweep): per-track jobs are deduped,
+ * so a track already queued or running is left alone. Tracks finalize
+ * independently - nobody waits for a slow participant.
  */
 export async function maybeFinalizeSession(
 	recordingSessionId: string,
@@ -299,14 +312,17 @@ export async function maybeFinalizeSession(
 		select: {
 			id: true,
 			status: true,
-			participantRecordings: { select: { status: true, isComplete: true } },
+			spaceId: true,
+			participantRecordings: {
+				select: { id: true, status: true, isComplete: true },
+			},
 		},
 	});
 
-	if (!session) return;
+	// Screen-recorder sessions have their own (per-session) finalizer.
+	if (!session?.spaceId) return;
 
-	// Recordings only reach UPLOADED after the host stops, so only act once the
-	// session is stopped / already finalizing.
+	// Tracks only become finalizable after the host stops.
 	if (!["STOPPED", "PROCESSING", "FAILED", "READY"].includes(session.status)) {
 		return;
 	}
@@ -314,34 +330,172 @@ export async function maybeFinalizeSession(
 	const recordings = session.participantRecordings;
 	if (recordings.length === 0) return;
 
-	// Per-track finalization: as soon as ANY track is fully uploaded we finalize
-	// it - we no longer wait for every participant. A track abandoned by a
-	// refresh/crash therefore can't hold up everyone else's output. Each later
-	// completion re-triggers to pick up the next ready track.
-	const hasFinalizable = recordings.some((rec) => rec.status === "UPLOADED");
+	for (const rec of recordings) {
+		if (rec.status === "UPLOADED") {
+			await requestTrackFinalize(recordingSessionId, rec.id);
+		} else if (rec.status === "PROCESSING") {
+			await recoverProcessingTrack(recordingSessionId, session.spaceId, rec.id);
+		}
+	}
 
-	// Edge case: a still-STOPPED session where nothing is left to encode and no
-	// upload is pending (e.g. every track failed with zero segments) still needs
-	// one run to settle its final status to FAILED.
-	const needsSettle =
-		session.status === "STOPPED" && recordings.every((rec) => rec.isComplete);
-
-	if (!hasFinalizable && !needsSettle) return;
-
-	// Hand off to the worker fleet (or in-process fallback). Callers (HTTP
-	// handlers) never block on encoding.
-	await triggerFinalize(recordingSessionId);
+	// Nothing left to encode and nothing uploading (e.g. every track failed
+	// with zero segments): settle the session's final status now.
+	const pending = recordings.some(
+		(rec) =>
+			!rec.isComplete ||
+			rec.status === "UPLOADED" ||
+			rec.status === "PROCESSING",
+	);
+	if (!pending && session.status !== "READY") {
+		await settleSessionStatus(recordingSessionId, session.spaceId);
+	}
 }
 
-/** Stitch + register masters for every recording in a session. */
-export async function finalizeSession(
+/** Queue one track (or, without Redis, run it in-process). */
+export async function requestTrackFinalize(
 	recordingSessionId: string,
+	recordingId: string,
+	{ delayMs = 0 }: { delayMs?: number } = {},
 ): Promise<void> {
-	if (inFlight.has(recordingSessionId)) return;
-	inFlight.add(recordingSessionId);
+	if (!isQueueConfigured()) {
+		const run = () => {
+			void finalizeTrack(recordingSessionId, recordingId).catch((error) =>
+				console.error(
+					`[Finalize] track ${recordingId} failed in-process (the recovery sweep retries it):`,
+					error,
+				),
+			);
+		};
+		if (delayMs > 0) setTimeout(run, delayMs).unref();
+		else run();
+		return;
+	}
+	try {
+		await enqueueFinalizeTrack(recordingSessionId, recordingId, { delayMs });
+	} catch (error) {
+		// Redis unreachable: never encode in the API process - the recovery
+		// sweep re-kicks this track once the queue is back.
+		console.error(
+			`[Finalize] enqueue failed for track ${recordingId}; leaving for recovery:`,
+			error,
+		);
+	}
+}
+
+/**
+ * A track in PROCESSING whose job is gone lost its worker mid-encode (deploy,
+ * OOM, scale-down) - run it again. One whose job FAILED exhausted its retries
+ * (it keeps killing the worker): stop the crash loop and fail it for good.
+ */
+async function recoverProcessingTrack(
+	recordingSessionId: string,
+	spaceId: string,
+	recordingId: string,
+): Promise<void> {
+	if (!isQueueConfigured()) {
+		if (!inFlight.has(trackKey(recordingId))) {
+			await requestTrackFinalize(recordingSessionId, recordingId);
+		}
+		return;
+	}
+
+	const state = await getFinalizeTrackJobState(recordingId).catch(
+		() => "pending" as const,
+	);
+	if (state === "pending" || state === "unconfigured") return;
+
+	if (state === "failed") {
+		const rec = await prisma.participantRecording.findUnique({
+			where: { id: recordingId },
+			include: { segments: { orderBy: { sequenceNumber: "asc" } } },
+		});
+		if (rec?.status === "PROCESSING" && rec.participantId) {
+			await failTrack({
+				rec: { ...rec, participantId: rec.participantId },
+				spaceId,
+				recordingSessionId,
+				message: "Finalization kept crashing the worker; gave up.",
+			});
+			await settleSessionStatus(recordingSessionId, spaceId);
+		}
+		return;
+	}
+
+	console.warn(
+		`[Finalize] track ${recordingId} was left PROCESSING with no live job - re-running`,
+	);
+	await requestTrackFinalize(recordingSessionId, recordingId);
+}
+
+/** Settle the session status from where its tracks actually landed. */
+async function settleSessionStatus(
+	recordingSessionId: string,
+	spaceId: string,
+): Promise<void> {
+	const [readyOutputs, recordings] = await Promise.all([
+		readyOutputCount(recordingSessionId),
+		prisma.participantRecording.findMany({
+			where: { recordingSessionId },
+			select: { status: true, isComplete: true },
+		}),
+	]);
+
+	// Anything still uploading, queued, or mid-encode means more tracks are
+	// coming - don't call the session finished yet.
+	const stillPending = recordings.some(
+		(rec) =>
+			!rec.isComplete ||
+			rec.status === "UPLOADED" ||
+			rec.status === "PROCESSING",
+	);
+
+	if (readyOutputs > 0) {
+		// At least one downloadable track exists → the session is usable now.
+		// Late tracks get added incrementally by their own jobs.
+		await prisma.recordingSession
+			.updateMany({
+				where: { id: recordingSessionId, status: { not: "ACTIVE" } },
+				data: { status: "READY" },
+			})
+			.catch(() => undefined);
+		return;
+	}
+
+	if (!stillPending && recordings.length > 0) {
+		// Everything terminal and nothing succeeded → the session failed.
+		await prisma.recordingSession
+			.updateMany({
+				where: { id: recordingSessionId, status: { not: "ACTIVE" } },
+				data: { status: "FAILED" },
+			})
+			.catch(() => undefined);
+		await prisma.space
+			.updateMany({
+				where: { id: spaceId, recordingStatus: "RECORDING" },
+				data: { recordingStatus: "STOPPED" },
+			})
+			.catch(() => undefined);
+		console.error(
+			`[Finalize] Session ${recordingSessionId} failed: no recordings finalized.`,
+		);
+	}
+}
+
+/**
+ * Finalize ONE meeting track. Returns whether chunks landed while it was
+ * encoding, so the caller re-runs it once the current job is out of the way
+ * (a re-add from inside the running job would be deduped away).
+ */
+export async function finalizeTrack(
+	recordingSessionId: string,
+	recordingId: string,
+): Promise<{ rerun: boolean }> {
+	const key = trackKey(recordingId);
+	if (inFlight.has(key)) return { rerun: false };
+	inFlight.add(key);
 
 	let tmp: string | null = null;
-
+	let rerun = false;
 	try {
 		const session = await prisma.recordingSession.findUnique({
 			where: { id: recordingSessionId },
@@ -352,85 +506,66 @@ export async function finalizeSession(
 				selfHosted: true,
 			},
 		});
-
-		if (!session) return;
-		if (!["STOPPED", "PROCESSING", "FAILED", "READY"].includes(session.status))
-			return;
-		// Finalization/merge is space-only for now; screen recordings aren't merged.
-		if (!session.spaceId) return;
+		if (!session?.spaceId) return { rerun: false };
+		if (
+			!["STOPPED", "PROCESSING", "FAILED", "READY"].includes(session.status)
+		) {
+			return { rerun: false };
+		}
 		const spaceId = session.spaceId;
 
-		// Watermark is an owner entitlement (DEMO plan), resolved server-side once
-		// per session and burned into every master below.
-		const watermark = await sessionNeedsWatermark({
-			spaceId,
-			userId: null,
-			selfHosted: session.selfHosted,
+		// Jobs are deduped per track, so only this run may hold this track. A
+		// PROCESSING track here was claimed by a run whose worker died - take
+		// it over instead of skipping it forever.
+		const claim = await prisma.participantRecording.updateMany({
+			where: {
+				id: recordingId,
+				status: { in: ["UPLOADED", "PROCESSING"] },
+				participantId: { not: null },
+			},
+			data: { status: "PROCESSING" },
 		});
-		// Only flip to PROCESSING on the very first run (session still STOPPED).
-		// Re-runs for late-completing tracks must not downgrade an already-READY
-		// session back to PROCESSING and flicker the UI.
-		const isFirstRun = session.status === "STOPPED";
+		if (claim.count !== 1) return { rerun: false };
+
+		// Only flip to PROCESSING on the very first track (session still
+		// STOPPED); later tracks must not downgrade a READY session and flicker
+		// the UI.
+		await prisma.recordingSession
+			.updateMany({
+				where: { id: recordingSessionId, status: "STOPPED" },
+				data: { status: "PROCESSING" },
+			})
+			.catch(() => undefined);
+
+		const rec = await prisma.participantRecording.findUnique({
+			where: { id: recordingId },
+			include: { segments: { orderBy: { sequenceNumber: "asc" } } },
+		});
+		if (!rec?.participantId) return { rerun: false };
+		const participantId = rec.participantId;
+		const segmentsAtClaim = rec.segments.length;
 
 		tmp = await mkdtemp(path.join(tmpdir(), "openside-finalize-"));
 
-		let processedAny = false;
-
-		// Drain every fully-uploaded track, one at a time, INCLUDING any that
-		// finish uploading while we're still working - so no track waits on
-		// another. Each track is claimed atomically (UPLOADED -> PROCESSING) so
-		// two concurrent workers never encode the same one twice.
-		while (true) {
-			const claimable = await prisma.participantRecording.findFirst({
-				where: {
-					recordingSessionId,
-					status: "UPLOADED",
-					participantId: { not: null },
-				},
-				include: { segments: { orderBy: { sequenceNumber: "asc" } } },
-			});
-			if (!claimable || !claimable.participantId) break;
-
-			const claim = await prisma.participantRecording.updateMany({
-				where: { id: claimable.id, status: "UPLOADED" },
-				data: { status: "PROCESSING" },
-			});
-			if (claim.count !== 1) continue; // another worker grabbed it first
-
-			if (!processedAny) {
-				processedAny = true;
-				if (isFirstRun) {
-					await prisma.recordingSession
-						.update({
-							where: { id: recordingSessionId },
-							data: { status: "PROCESSING" },
-						})
-						.catch(() => undefined);
-					// A space stays LIVE while its meeting is open. Recording-session
-					// status owns processing state so the host can start another run.
-				}
-			}
-
-			const participantId = claimable.participantId;
-
-			// The parallel raw-PCM mic track (container "pcm") is wrapped into a
-			// lossless WAV and back-linked to the participant's video output - a
-			// wholly separate path from the WebM master. It never produces its own
-			// FinalOutput, and it handles its own errors internally (so a PCM
+		if (rec.container === "pcm") {
+			// The parallel raw-PCM mic track becomes a lossless WAV back-linked to
+			// the participant's video output. It handles its own errors (a PCM
 			// failure never creates a phantom failed audio output).
-			if (claimable.container === "pcm") {
-				await finalizePcmRecording({
-					rec: { ...claimable, participantId },
-					spaceId,
-					recordingSessionId,
-					tmpDir: tmp,
-				});
-				continue;
-			}
-
+			await finalizePcmRecording({
+				rec: { ...rec, participantId },
+				spaceId,
+				recordingSessionId,
+				tmpDir: tmp,
+			});
+		} else {
+			const watermark = await sessionNeedsWatermark({
+				spaceId,
+				userId: null,
+				selfHosted: session.selfHosted,
+			});
 			try {
 				await finalizeRecording({
-					rec: { ...claimable, participantId },
+					rec: { ...rec, participantId },
 					spaceId,
 					recordingSessionId,
 					tmpDir: tmp,
@@ -438,96 +573,108 @@ export async function finalizeSession(
 					targetFps: clampFps(session.targetFps),
 				});
 			} catch (error) {
-				const message = errorMessage(error);
-				console.error(`[Finalize] recording ${claimable.id} failed:`, error);
-				await prisma.participantRecording
-					.update({
-						where: { id: claimable.id },
-						data: { status: "FAILED", processingError: message.slice(0, 2000) },
-					})
-					.catch(() => undefined);
-				await upsertFailedParticipantOutput({
-					recordingSessionId,
+				// Storage trouble: keep the track PROCESSING and let the job retry
+				// (the next attempt takes the claim over).
+				if (error instanceof TransientFinalizeError) throw error;
+				console.error(`[Finalize] recording ${rec.id} failed:`, error);
+				await failTrack({
+					rec: { ...rec, participantId },
 					spaceId,
-					rec: { ...claimable, participantId },
-					errorMessage: message,
-				}).catch(() => undefined);
+					recordingSessionId,
+					message: errorMessage(error),
+				});
 			}
 		}
 
-		// Settle the session status from where its tracks actually landed.
-		const [readyOutputs, recordings] = await Promise.all([
-			readyOutputCount(recordingSessionId),
-			prisma.participantRecording.findMany({
-				where: { recordingSessionId },
-				select: { status: true, isComplete: true },
-			}),
-		]);
-
-		// Anything still uploading, queued, or mid-encode means more tracks are
-		// coming - don't call the session finished yet.
-		const stillPending = recordings.some(
-			(rec) =>
-				!rec.isComplete ||
-				rec.status === "UPLOADED" ||
-				rec.status === "PROCESSING",
-		);
-
-		if (readyOutputs > 0) {
-			// At least one downloadable track exists → the session is usable now.
-			// Late tracks (a straggler upload) get added incrementally by re-runs.
-			await prisma.recordingSession
-				.update({
-					where: { id: recordingSessionId },
-					data: { status: "READY" },
-				})
-				.catch(() => undefined);
-			console.log(`[Finalize] Session ${recordingSessionId} ready.`);
-			return;
+		// A finished run must never leave its track PROCESSING.
+		const leftover = await prisma.participantRecording.findUnique({
+			where: { id: recordingId },
+			select: { status: true },
+		});
+		if (leftover?.status === "PROCESSING") {
+			await failTrack({
+				rec: { ...rec, participantId },
+				spaceId,
+				recordingSessionId,
+				message: "Finalization ended without a result.",
+			});
 		}
 
-		if (!stillPending && recordings.length > 0) {
-			// Everything terminal and nothing succeeded → the session failed.
-			await prisma.recordingSession
-				.update({
-					where: { id: recordingSessionId },
-					data: { status: "FAILED" },
-				})
-				.catch(() => undefined);
-			await prisma.space
-				.update({
-					where: { id: spaceId },
-					data: { recordingStatus: "STOPPED" },
-				})
-				.catch(() => undefined);
-			console.error(
-				`[Finalize] Session ${recordingSessionId} failed: no recordings finalized.`,
-			);
-			return;
+		// Chunks that registered while we were encoding (a slow uplink's tail)
+		// aren't in this master - re-open the track for one more pass.
+		const segmentsNow = await prisma.recordingSegment.count({
+			where: { participantRecordingId: recordingId },
+		});
+		if (segmentsNow > segmentsAtClaim) {
+			const reopened = await prisma.participantRecording.updateMany({
+				where: { id: recordingId, status: { in: ["READY", "FAILED"] } },
+				data: { status: "UPLOADED" },
+			});
+			rerun = reopened.count === 1;
 		}
 
-		// Nothing ready yet but tracks are still uploading - leave PROCESSING; a
-		// later completion will re-trigger and pick them up.
-		console.log(
-			`[Finalize] Session ${recordingSessionId} waiting on pending uploads.`,
-		);
-	} catch (error) {
-		const message = errorMessage(error);
-		console.error(`[Finalize] Session ${recordingSessionId} failed:`, error);
-		await prisma.recordingSession
-			.update({ where: { id: recordingSessionId }, data: { status: "FAILED" } })
-			.catch(() => undefined);
-		await prisma.participantRecording
-			.updateMany({
-				where: { recordingSessionId, status: "PROCESSING" },
-				data: { status: "FAILED", processingError: message.slice(0, 2000) },
-			})
-			.catch(() => undefined);
+		await settleSessionStatus(recordingSessionId, spaceId);
 	} finally {
-		inFlight.delete(recordingSessionId);
+		inFlight.delete(key);
 		if (tmp) {
 			await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
 		}
+	}
+
+	if (rerun && !isQueueConfigured()) {
+		await requestTrackFinalize(recordingSessionId, recordingId, {
+			delayMs: LATE_CHUNK_RERUN_DELAY_MS,
+		});
+	}
+	return { rerun };
+}
+
+/**
+ * Session-level job (from before per-track jobs, or an explicit kick): fan out
+ * to per-track jobs and settle. Never encodes itself, so it can't race a
+ * track job over the same track.
+ */
+export async function finalizeSession(
+	recordingSessionId: string,
+): Promise<void> {
+	await maybeFinalizeSession(recordingSessionId);
+}
+
+/**
+ * A run that failed. If the track already had a good master (this was a
+ * re-run for late chunks), keep it READY with the old output rather than
+ * replacing a working recording with a failure.
+ */
+async function failTrack(args: {
+	rec: FinalizeRecordingArgs["rec"];
+	spaceId: string;
+	recordingSessionId: string;
+	message: string;
+}): Promise<void> {
+	const { rec, message } = args;
+	const note = message.slice(0, 2000);
+	if (rec.mergedFileKey) {
+		await prisma.participantRecording
+			.update({
+				where: { id: rec.id },
+				data: { status: "READY", processingError: `Re-run failed: ${note}` },
+			})
+			.catch(() => undefined);
+		return;
+	}
+	await prisma.participantRecording
+		.update({
+			where: { id: rec.id },
+			data: { status: "FAILED", processingError: note },
+		})
+		.catch(() => undefined);
+	if (rec.container !== "pcm") {
+		await upsertFailedParticipantOutput({
+			recordingSessionId: args.recordingSessionId,
+			spaceId: args.spaceId,
+			rec,
+			errorMessage: note,
+		}).catch(() => undefined);
 	}
 }
 
@@ -535,9 +682,11 @@ interface FinalizeRecordingArgs {
 	rec: {
 		id: string;
 		participantId: string;
+		type: "AUDIO" | "VIDEO";
 		hasVideo: boolean;
 		hasAudio: boolean;
 		isScreenShare: boolean;
+		container: string | null;
 		width: number | null;
 		height: number | null;
 		fps: number | null;
@@ -546,15 +695,15 @@ interface FinalizeRecordingArgs {
 		channels: number | null;
 		startOffsetMs: number | null;
 		expectedSegments: number | null;
-		// True only when every expected chunk uploaded contiguously - i.e. no late
-		// straggler can still arrive to rebuild a fuller master. Gates chunk cleanup.
-		isComplete: boolean;
+		// The previous run's master, when this run rebuilds an existing track.
+		mergedFileKey: string | null;
 		// Set if an early poster was already extracted from the first chunk; reused
 		// here so we don't re-extract at finalize time.
 		thumbnailKey: string | null;
 		segments: {
 			sequenceNumber: number;
 			assetKey: string;
+			startMs: number;
 			durationMs: number;
 		}[];
 	};
@@ -565,24 +714,6 @@ interface FinalizeRecordingArgs {
 	watermark: boolean;
 	/** Constant frame rate to normalize every video master to (session-level). */
 	targetFps: AllowedFps;
-}
-
-interface FinalizedRecording {
-	id: string;
-	participantId: string;
-	hasVideo: boolean;
-	hasAudio: boolean;
-	isScreenShare: boolean;
-	width: number | null;
-	height: number | null;
-	fps: number | null;
-	bitrate: number | null;
-	sampleRate: number | null;
-	channels: number | null;
-	startOffsetMs: number | null;
-	masterPath: string;
-	durationMs: number;
-	fileSize: bigint;
 }
 
 async function upsertFailedParticipantOutput(args: {
@@ -645,6 +776,71 @@ const WATERMARK_FONT_ARG = watermarkFontPath
 // Large, bold, outlined + boxed so it's prominent and not trivially cropped out.
 const WATERMARK_FILTER = `drawtext=${WATERMARK_FONT_ARG}text='openside.pro':x=w-tw-28:y=h-th-24:fontsize=44:fontcolor=white:borderw=2:bordercolor=black@0.6:box=1:boxcolor=black@0.45:boxborderw=16`;
 
+/** Every file derived from a master or aligned key (cached download formats). */
+function derivedSiblings(key: string): string[] {
+	if (!/\.[a-z0-9]+$/i.test(key)) return [];
+	return ["mp4", "webm", "mp3", "wav"].map((ext) =>
+		key.replace(/\.[a-z0-9]+$/i, `.${ext}`),
+	);
+}
+
+/**
+ * A re-run replaces the master in place, so cached download formats made from
+ * the OLD master must go - otherwise downloads keep serving the stale file.
+ */
+async function invalidateDerivedFiles(
+	previousKeys: (string | null | undefined)[],
+	keep: (string | null | undefined)[],
+): Promise<void> {
+	const keepSet = new Set(keep.filter((key): key is string => !!key));
+	const stale = new Set<string>();
+	for (const key of previousKeys) {
+		if (!key) continue;
+		if (!keepSet.has(key)) stale.add(key);
+		for (const sibling of derivedSiblings(key)) {
+			if (!keepSet.has(sibling)) stale.add(sibling);
+		}
+	}
+	if (stale.size === 0) return;
+	await deleteObjects([...stale]).catch((error) =>
+		console.error(
+			"[Finalize] failed to invalidate stale derived files:",
+			error,
+		),
+	);
+}
+
+/**
+ * Download a track's chunks to disk in order, starting a new part at every
+ * chunk that opens a fresh container stream (each recorder restart).
+ */
+async function downloadParts(
+	rec: FinalizeRecordingArgs["rec"],
+	ordered: FinalizeRecordingArgs["rec"]["segments"],
+	tmpDir: string,
+): Promise<{ parts: { rawPath: string; startMs: number }[]; missing: number }> {
+	const parts: { rawPath: string; startMs: number }[] = [];
+	let current: { rawPath: string; startMs: number } | null = null;
+	let missing = 0;
+	for (const seg of ordered) {
+		const buf = await downloadChunk(seg.assetKey);
+		if (!buf) {
+			missing++;
+			continue;
+		}
+		if (!current || startsContainer(buf)) {
+			current = {
+				rawPath: path.join(tmpDir, `${rec.id}-raw-${parts.length}.bin`),
+				startMs: seg.startMs,
+			};
+			parts.push(current);
+			await writeFile(current.rawPath, Buffer.alloc(0));
+		}
+		await appendFile(current.rawPath, buf);
+	}
+	return { parts, missing };
+}
+
 async function finalizeRecording({
 	rec,
 	spaceId,
@@ -652,7 +848,7 @@ async function finalizeRecording({
 	tmpDir,
 	watermark,
 	targetFps,
-}: FinalizeRecordingArgs): Promise<FinalizedRecording | null> {
+}: FinalizeRecordingArgs): Promise<void> {
 	if (rec.segments.length === 0) {
 		// The client can mark a recording "complete" with 0 segments if its very
 		// last chunk (often its only chunk, for a take under 5s) was still being
@@ -663,26 +859,19 @@ async function finalizeRecording({
 		const lateSegments = await waitForLateSegments(rec.id, () =>
 			prisma.recordingSegment.findMany({
 				where: { participantRecordingId: rec.id },
-				select: { sequenceNumber: true, assetKey: true, durationMs: true },
+				select: {
+					sequenceNumber: true,
+					assetKey: true,
+					startMs: true,
+					durationMs: true,
+				},
 				orderBy: { sequenceNumber: "asc" },
 			}),
 		);
-		if (lateSegments.length > 0) {
-			rec = { ...rec, segments: lateSegments };
-		} else {
-			const message = "No segments uploaded";
-			await prisma.participantRecording.update({
-				where: { id: rec.id },
-				data: { status: "FAILED", processingError: message },
-			});
-			await upsertFailedParticipantOutput({
-				recordingSessionId,
-				spaceId,
-				rec,
-				errorMessage: message,
-			});
-			return null;
+		if (lateSegments.length === 0) {
+			throw new Error("No segments uploaded");
 		}
+		rec = { ...rec, segments: lateSegments };
 	}
 
 	await prisma.participantRecording.update({
@@ -691,117 +880,144 @@ async function finalizeRecording({
 	});
 
 	const kind = recordingTrackKind(rec);
-	const rawPath = path.join(tmpDir, `${rec.id}-raw.webm`);
-
-	// 1. Byte-concat chunks in order → reconstructs the original WebM stream.
-	// Append each downloaded chunk straight to disk so we never hold a whole
-	// (potentially multi-GB) recording in memory at once.
 	const ordered = [...rec.segments].sort(
 		(a, b) => a.sequenceNumber - b.sequenceNumber,
 	);
-	// Salvage rather than fail: concat whatever arrived, in order. A missing chunk
-	// no longer loses the whole track - worst case a brief glitch at the seam.
-	const gaps = findSegmentGaps(ordered, rec.expectedSegments);
-	const gapNote = describeSegmentGaps(gaps);
+	// Salvage rather than fail: build from whatever arrived. A missing chunk
+	// costs a brief glitch, never the whole track.
+	const gapNote = describeSegmentGaps(
+		findSegmentGaps(ordered, rec.expectedSegments),
+	);
 	if (gapNote) {
 		console.warn(
 			`[Finalize] ${rec.id}: ${gapNote} - salvaging available footage`,
 		);
 	}
-	await writeFile(rawPath, Buffer.alloc(0));
-	for (const seg of ordered) {
-		const buf = await getObjectBuffer(seg.assetKey);
-		await appendFile(rawPath, buf);
+
+	// 1. Chunks → parts on disk (never the whole recording in memory).
+	const { parts, missing } = await downloadParts(rec, ordered, tmpDir);
+	if (parts.length === 0) throw new Error("No chunk objects could be read");
+	// A re-run must only ever improve the master. With chunks gone (cleaned up
+	// by an older build) it would rebuild from a fraction of them - keep the
+	// existing master instead.
+	if (rec.mergedFileKey && missing > 0) {
+		throw new Error(
+			`${missing} chunk object(s) are gone; keeping the existing master`,
+		);
 	}
+	const timelineOriginMs = parts[0]?.startMs ?? 0;
 
-	// 2. Normalize to a CONSTANT frame rate. The raw WebM is VFR (MediaRecorder
-	// timeslices), which drifts lip-sync and misaligns participants against each
-	// other. Re-encode video masters to CFR H.264/MP4 locked to the session's
-	// targetFps (`-r <fps> -fps_mode cfr`); this replaces the old `-c copy`
-	// passthrough and is the core fix. DEMO masters burn the watermark into the
-	// SAME pass. Audio-only masters have no video to normalize, so they keep the
-	// cheap WebM remux. `outExt` tracks what was actually written so the key,
-	// content-type, and mimeType stay in lockstep.
-	const cfrArgs = ["-r", String(targetFps), "-fps_mode", "cfr"];
-	// A screen-share source RESIZES mid-capture when the shared surface changes
-	// shape, which libx264 cannot follow mid-encode - pin every frame to one
-	// geometry (see video-geometry.ts) or everything after the switch encodes as
-	// garbage. Cheap for camera tracks, which never change size.
-	const target = rec.hasVideo ? await resolveTargetSize(rec, rawPath) : null;
-	let outExt: "mp4" | "webm" = masterExt(rec.hasVideo);
-	let outPath = path.join(tmpDir, `${rec.id}-master.${outExt}`);
-	let masterPath = outPath;
-	let encoded = false;
+	// 2. Lay the parts out on the track's timeline and encode one CFR master
+	// (H.264/AAC; audio-only tracks → Opus/WebM). A raw MediaRecorder stream is
+	// VFR, which drifts lip-sync and misaligns participants, and a shared screen
+	// RESIZES mid-capture - every frame is pinned to one geometry. DEMO masters
+	// burn the watermark into the same pass.
+	const sizeHint =
+		rec.width && rec.height && rec.width > 1 && rec.height > 1
+			? { width: rec.width, height: rec.height }
+			: null;
+	const compose = (withWatermark: boolean) =>
+		composeTimeline({
+			parts,
+			tmpDir,
+			id: rec.id,
+			fps: targetFps,
+			crf: withWatermark ? WATERMARKED_MASTER_CRF : MASTER_CRF,
+			extraFilters: withWatermark ? [WATERMARK_FILTER] : [],
+			sizeHint,
+		});
 
-	if (rec.hasVideo && target) {
-		// Size filter FIRST (pins geometry), watermark after so the badge lands
-		// on the final canvas.
-		const vf = [sizeFilter(target), ...(watermark ? [WATERMARK_FILTER] : [])];
-		try {
-			await runFfmpeg([
-				"-y",
-				"-fflags",
-				"+genpts",
-				"-i",
-				rawPath,
-				"-vf",
-				vf.join(","),
-				...cfrArgs,
-				"-c:v",
-				"libx264",
-				"-preset",
-				// DEMO watermark re-encodes keep their light settings; the plain CFR
-				// master favors quality (crf 16) since it's the deliverable.
-				"medium",
-				"-crf",
-				watermark ? "20" : "16",
-				"-pix_fmt",
-				"yuv420p",
-				"-movflags",
-				"+faststart",
-				"-c:a",
-				"copy",
-				outPath,
-			]);
-			encoded = true;
-		} catch (error) {
-			// Re-encode failed (drawtext missing in a stripped build, odd container,
-			// etc.) - never lose the recording. Fall through to a plain WebM remux.
-			console.error(
-				`[Finalize] CFR re-encode failed for ${rec.id}, falling back to WebM remux:`,
-				error,
-			);
+	let master: ComposedMaster | null = null;
+	let settings: MasterEncodeSettings | null = null;
+	const notes: string[] = [];
+	try {
+		master = await compose(watermark);
+		if (master.target) {
+			settings = {
+				target: master.target,
+				fps: targetFps,
+				crf: watermark ? WATERMARKED_MASTER_CRF : MASTER_CRF,
+				extraFilters: watermark ? [WATERMARK_FILTER] : [],
+			};
+		}
+	} catch (error) {
+		console.error(`[Finalize] ${rec.id}: master encode failed:`, error);
+		if (watermark) {
+			// drawtext missing in a stripped build: an un-watermarked master
+			// beats losing the recording.
+			try {
+				master = await compose(false);
+				if (master.target) {
+					settings = {
+						target: master.target,
+						fps: targetFps,
+						crf: MASTER_CRF,
+						extraFilters: [],
+					};
+				}
+			} catch (retryError) {
+				console.error(
+					`[Finalize] ${rec.id}: master encode failed without watermark too:`,
+					retryError,
+				);
+			}
 		}
 	}
 
-	if (!encoded) {
-		// Audio-only, or the video re-encode failed: remux (no re-encode) to WebM.
+	if (missing > 0) {
+		notes.push(`${missing} chunk object(s) were missing from storage`);
+	}
+	if (master?.skippedParts) {
+		notes.push(
+			`${master.skippedParts} recorder part(s) could not be decoded and were filled with black/silence`,
+		);
+	}
+
+	let masterPath: string;
+	let outExt: "mp4" | "webm";
+	let hasVideo = rec.hasVideo;
+	let hasAudio = rec.hasAudio;
+	let durationMs = ordered.reduce((sum, seg) => sum + (seg.durationMs || 0), 0);
+	let geometry: { width: number; height: number } | null = null;
+
+	if (master) {
+		masterPath = master.path;
+		outExt = master.ext;
+		hasVideo = master.hasVideo;
+		hasAudio = master.hasAudio;
+		durationMs = master.durationMs || durationMs;
+		geometry = master.target;
+	} else {
+		// Encoding failed outright (odd container, etc.) - never lose the
+		// recording: remux the first part to WebM, or keep its raw bytes.
+		const firstPart = parts[0];
+		if (!firstPart) throw new Error("No recorder part to salvage");
+		if (parts.length > 1) {
+			notes.push(`only the first of ${parts.length} recorder parts was kept`);
+		}
 		outExt = "webm";
-		outPath = path.join(tmpDir, `${rec.id}-master.webm`);
-		masterPath = outPath;
+		masterPath = path.join(tmpDir, `${rec.id}-fallback.webm`);
 		try {
 			await runFfmpeg([
 				"-y",
 				"-fflags",
 				"+genpts",
 				"-i",
-				rawPath,
+				firstPart.rawPath,
 				"-c",
 				"copy",
-				outPath,
+				masterPath,
 			]);
 		} catch (error) {
-			// Remux failed (rare container edge case) - fall back to the raw concat,
-			// which is still a playable WebM, just without a clean duration index.
 			console.error(
 				`[Finalize] remux failed for ${rec.id}, using raw concat:`,
 				error,
 			);
-			masterPath = rawPath;
+			masterPath = firstPart.rawPath;
 		}
 	}
 
-	// 3. Upload the master to R2 with the format we actually produced.
+	// 3. Upload the master with the format we actually produced.
 	const key = masterKey(
 		spaceId,
 		recordingSessionId,
@@ -811,17 +1027,12 @@ async function finalizeRecording({
 	);
 	await putFileObject(key, masterPath, masterContentType(outExt));
 	const masterMime = masterContentType(outExt);
-
 	const fileStat = await stat(masterPath);
-	const durationMs = ordered.reduce(
-		(sum, seg) => sum + (seg.durationMs || 0),
-		0,
-	);
 
 	// 3b. Thumbnail (video tracks only). Always replace any early poster with a
 	// high-quality image from the completed master. If extraction fails, retain
 	// the early thumbnail so cards still have an image to show.
-	const generatedThumbKey = rec.hasVideo
+	const generatedThumbKey = hasVideo
 		? await generateThumbnail(
 				masterPath,
 				spaceId,
@@ -833,7 +1044,77 @@ async function finalizeRecording({
 		: null;
 	const thumbKey = generatedThumbKey ?? rec.thumbnailKey ?? null;
 
-	// 4. Mark the recording ready + create a downloadable FinalOutput. If we
+	// 4. Aligned ("with space") variant for a track that started after the
+	// session: black lead-in so it lines up with everyone else's. t=0 of the
+	// master is the first part's start, which sits this far into the session.
+	const alignedGapMs = Math.max(0, (rec.startOffsetMs ?? 0) + timelineOriginMs);
+	let alignedKeyWritten: string | null = null;
+	let alignedFailure: string | null = null;
+	let alignedStat: { size: number } | null = null;
+	if (hasVideo && alignedGapMs >= ALIGNED_MIN_OFFSET_MS) {
+		const alignedPath = path.join(tmpDir, `${rec.id}-aligned.mp4`);
+		try {
+			if (settings && outExt === "mp4") {
+				// The master is our own normalized encode, so a matching black
+				// lead-in joins it with a stream copy - no second full encode.
+				const leadPath = path.join(tmpDir, `${rec.id}-lead.mp4`);
+				await encodeMasterFiller({
+					durationMs: alignedGapMs,
+					settings,
+					output: leadPath,
+				});
+				await concatCopy(
+					[leadPath, masterPath],
+					alignedPath,
+					path.join(tmpDir, `${rec.id}-aligned-list.txt`),
+				);
+			} else {
+				await createAlignedVideo({
+					inputPath: masterPath,
+					outputPath: alignedPath,
+					gapMs: alignedGapMs,
+					width: geometry?.width ?? rec.width,
+					height: geometry?.height ?? rec.height,
+					fps: targetFps,
+					hasAudio,
+				});
+			}
+			alignedKeyWritten = alignedKey(
+				spaceId,
+				recordingSessionId,
+				rec.participantId,
+				kind,
+				"mp4",
+			);
+			await putFileObject(
+				alignedKeyWritten,
+				alignedPath,
+				masterContentType("mp4"),
+			);
+			alignedStat = await stat(alignedPath);
+		} catch (error) {
+			console.error(`[Finalize] aligned output failed for ${rec.id}:`, error);
+			alignedFailure = errorMessage(error).slice(0, 2000);
+			alignedKeyWritten = null;
+		}
+	}
+
+	// Cached downloads made from the previous master are stale now.
+	if (rec.mergedFileKey) {
+		await invalidateDerivedFiles(
+			[
+				rec.mergedFileKey,
+				alignedKey(spaceId, recordingSessionId, rec.participantId, kind, "mp4"),
+			],
+			[key, alignedKeyWritten],
+		);
+	}
+
+	const processingError =
+		[gapNote, ...notes].filter((note): note is string => !!note).join("; ") ||
+		null;
+
+	// 5. Mark the recording ready + create a downloadable FinalOutput. If we
 	// salvaged over gaps, keep it READY but record the note so it's diagnosable.
 	await prisma.participantRecording.update({
 		where: { id: rec.id },
@@ -844,12 +1125,14 @@ async function finalizeRecording({
 			fileSize: BigInt(fileStat.size),
 			durationMs,
 			mimeType: masterMime,
+			// What the master ACTUALLY contains (a camera track recorded with the
+			// camera off the whole time is audio-only).
+			hasVideo,
+			hasAudio,
 			// The master's REAL geometry (the client's start-of-capture snapshot
 			// is stale once a shared surface resizes).
-			...(encoded && target
-				? { width: target.width, height: target.height }
-				: {}),
-			processingError: gapNote,
+			...(geometry ? { width: geometry.width, height: geometry.height } : {}),
+			processingError,
 		},
 	});
 
@@ -857,17 +1140,17 @@ async function finalizeRecording({
 		recordingSessionId,
 		spaceId,
 		type: "PER_PARTICIPANT" as const,
-		mode: rec.hasVideo ? ("MIXED" as const) : ("AUDIO_ONLY" as const),
+		mode: hasVideo ? ("MIXED" as const) : ("AUDIO_ONLY" as const),
 		targetParticipantId: rec.participantId,
 		sourceRecordingId: rec.id,
-		width: encoded && target ? target.width : rec.width,
-		height: encoded && target ? target.height : rec.height,
-		fps: rec.fps,
+		width: geometry ? geometry.width : rec.width,
+		height: geometry ? geometry.height : rec.height,
+		fps: master && hasVideo ? targetFps : rec.fps,
 		bitrate: rec.bitrate,
 		sampleRate: rec.sampleRate,
 		channels: rec.channels,
-		hasVideo: rec.hasVideo,
-		hasAudio: rec.hasAudio,
+		hasVideo,
+		hasAudio,
 		masterKey: key,
 		thumbnailKey: thumbKey,
 		mimeType: masterMime,
@@ -892,146 +1175,61 @@ async function finalizeRecording({
 		await prisma.finalOutput.create({ data: outputData });
 	}
 
-	// This is intentionally role-agnostic: any track that actually starts late,
-	// including the host's, receives the black lead-in needed for timeline sync.
-	if (
-		rec.hasVideo &&
-		rec.startOffsetMs &&
-		rec.startOffsetMs >= ALIGNED_MIN_OFFSET_MS
-	) {
-		try {
-			// The aligned (black lead-in) variant re-encodes anyway, so it lands on
-			// the SAME CFR H.264/MP4 target as the plain master - the two must agree.
-			const alignedPath = path.join(tmpDir, `${rec.id}-aligned.mp4`);
-			await createAlignedVideo({
-				inputPath: masterPath,
-				outputPath: alignedPath,
-				gapMs: rec.startOffsetMs,
-				// The pinned master geometry, so the black lead-in and the footage
-				// share one canvas (rec.width/height is the start-of-capture
-				// snapshot, which a resized share invalidates).
-				width: target?.width ?? rec.width,
-				height: target?.height ?? rec.height,
-				fps: targetFps,
-				hasAudio: rec.hasAudio,
+	if (alignedKeyWritten || alignedFailure) {
+		const alignedOutputData = alignedKeyWritten
+			? {
+					...outputData,
+					masterKey: alignedKeyWritten,
+					mimeType: masterContentType("mp4"),
+					durationMs: durationMs + alignedGapMs,
+					fileSize: BigInt(alignedStat?.size ?? 0),
+					variant: "ALIGNED" as const,
+				}
+			: {
+					...outputData,
+					masterKey: null,
+					durationMs: null,
+					fileSize: null,
+					status: "FAILED" as const,
+					variant: "ALIGNED" as const,
+					errorMessage: alignedFailure,
+				};
+
+		const existingAlignedOutput = await prisma.finalOutput.findFirst({
+			where: { sourceRecordingId: rec.id, variant: "ALIGNED" },
+			select: { id: true },
+		});
+
+		if (existingAlignedOutput) {
+			await prisma.finalOutput.update({
+				where: { id: existingAlignedOutput.id },
+				data: alignedOutputData,
 			});
-
-			const alignedFileStat = await stat(alignedPath);
-			const alignedFileKey = alignedKey(
-				spaceId,
-				recordingSessionId,
-				rec.participantId,
-				kind,
-				"mp4",
-			);
-			await putFileObject(
-				alignedFileKey,
-				alignedPath,
-				masterContentType("mp4"),
-			);
-
-			const alignedOutputData = {
-				...outputData,
-				masterKey: alignedFileKey,
-				mimeType: masterContentType("mp4"),
-				durationMs: durationMs + rec.startOffsetMs,
-				fileSize: BigInt(alignedFileStat.size),
-				variant: "ALIGNED" as const,
-			};
-
-			const existingAlignedOutput = await prisma.finalOutput.findFirst({
-				where: { sourceRecordingId: rec.id, variant: "ALIGNED" },
-				select: { id: true },
-			});
-
-			if (existingAlignedOutput) {
-				await prisma.finalOutput.update({
-					where: { id: existingAlignedOutput.id },
-					data: alignedOutputData,
-				});
-			} else {
-				await prisma.finalOutput.create({ data: alignedOutputData });
-			}
-		} catch (error) {
-			const message = errorMessage(error).slice(0, 2000);
-			console.error(`[Finalize] aligned output failed for ${rec.id}:`, error);
-			const failedAlignedData = {
-				...outputData,
-				masterKey: null,
-				durationMs: null,
-				fileSize: null,
-				status: "FAILED" as const,
-				variant: "ALIGNED" as const,
-				errorMessage: message,
-			};
-
-			const existingAlignedOutput = await prisma.finalOutput.findFirst({
-				where: { sourceRecordingId: rec.id, variant: "ALIGNED" },
-				select: { id: true },
-			});
-
-			if (existingAlignedOutput) {
-				await prisma.finalOutput.update({
-					where: { id: existingAlignedOutput.id },
-					data: failedAlignedData,
-				});
-			} else {
-				await prisma.finalOutput.create({ data: failedAlignedData });
-			}
+		} else {
+			await prisma.finalOutput.create({ data: alignedOutputData });
 		}
 	}
 
 	// Order-independent back-link: if this participant's parallel PCM track has
 	// already produced a WAV, attach it to the output(s) we just wrote. If PCM
 	// hasn't finalized yet, this is a no-op and finalizePcmRecording performs the
-	// link when it runs. Camera masters only - screen shares have no mic PCM.
-	if (rec.hasVideo && !rec.isScreenShare) {
+	// link when it runs. Camera tracks only - screen shares have no mic PCM.
+	if (!rec.isScreenShare) {
 		await linkPcmWavToVideoOutput({
 			recordingSessionId,
 			spaceId,
 			participantId: rec.participantId,
 		}).catch((error) =>
 			console.error(
-				`[Finalize] PCM WAV back-link failed for ${rec.id} (video master is safe):`,
+				`[Finalize] PCM WAV back-link failed for ${rec.id} (master is safe):`,
 				error,
 			),
 		);
 	}
 
-	// The master (and any aligned variant) is safely in R2 now, so the loose
-	// per-chunk segment objects have served their only purpose. Delete them to
-	// reclaim storage - but ONLY when the track is fully complete, so a late
-	// straggler chunk that would re-trigger a fuller re-stitch still has its
-	// source. `mergedFileKey` on the recording remains the canonical master.
-	if (rec.isComplete) {
-		const chunkKeys = ordered.map((seg) => seg.assetKey);
-		if (chunkKeys.length > 0) {
-			await deleteObjects(chunkKeys).catch((error) => {
-				console.error(
-					`[Finalize] failed to delete chunk objects for ${rec.id} (master is safe, leaving chunks):`,
-					error,
-				);
-			});
-		}
-	}
-
-	return {
-		id: rec.id,
-		participantId: rec.participantId,
-		hasVideo: rec.hasVideo,
-		hasAudio: rec.hasAudio,
-		isScreenShare: rec.isScreenShare,
-		width: rec.width,
-		height: rec.height,
-		fps: rec.fps,
-		bitrate: rec.bitrate,
-		sampleRate: rec.sampleRate,
-		channels: rec.channels,
-		startOffsetMs: rec.startOffsetMs,
-		masterPath,
-		durationMs,
-		fileSize: BigInt(fileStat.size),
-	};
+	// Raw chunk objects are NOT deleted here: a straggler chunk may still
+	// arrive and rebuild a fuller master. The recovery sweep removes them once
+	// the track has been quiet for a day.
 }
 
 interface FinalizePcmArgs {
@@ -1041,10 +1239,11 @@ interface FinalizePcmArgs {
 		sampleRate: number | null;
 		channels: number | null;
 		expectedSegments: number | null;
-		isComplete: boolean;
+		mergedFileKey: string | null;
 		segments: {
 			sequenceNumber: number;
 			assetKey: string;
+			startMs: number;
 			durationMs: number;
 			sampleRate: number | null;
 			bitDepth: number | null;
@@ -1190,12 +1389,14 @@ async function linkPcmWavToVideoOutput(args: {
 		return;
 	}
 
+	// The participant's camera track - even one recorded with the camera off
+	// the whole time (an audio-only master still gets the lossless WAV).
 	const videoRecordings = await prisma.participantRecording.findMany({
 		where: {
 			recordingSessionId,
 			participantId,
 			isScreenShare: false,
-			hasVideo: true,
+			OR: [{ container: null }, { container: { not: "pcm" } }],
 		},
 		select: { id: true },
 	});
@@ -1210,16 +1411,81 @@ async function linkPcmWavToVideoOutput(args: {
 	});
 }
 
+/** Convert a raw s24le chunk to another rate/channel layout (rare: a later tab
+ *  got a different AudioContext rate). */
+async function convertPcm(
+	buffer: Buffer,
+	from: PcmFormat,
+	to: PcmFormat,
+	tmpDir: string,
+): Promise<Buffer> {
+	const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	const inPath = path.join(tmpDir, `pcm-convert-${stamp}.in.raw`);
+	const outPath = path.join(tmpDir, `pcm-convert-${stamp}.out.raw`);
+	await writeFile(inPath, buffer);
+	await runFfmpeg([
+		"-y",
+		"-f",
+		"s24le",
+		"-ar",
+		String(from.sampleRate),
+		"-ac",
+		String(from.channelCount),
+		"-i",
+		inPath,
+		"-f",
+		"s24le",
+		"-ar",
+		String(to.sampleRate),
+		"-ac",
+		String(to.channelCount),
+		outPath,
+	]);
+	const converted = await readFile(outPath);
+	await rm(inPath, { force: true }).catch(() => undefined);
+	await rm(outPath, { force: true }).catch(() => undefined);
+	return converted;
+}
+
+/**
+ * Where the participant's video master starts on the shared chunk timeline:
+ * the first chunk of their camera track. The WAV is padded to start there too,
+ * so it drops into an editor in sync with the video (the PCM capture opens its
+ * own mic and starts a few hundred ms after the video recorder).
+ */
+async function cameraTimelineOrigin(
+	recordingSessionId: string,
+	participantId: string,
+): Promise<number | null> {
+	const first = await prisma.recordingSegment.findFirst({
+		where: {
+			participantRecording: {
+				recordingSessionId,
+				participantId,
+				isScreenShare: false,
+				OR: [{ container: null }, { container: { not: "pcm" } }],
+			},
+		},
+		orderBy: { startMs: "asc" },
+		select: { startMs: true },
+	});
+	return first?.startMs ?? null;
+}
+
+/** Cap on the lead-in pad: beyond this the timestamps are wrong, not late. */
+const MAX_PCM_LEAD_PAD_MS = 10_000;
+
 /**
  * Wrap a participant's raw-PCM mic segments into a lossless WAV master.
  *
- * Byte-concats the headerless 24-bit-LE PCM chunks in sequence order (same
- * salvage-over-gaps approach as the video master), then muxes a real WAV with
- * `ffmpeg -f s24le -c:a copy` using the stored capture format. Falls back to a
- * hand-written 44-byte header if this ffmpeg build can't handle s24le. Produces
- * NO FinalOutput of its own - it sets an audioWavKey on the participant's video
- * output instead. Never throws: PCM is a best-effort enhancement over the WebM
- * master's lossy audio, so its failure must not fail the session.
+ * Places the headerless 24-bit-LE PCM chunks on the track's timeline (gaps
+ * become silence), aligns the start with the video master, then muxes a real
+ * WAV with `ffmpeg -f s24le -c:a copy` using the stored capture format. Falls
+ * back to a hand-written 44-byte header if this ffmpeg build can't handle
+ * s24le. Produces NO FinalOutput of its own - it sets an audioWavKey on the
+ * participant's video output instead. Never throws: PCM is a best-effort
+ * enhancement over the master's lossy audio, so its failure must not fail the
+ * session.
  */
 async function finalizePcmRecording({
 	rec,
@@ -1229,14 +1495,7 @@ async function finalizePcmRecording({
 }: FinalizePcmArgs): Promise<void> {
 	try {
 		if (rec.segments.length === 0) {
-			await prisma.participantRecording.update({
-				where: { id: rec.id },
-				data: {
-					status: "FAILED",
-					processingError: "No PCM segments uploaded",
-				},
-			});
-			return;
+			throw new Error("No PCM segments uploaded");
 		}
 
 		await prisma.participantRecording.update({
@@ -1252,33 +1511,64 @@ async function finalizePcmRecording({
 		);
 		if (gapNote) {
 			console.warn(
-				`[Finalize] PCM ${rec.id}: ${gapNote} - salvaging available audio`,
+				`[Finalize] PCM ${rec.id}: ${gapNote} - missing audio becomes silence`,
 			);
 		}
 
 		// Format comes from the captured chunks (hardware may have ignored the
 		// requested 48000), falling back to the recording metadata then defaults.
-		const first = ordered[0];
-		const sampleRate = first?.sampleRate ?? rec.sampleRate ?? 48000;
-		const channelCount = first?.channelCount ?? rec.channels ?? 1;
-		const bitDepth = first?.bitDepth ?? 24;
+		const formatOf = (seg: (typeof ordered)[number]): PcmFormat => ({
+			sampleRate: seg.sampleRate ?? rec.sampleRate ?? 48000,
+			channelCount: seg.channelCount ?? rec.channels ?? 1,
+			bitDepth: seg.bitDepth ?? 24,
+		});
+
+		const firstStartMs = ordered[0]?.startMs ?? 0;
+		const videoOrigin = await cameraTimelineOrigin(
+			recordingSessionId,
+			rec.participantId,
+		);
+		const leadPadMs =
+			videoOrigin === null
+				? 0
+				: Math.min(
+						MAX_PCM_LEAD_PAD_MS,
+						Math.max(0, firstStartMs - videoOrigin),
+					);
 
 		const rawPath = path.join(tmpDir, `${rec.id}-raw.pcm`);
 		const wavPath = path.join(tmpDir, `${rec.id}-out.wav`);
 
-		// Byte-concat chunks straight to disk - never hold the whole recording in
-		// memory (a long mic track is many MB of raw PCM).
-		await writeFile(rawPath, Buffer.alloc(0));
-		for (const seg of ordered) {
-			await appendFile(rawPath, await getObjectBuffer(seg.assetKey));
+		// Each chunk at its own timeline position, streamed straight to disk: a
+		// lost chunk or a refreshed tab becomes silence instead of shifting
+		// everything after it out of sync.
+		let missingChunks = 0;
+		const format = await composePcmTimeline({
+			segments: ordered.map((seg) => ({
+				startMs: seg.startMs,
+				format: formatOf(seg),
+				load: async () => {
+					const buffer = await downloadChunk(seg.assetKey);
+					if (!buffer) missingChunks++;
+					return buffer ?? Buffer.alloc(0);
+				},
+			})),
+			outPath: rawPath,
+			leadPadMs,
+			convert: (buffer, from, to) => convertPcm(buffer, from, to, tmpDir),
+		});
+		// A re-run must only ever improve the WAV - never rebuild it from a
+		// fraction of its chunks.
+		if (rec.mergedFileKey && missingChunks > 0) {
+			throw new Error(
+				`${missingChunks} PCM chunk object(s) are gone; keeping the existing WAV`,
+			);
 		}
+		const { sampleRate, channelCount, bitDepth } = format;
 
-		// TODO(drift, Part D): the PCM stream (ctx.currentTime clock) and the video
-		// master (performance.now clock) drift apart over long recordings. Both
-		// clocks' start references are persisted per recording (PCM baseline +
-		// video startOffsetMs). When there's real long-recording data to tune
-		// against, the final mux should apply `aresample=async=1:first_pts=0` here
-		// to correct it. NOT implemented yet - left as a deliberate hook.
+		// TODO(drift): the PCM stream (audio-hardware clock) and the video master
+		// (system clock) can drift apart over very long recordings. Not corrected
+		// yet - chunk wall-clock timestamps are too jittery to estimate it from.
 
 		// s24le = signed 24-bit LE, matching our 3-bytes/sample packing. Verify at
 		// runtime and fall back to a hand-written header if the binary differs.
@@ -1315,11 +1605,15 @@ async function finalizePcmRecording({
 
 		const wavKey = audioWavKey(spaceId, recordingSessionId, rec.participantId);
 		await putFileObject(wavKey, wavPath, "audio/wav");
+		// A rebuilt WAV makes the MP3 cached from the old one stale.
+		if (rec.mergedFileKey) {
+			await invalidateDerivedFiles([rec.mergedFileKey], [wavKey]);
+		}
 
 		const fileStat = await stat(wavPath);
-		const durationMs = ordered.reduce(
-			(sum, seg) => sum + (seg.durationMs || 0),
-			0,
+		const frameBytes = (bitDepth / 8) * channelCount;
+		const durationMs = Math.round(
+			(format.bytes / frameBytes / sampleRate) * 1000,
 		);
 
 		await prisma.participantRecording.update({
@@ -1335,7 +1629,7 @@ async function finalizePcmRecording({
 		});
 
 		console.log(
-			`[Finalize] PCM ${rec.id}: wrote lossless WAV ${wavKey} (${sampleRate}Hz / 24-bit / ${channelCount}ch)`,
+			`[Finalize] PCM ${rec.id}: wrote lossless WAV ${wavKey} (${sampleRate}Hz / 24-bit / ${channelCount}ch, lead ${leadPadMs}ms)`,
 		);
 
 		// Back-link to the participant's video output (order-independent).
@@ -1345,29 +1639,20 @@ async function finalizePcmRecording({
 			participantId: rec.participantId,
 		});
 
-		// Drop the raw chunk objects once the track is fully complete (a late
-		// straggler could otherwise still rebuild a fuller WAV).
-		if (rec.isComplete) {
-			const chunkKeys = ordered.map((seg) => seg.assetKey);
-			if (chunkKeys.length > 0) {
-				await deleteObjects(chunkKeys).catch((error) =>
-					console.error(
-						`[Finalize] failed to delete PCM chunk objects for ${rec.id} (WAV is safe):`,
-						error,
-					),
-				);
-			}
-		}
+		// Raw chunks are kept for a day (see the recovery sweep's cleanup) so a
+		// straggler can still rebuild a fuller WAV.
 	} catch (error) {
-		// Best-effort: never fail the session over the lossless-audio enhancement.
+		if (error instanceof TransientFinalizeError) throw error;
+		// Best-effort: never fail the session over the lossless-audio
+		// enhancement, and never replace a WAV that already worked.
 		console.error(`[Finalize] PCM ${rec.id} failed:`, error);
+		const message = errorMessage(error).slice(0, 2000);
 		await prisma.participantRecording
 			.update({
 				where: { id: rec.id },
-				data: {
-					status: "FAILED",
-					processingError: errorMessage(error).slice(0, 2000),
-				},
+				data: rec.mergedFileKey
+					? { status: "READY", processingError: `Re-run failed: ${message}` }
+					: { status: "FAILED", processingError: message },
 			})
 			.catch(() => undefined);
 	}
