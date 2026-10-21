@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import {
   CalendarClock,
   CalendarX,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Mail,
@@ -11,6 +13,13 @@ import {
 import { RiMovie2Line } from "react-icons/ri";
 import { useNavigate } from "react-router-dom";
 import PageTitle from "@/components/shared/PageTitle";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/shared/ui/dropdown-menu";
 import ScheduleModal from "@/components/Dashboard/ScheduleModal";
 import { useDeleteSpace, useGetUserSpaces } from "@/hooks/useSpace";
 import { useGetMe } from "@/hooks/useUserQuery";
@@ -20,6 +29,8 @@ import { usePresence } from "@/hooks/usePresence";
 import type { Space } from "@/types/spaceTypes";
 
 type CalendarView = "month" | "week" | "list";
+
+const CALENDAR_VIEWS: CalendarView[] = ["week", "month", "list"];
 
 interface CalendarEvent {
   id: string;
@@ -327,6 +338,14 @@ const DashboardCalendarPage = () => {
           month: "long",
           year: "numeric",
         }).format(focusDate);
+  // Phones: "Oct 26" instead of "October 2026".
+  const shortHeaderLabel =
+    view === "list"
+      ? ""
+      : new Intl.DateTimeFormat("en", {
+          month: "short",
+          year: "2-digit",
+        }).format(focusDate);
 
   // Month grid: whole weeks starting on the Sunday on/before the 1st, running
   // only as far as the week that contains the last day of the month. A trailing
@@ -420,24 +439,26 @@ const DashboardCalendarPage = () => {
       <PageTitle title="Calendar" />
       <div className="flex h-full flex-col gap-2">
         {/* Toolbar */}
-        <div className="mx-4 mt-2 mb-1 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        {/* One line on every screen: on phones the view switch is a dropdown,
+            "New" is just its icon and the date label truncates. */}
+        <div className="mx-4 mt-2 mb-1 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
             {view !== "list" && (
               <button
                 type="button"
                 onClick={goToday}
-                className="inline-flex h-9 items-center rounded-md bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
+                className="inline-flex h-9 shrink-0 items-center rounded-md bg-muted px-2.5 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer sm:px-3"
               >
                 Today
               </button>
             )}
             {view !== "list" && (
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center sm:gap-1">
                 <button
                   type="button"
                   onClick={goPrev}
                   aria-label="Previous"
-                  className="flex size-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+                  className="flex size-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer sm:size-9"
                 >
                   <ChevronLeft size={18} />
                 </button>
@@ -445,22 +466,59 @@ const DashboardCalendarPage = () => {
                   type="button"
                   onClick={goNext}
                   aria-label="Next"
-                  className="flex size-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+                  className="flex size-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer sm:size-9"
                 >
                   <ChevronRight size={18} />
                 </button>
               </div>
             )}
             {view !== "list" && (
-              <h1 className="text-base font-medium text-foreground">
-                {headerLabel}
+              <h1 className="min-w-0 truncate text-sm font-medium text-foreground sm:text-base">
+                <span className="sm:hidden">{shortHeaderLabel}</span>
+                <span className="hidden sm:inline">{headerLabel}</span>
               </h1>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 items-center gap-0.5 rounded-md bg-muted p-0.5">
-              {(["week", "month", "list"] as CalendarView[]).map((option) => (
+          <div className="flex shrink-0 items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Calendar view"
+                  className="flex h-9 items-center gap-1.5 rounded-md bg-muted px-2.5 text-sm font-medium capitalize text-foreground transition-opacity hover:opacity-80 data-[state=open]:opacity-80 cursor-pointer sm:hidden"
+                >
+                  {view}
+                  <ChevronDown size={14} className="text-fg-subtle" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                sideOffset={6}
+                className="w-36 rounded-xl border-border/50 bg-primary p-1"
+              >
+                <DropdownMenuRadioGroup
+                  value={view}
+                  onValueChange={(value) => setView(value as CalendarView)}
+                >
+                  {CALENDAR_VIEWS.map((option) => (
+                    <DropdownMenuRadioItem
+                      key={option}
+                      value={option}
+                      // Hide the stock radio dot; the check on the right marks it.
+                      className="cursor-pointer gap-2.5 rounded-lg px-2.5 py-2 text-sm capitalize text-fg-muted focus:bg-muted focus:text-foreground data-[state=checked]:text-foreground [&>span:first-child]:hidden"
+                    >
+                      <span className="flex-1">{option}</span>
+                      {option === view && (
+                        <Check size={14} className="text-foreground" />
+                      )}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="hidden h-9 items-center gap-0.5 rounded-md bg-muted p-0.5 sm:flex">
+              {CALENDAR_VIEWS.map((option) => (
                 <button
                   key={option}
                   type="button"
@@ -478,10 +536,11 @@ const DashboardCalendarPage = () => {
             <button
               type="button"
               onClick={() => setIsScheduleOpen(true)}
-              className="ml-2 flex h-9 items-center gap-1.5 rounded-md bg-brand px-3 text-sm font-medium text-white transition-colors hover:bg-brand/90 cursor-pointer"
+              aria-label="New"
+              className="flex size-9 items-center justify-center gap-1.5 rounded-md bg-brand text-sm font-medium text-white transition-colors hover:bg-brand/90 cursor-pointer sm:ml-2 sm:w-auto sm:px-3"
             >
               <Plus size={16} />
-              New
+              <span className="hidden sm:inline">New</span>
             </button>
           </div>
         </div>
