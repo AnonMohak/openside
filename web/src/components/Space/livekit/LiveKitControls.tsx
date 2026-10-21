@@ -216,16 +216,16 @@ const getParticipantAvatar = (participant: Participant): string => {
 // chunk (ready within seconds of record start). Falls back to their profile
 // picture, then their name initial.
 const ParticipantThumb = ({
-  participant,
+  name,
+  avatar,
   thumbnailUrl,
 }: {
-  participant: Participant;
+  name: string;
+  avatar: string;
   thumbnailUrl: string | null;
 }) => {
-  const avatar = getParticipantAvatar(participant);
   const [thumbFailed, setThumbFailed] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const name = participant.name?.trim() || "Guest";
   const showThumb = !!thumbnailUrl && !thumbFailed;
 
   return (
@@ -261,13 +261,18 @@ const ParticipantThumb = ({
 // This is upload confirmation only - server-side processing/merging is surfaced
 // on the project page, not here. Hosts get a row per participant with their live
 // progress; everyone else just sees their own. Ends with a link to the project.
+interface Person {
+  name: string;
+  avatar: string;
+}
+
 const savedCardDismissKey = (sessionId: string) =>
   `openside:uploadedCardDismissed:${sessionId}`;
 
 const clampPercent = (value: number) =>
   Math.max(0, Math.min(100, Math.round(value)));
 
-const UPLOAD_RING_RADIUS = 13;
+const UPLOAD_RING_RADIUS = 12;
 const UPLOAD_RING_CIRCUMFERENCE = 2 * Math.PI * UPLOAD_RING_RADIUS;
 
 /**
@@ -306,7 +311,7 @@ const LiveUploadStatus = ({
     >
       <span
         className={cn(
-          "relative grid size-[30px] shrink-0 place-items-center transition-colors",
+          "relative grid size-[28px] shrink-0 place-items-center transition-colors",
           behind
             ? "text-amber-400"
             : caughtUp
@@ -315,13 +320,13 @@ const LiveUploadStatus = ({
         )}
       >
         <svg
-          viewBox="0 0 30 30"
+          viewBox="0 0 28 28"
           className="absolute inset-0 size-full -rotate-90"
           aria-hidden="true"
         >
           <circle
-            cx="15"
-            cy="15"
+            cx="14"
+            cy="14"
             r={UPLOAD_RING_RADIUS}
             fill="none"
             stroke="currentColor"
@@ -329,8 +334,8 @@ const LiveUploadStatus = ({
             className="opacity-20"
           />
           <circle
-            cx="15"
-            cy="15"
+            cx="14"
+            cy="14"
             r={UPLOAD_RING_RADIUS}
             fill="none"
             stroke="currentColor"
@@ -386,7 +391,7 @@ const LiveUploadStatus = ({
             after you stop.
           </span>
         )}
-        <span className="absolute left-[21px] top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-[5px] rotate-45 border-b border-r border-call-border/80 bg-primary-hover" />
+        <span className="absolute left-[20px] top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-[5px] rotate-45 border-b border-r border-call-border/80 bg-primary-hover" />
       </span>
     </span>
   );
@@ -411,9 +416,6 @@ const SavedSessionCard = ({
   const percent = clampPercent(uploadProgress ?? 0);
   const allParticipants = useParticipants();
   const showOthers = participantUploads !== null;
-  const participants = showOthers
-    ? allParticipants
-    : allParticipants.filter((participant) => participant.isLocal);
   // Pull the current session's per-track thumbnails (early posters from the first
   // chunk). Poll briefly so a thumbnail still generating shows up once ready.
   const { data: sessionsData } = useGetRecordingSessionsBySpace(
@@ -424,44 +426,110 @@ const SavedSessionCard = ({
   const session =
     sessionsData?.sessions?.find((s) => s.id === sessionId) ??
     sessionsData?.sessions?.[0];
-  const { thumbnailByIdentity, uploadedByIdentity } = useMemo(() => {
-    const thumbnails = new Map<string, string>();
-    // Fallback for a missed socket update: true once every track is complete.
-    const uploaded = new Map<string, boolean>();
-    for (const rec of session?.participantRecordings ?? []) {
-      const identity = rec.participant?.livekitIdentity;
-      if (!identity) continue;
-      if (rec.thumbnailUrl) thumbnails.set(identity, rec.thumbnailUrl);
-      uploaded.set(identity, (uploaded.get(identity) ?? true) && rec.isComplete);
-    }
-    return { thumbnailByIdentity: thumbnails, uploadedByIdentity: uploaded };
-  }, [session]);
+  const { thumbnailByIdentity, uploadedByIdentity, recordedPeople } =
+    useMemo(() => {
+      const thumbnails = new Map<string, string>();
+      // Fallback for a missed socket update: true once every track is complete.
+      const uploaded = new Map<string, boolean>();
+      // Who recorded in this take - kept after they leave the call.
+      const people = new Map<string, Person>();
+      for (const rec of session?.participantRecordings ?? []) {
+        const identity = rec.participant?.livekitIdentity;
+        if (!identity) continue;
+        if (rec.thumbnailUrl) thumbnails.set(identity, rec.thumbnailUrl);
+        uploaded.set(
+          identity,
+          (uploaded.get(identity) ?? true) && rec.isComplete,
+        );
+        if (!people.has(identity)) {
+          people.set(identity, {
+            name:
+              rec.participant?.user?.name?.trim() ||
+              rec.participant?.displayName?.trim() ||
+              "Guest",
+            avatar: rec.participant?.user?.avatar ?? "",
+          });
+        }
+      }
+      return {
+        thumbnailByIdentity: thumbnails,
+        uploadedByIdentity: uploaded,
+        recordedPeople: people,
+      };
+    }, [session]);
+
+  // Everyone seen in the call while this card is up, so someone who leaves
+  // keeps their name and picture even if the session data lacks them.
+  const [seenPeople, setSeenPeople] = useState<Record<string, Person>>({});
+  useEffect(() => {
+    setSeenPeople((previous) => {
+      let next = previous;
+      for (const participant of allParticipants) {
+        const person = {
+          name: participant.name?.trim() || "Guest",
+          avatar: getParticipantAvatar(participant),
+        };
+        const known = previous[participant.identity];
+        if (known?.name === person.name && known.avatar === person.avatar) {
+          continue;
+        }
+        if (next === previous) next = { ...previous };
+        next[participant.identity] = person;
+      }
+      return next;
+    });
+  }, [allParticipants]);
 
   type UploadRow = {
-    participant: (typeof participants)[number];
+    identity: string;
+    person: Person;
     done: boolean;
     progress: number | null;
+    /** No longer in the call - their upload continues from their browser. */
+    left: boolean;
   };
-  const rows = participants.flatMap((participant): UploadRow[] => {
-    if (participant.isLocal) {
-      return [{ participant, done: !isUploading, progress: percent }];
+  const local = allParticipants.find((participant) => participant.isLocal);
+  const inCall = new Set(allParticipants.map((participant) => participant.identity));
+  const personFor = (identity: string): Person =>
+    seenPeople[identity] ??
+    recordedPeople.get(identity) ?? { name: "Guest", avatar: "" };
+
+  const rows: UploadRow[] = [];
+  if (local) {
+    rows.push({
+      identity: local.identity,
+      person: personFor(local.identity),
+      done: !isUploading,
+      progress: percent,
+      left: false,
+    });
+  }
+  if (showOthers) {
+    // In-call order first, then anyone who recorded and has since left.
+    const others = [
+      ...allParticipants
+        .filter((participant) => !participant.isLocal)
+        .map((participant) => participant.identity),
+      ...Object.keys(participantUploads ?? {}),
+      ...recordedPeople.keys(),
+    ].filter(
+      (identity, index, all) =>
+        identity !== local?.identity && all.indexOf(identity) === index,
+    );
+    for (const identity of others) {
+      const reported = participantUploads?.[identity];
+      const uploaded = uploadedByIdentity.get(identity);
+      // Joined after the recording: no tracks and nothing reported.
+      if (!reported && uploaded === undefined) continue;
+      rows.push({
+        identity,
+        person: personFor(identity),
+        done: reported?.done === true || uploaded === true,
+        progress: reported ? clampPercent(reported.progress) : null,
+        left: !inCall.has(identity),
+      });
     }
-    const reported = participantUploads?.[participant.identity];
-    if (reported) {
-      return [
-        {
-          participant,
-          done: reported.done,
-          progress: clampPercent(reported.progress),
-        },
-      ];
-    }
-    // No socket update yet: lean on the polled session, and skip anyone who
-    // has no tracks in it (they joined after the recording).
-    const uploaded = uploadedByIdentity.get(participant.identity);
-    if (uploaded === undefined) return [];
-    return [{ participant, done: uploaded, progress: null }];
-  });
+  }
   const allUploaded = rows.every((row) => row.done);
 
   // Dismissal is remembered per session, so once the host closes it with the
@@ -523,30 +591,30 @@ const SavedSessionCard = ({
 
       {/* One row per participant in the recording */}
       <div className="flex flex-col gap-1">
-        {rows.map(({ participant, done, progress }) => {
-          const name = participant.name?.trim() || "Guest";
+        {rows.map(({ identity, person, done, progress, left }) => {
           return (
             <div
-              key={participant.identity}
+              key={identity}
               className="flex items-center justify-between gap-2 rounded-lg border border-call-border bg-call-background p-1.5 pr-2.5"
             >
               <span className="flex min-w-0 items-center gap-2.5">
                 <ParticipantThumb
-                  participant={participant}
-                  thumbnailUrl={
-                    thumbnailByIdentity.get(participant.identity) ?? null
-                  }
+                  name={person.name}
+                  avatar={person.avatar}
+                  thumbnailUrl={thumbnailByIdentity.get(identity) ?? null}
                 />
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-sm font-medium text-foreground">
-                    {name}
+                    {person.name}
                   </span>
                   <span className="text-xs tabular-nums text-foreground/50">
                     {done
                       ? "Uploaded"
-                      : progress === null
-                        ? "Uploading…"
-                        : `Uploading… ${progress}%`}
+                      : left
+                        ? "Left the call · uploading from their browser"
+                        : progress === null
+                          ? "Uploading…"
+                          : `Uploading… ${progress}%`}
                   </span>
                 </span>
               </span>
