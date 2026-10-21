@@ -3,6 +3,8 @@ import { FiLoader } from "react-icons/fi";
 import {
   LuVideo,
   LuAudioLines,
+  LuChevronDown,
+  LuCloud,
   LuLayoutGrid,
   LuDownload,
   LuPlay,
@@ -169,10 +171,19 @@ const RowThumbnail = ({
   );
 };
 
+type DownloadKind = "video" | "audio" | "cloud";
+
+const DOWNLOAD_KIND_ICON = {
+  video: LuVideo,
+  audio: LuAudioLines,
+  cloud: LuCloud,
+} as const;
+
 const DownloadItem = ({
   name,
   format,
   description,
+  kind,
   busy,
   disabled,
   onClick,
@@ -180,34 +191,51 @@ const DownloadItem = ({
   name: string;
   format: string;
   description: string;
+  kind: DownloadKind;
   busy: boolean;
   disabled: boolean;
   onClick: () => void;
-}) => (
-  <button
-    type="button"
-    disabled={disabled}
-    onClick={onClick}
-    aria-label={`${name}, ${format}. ${description}`}
-    className="group/download relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground transition hover:bg-primary focus-visible:bg-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {busy ? (
-      <FiLoader className="size-3.5 animate-spin" />
-    ) : (
-      <LuDownload className="size-3.5 text-fg-muted" />
-    )}
-    {name}
-    <span className="ml-auto rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-fg-muted">
-      {format}
-    </span>
-    <span
-      role="tooltip"
-      className="pointer-events-none invisible absolute right-[calc(100%+0.75rem)] top-1/2 z-[70] w-56 -translate-y-1/2 rounded-lg border border-border bg-popover px-3 py-2 text-left text-xs font-normal leading-5 text-popover-foreground opacity-0 shadow-md group-hover/download:visible group-hover/download:opacity-100 group-focus-visible/download:visible group-focus-visible/download:opacity-100"
+}) => {
+  const Icon = DOWNLOAD_KIND_ICON[kind];
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={`${name}, ${format}. ${description}`}
+      className="group/download relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
     >
-      {description}
-    </span>
-  </button>
-);
+      {busy ? (
+        <FiLoader className="size-3.5 shrink-0 animate-spin text-fg-muted" />
+      ) : (
+        <Icon className="size-3.5 shrink-0 text-fg-muted transition-colors group-hover/download:text-foreground" />
+      )}
+      <span className="truncate text-sm text-foreground">
+        {busy ? "Preparing…" : name}
+      </span>
+      <span className="ml-auto shrink-0 text-[0.65rem] font-medium uppercase tracking-wide text-fg-subtle">
+        {format}
+      </span>
+
+      {/* What this download is, beside the menu on hover / keyboard focus. */}
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute right-[calc(100%+0.875rem)] top-1/2 z-[70] w-60 -translate-y-1/2 translate-x-1 scale-95 rounded-xl border border-border bg-popover px-3 py-2.5 text-left opacity-0 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45),0_0_0_1px_rgba(0,0,0,0.06)] transition-[opacity,transform,visibility] duration-150 ease-out group-hover/download:visible group-hover/download:translate-x-0 group-hover/download:scale-100 group-hover/download:opacity-100 group-focus-visible/download:visible group-focus-visible/download:translate-x-0 group-focus-visible/download:scale-100 group-focus-visible/download:opacity-100"
+      >
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-popover-foreground">
+          <Icon className="size-3.5 text-fg-muted" />
+          {name}
+          <span className="text-fg-muted">·</span>
+          <span className="uppercase text-fg-muted">{format}</span>
+        </span>
+        <span className="mt-1 block text-xs leading-5 text-fg-muted">
+          {description}
+        </span>
+        <span className="absolute left-full top-1/2 size-2.5 -translate-x-[5px] -translate-y-1/2 rotate-45 border-r border-t border-border bg-popover" />
+      </span>
+    </button>
+  );
+};
 
 const OutputCard = ({
   output,
@@ -270,6 +298,7 @@ const OutputCard = ({
     id: string;
     name: string;
     description: string;
+    kind: DownloadKind;
     output: FinalOutput;
     format: DownloadFormat;
   };
@@ -282,8 +311,8 @@ const OutputCard = ({
       videoItems.push({
         id: `${output.id}:${format}`,
         name: "Raw video",
-        description:
-          "High-quality video recorded locally in the participant's browser.",
+        description: "Full-quality video recorded in the participant's browser.",
+        kind: "video",
         output,
         format,
       });
@@ -299,8 +328,8 @@ const OutputCard = ({
     videoItems.push({
       id: `${alignedSource.id}:aligned:mp4`,
       name: "Aligned video",
-      description:
-        "Adds black padding when this track started late; otherwise it matches Raw video.",
+      description: "Lines up with the session start, padded if they joined late.",
+      kind: "video",
       output: alignedSource,
       format: "mp4",
     });
@@ -321,8 +350,9 @@ const OutputCard = ({
         name: format === "wav" ? "Raw audio" : "Compressed",
         description:
           format === "wav"
-            ? "Uncompressed 24-bit WAV captured from the participant's microphone."
-            : "Smaller MP3 version of this track's audio.",
+            ? "Lossless 24-bit WAV from the participant's microphone."
+            : "Smaller MP3 of this track's audio.",
+        kind: "audio",
         output,
         format,
       });
@@ -336,8 +366,8 @@ const OutputCard = ({
     videoItems.push({
       id: `${cloudOutput.id}:mp4`,
       name: "Cloud",
-      description:
-        "Server-side video backup of this track from the live session.",
+      description: "Server-side backup recorded from the live call.",
+      kind: "cloud",
       output: cloudOutput,
       format: "mp4",
     });
@@ -345,7 +375,8 @@ const OutputCard = ({
       audioItems.push({
         id: `${cloudOutput.id}:mp3`,
         name: "Cloud",
-        description: "MP3 audio from the server-side backup of this track.",
+        description: "MP3 audio from the server-side backup.",
+        kind: "cloud",
         output: cloudOutput,
         format: "mp3",
       });
@@ -470,7 +501,7 @@ const OutputCard = ({
             onClick={(event) => event.stopPropagation()}
             aria-label={downloading ? "Preparing download" : "Download"}
             title={downloading ? "Preparing download" : "Download"}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:opacity-80 cursor-pointer"
+            className="group/trigger flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-muted pl-3 pr-2 text-xs font-medium text-foreground ring-1 ring-transparent transition-colors hover:ring-border disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:ring-border"
           >
             {downloading ? (
               <FiLoader className="size-3.5 animate-spin" />
@@ -478,16 +509,18 @@ const OutputCard = ({
               <LuDownload className="size-3.5" />
             )}
             {downloading ? "Preparing" : "Download"}
+            <LuChevronDown className="size-3.5 text-fg-muted transition-transform duration-150 group-data-[state=open]/trigger:rotate-180" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-56 overflow-visible rounded-xl border-border/50 bg-primary p-1.5"
+          className="w-56 rounded-xl border-border bg-primary p-1 shadow-md"
+          // The description tooltips sit outside the menu.
           style={{ overflow: "visible" }}
         >
           {videoItems.length > 0 && (
             <>
-              <p className="px-2 pt-1 pb-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-fg-subtle">
+              <p className="px-2 pt-1.5 pb-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-fg-subtle">
                 Video
               </p>
               {videoItems.map((item) => (
@@ -496,6 +529,7 @@ const OutputCard = ({
                   name={item.name}
                   format={item.format}
                   description={item.description}
+                  kind={item.kind}
                   busy={downloading === item.id}
                   disabled={!!downloading}
                   onClick={() =>
@@ -508,6 +542,9 @@ const OutputCard = ({
 
           {audioItems.length > 0 && (
             <>
+              {videoItems.length > 0 && (
+                <div className="mx-1 my-1 h-px bg-border/70" />
+              )}
               <p className="px-2 pt-1.5 pb-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-fg-subtle">
                 Audio
               </p>
@@ -517,6 +554,7 @@ const OutputCard = ({
                   name={item.name}
                   format={item.format}
                   description={item.description}
+                  kind={item.kind}
                   busy={downloading === item.id}
                   disabled={!!downloading}
                   onClick={() =>
