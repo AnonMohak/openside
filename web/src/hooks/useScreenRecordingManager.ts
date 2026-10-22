@@ -4,11 +4,12 @@
  * Single-user screen-recorder orchestration (no sockets, no other
  * participants). End-to-end:
  *   1. Create a RecordingSession (source = SCREEN_RECORDER) on the backend.
- *   2. Run a local 3-2-1 lead-in, then start the 3 local recorders.
- *   3. Create one ParticipantRecording row per track (combined/camera/audio).
+ *   2. Create one ParticipantRecording row per track (combined/camera/audio)
+ *      during the local 3-2-1 lead-in, then start the local recorders.
+ *   3. (Chunks are saved under those rows from the very first one.)
  *   4. Stream every chunk through useChunkUploader → R2 (screen endpoints).
- *   5. On stop, drain the upload queue, mark each recording complete, and stop
- *      the session.
+ *   5. On stop, report each track's recorded chunk count, stop the session,
+ *      then wait for the upload queue to drain.
  * Pause/resume pauses the local recorders; discard throws the take away
  * (queued chunks dropped, session + storage deleted).
  */
@@ -95,24 +96,22 @@ function generateSessionId(): string {
   return `scr_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
-// combined + camera are VIDEO rows; audio is an AUDIO row.
-function recordingPayloadFor(
-  trackType: ScreenTrackType,
-  meta: RecordingMetadata,
-) {
+// combined + camera are VIDEO rows; audio is an AUDIO row. Built from the
+// live tracks before capture starts (the recorder's codec isn't known yet -
+// finalization probes the files anyway).
+function recordingPayloadFor(trackType: ScreenTrackType, stream: MediaStream) {
+  const video = stream.getVideoTracks()[0]?.getSettings();
+  const audio = stream.getAudioTracks()[0]?.getSettings();
   return {
     type: trackType === "audio" ? ("AUDIO" as const) : ("VIDEO" as const),
     isScreenShare: trackType === "combined",
-    container: meta.container,
-    codec: meta.codec,
-    width: meta.width,
-    height: meta.height,
-    fps: meta.fps,
-    bitrate: meta.bitrate,
-    sampleRate: meta.sampleRate,
-    channels: meta.channels,
-    hasAudio: meta.hasAudio,
-    hasVideo: meta.hasVideo,
+    width: video?.width,
+    height: video?.height,
+    fps: video?.frameRate,
+    sampleRate: audio?.sampleRate,
+    channels: audio?.channelCount,
+    hasAudio: stream.getAudioTracks().length > 0,
+    hasVideo: stream.getVideoTracks().length > 0,
   };
 }
 
@@ -235,30 +234,10 @@ export default function useScreenRecordingManager({
 
     const streams = buildStreams();
     try {
+      // The track rows already exist (created during the countdown), so every
+      // chunk goes straight to IndexedDB and the upload queue.
       await startLocal(streams);
-
-      const metadata = metaRef.current;
-      const sessionId = sessionIdRef.current;
-      if (!sessionId) throw new Error("No recording session");
-
-      // Capture has begun - flip to "recording" immediately; chunks buffer
-      // until the rows below are created.
       setRecordingState("recording");
-
-      // Create one ParticipantRecording row per active track.
-      const trackTypes = Object.keys(metadata) as ScreenTrackType[];
-      await Promise.all(
-        trackTypes.map(async (trackType) => {
-          const meta = metadata[trackType];
-          if (!meta) return;
-          const { data } = await api.post("/recording/screen/recording", {
-            recordingSessionId: sessionId,
-            ...recordingPayloadFor(trackType, meta),
-          });
-          recordingIdsRef.current[trackType] = data.data.id as string;
-        }),
-      );
-
       flushPendingChunks();
     } catch (err) {
       const message =
@@ -293,7 +272,36 @@ export default function useScreenRecordingManager({
         description: info?.description,
         composition: getComposition?.(),
       });
-      sessionIdRef.current = data.data.id as string;
+      const sessionId = data.data.id as string;
+      sessionIdRef.current = sessionId;
+
+      // One row per track, created BEFORE capture: a failure here aborts the
+      // take cleanly instead of mid-recording, and no chunk ever waits in
+      // memory for an id it can be saved under.
+      try {
+        const planned = buildStreams();
+        await Promise.all(
+          (
+            Object.entries(planned) as [ScreenTrackType, MediaStream | null][]
+          ).map(async ([trackType, stream]) => {
+            if (!stream) return;
+            const { data: created } = await api.post(
+              "/recording/screen/recording",
+              {
+                recordingSessionId: sessionId,
+                ...recordingPayloadFor(trackType, stream),
+              },
+            );
+            recordingIdsRef.current[trackType] = created.data.id as string;
+          }),
+        );
+      } catch (rowError) {
+        await api
+          .delete(`/recording/screen/${sessionId}`)
+          .catch(() => undefined);
+        sessionIdRef.current = null;
+        throw rowError;
+      }
 
       // Local 3-2-1 lead-in.
       setRecordingState("countdown");
@@ -335,7 +343,7 @@ export default function useScreenRecordingManager({
       setError(message);
       setRecordingState("error");
     }
-  }, [beginRecording, getInfo, getComposition]);
+  }, [beginRecording, buildStreams, getInfo, getComposition]);
 
   // Usage heartbeat while recording: credits metered seconds server-side (a
   // crashed tab still counts what ran), warns near the limit, and reacts to a
