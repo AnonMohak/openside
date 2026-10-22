@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   CalendarDays,
   ChevronDown,
+  Clapperboard,
   Crown,
   FolderClosed,
   House,
@@ -94,6 +95,20 @@ const DashboardSidebar = ({ isOpen, onNavigate }: DashboardSidebarProps) => {
             </Link>
           );
         })}
+        {/* Not built yet: shown so people know it's coming, but not a link. */}
+        <div
+          aria-disabled="true"
+          title="Editor · Coming soon"
+          className="flex h-10 cursor-not-allowed items-center overflow-hidden rounded-md text-sm font-medium text-fg-subtle"
+        >
+          <span className="flex w-[42px] shrink-0 items-center justify-center">
+            <Clapperboard size={18} />
+          </span>
+          <span className="min-w-0 flex-1 truncate">Editor</span>
+          <span className="mr-2 shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] font-semibold text-fg-muted">
+            Coming soon
+          </span>
+        </div>
       </nav>
 
       <div className="flex flex-col gap-1">
