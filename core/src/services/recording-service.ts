@@ -1943,6 +1943,14 @@ interface SharedSpaceTrack {
 	cloudHasAudio: boolean;
 }
 
+interface SharedOutputMeta {
+	fileType: string | null;
+	durationMs: number | null;
+	width: number | null;
+	height: number | null;
+	fps: number | null;
+}
+
 interface SharedRecordingView {
 	id: string;
 	source: "SCREEN_RECORDER" | "SPACE";
@@ -1954,6 +1962,8 @@ interface SharedRecordingView {
 	ownerName: string | null;
 	/** Output kinds that exist, WITHOUT their storage keys. */
 	kinds: string[];
+	/** Per-kind playback facts (no keys): file type, length, size, rate. */
+	outputs: Record<string, SharedOutputMeta>;
 	/** Ready, playable Space tracks. Empty for a screen-recorder session. */
 	tracks: SharedSpaceTrack[];
 }
@@ -2022,10 +2032,32 @@ export async function getSharedRecording(
 	if (!session) return null;
 
 	const outputs =
-		(session.outputs as Record<string, { key?: string }> | null) ?? {};
+		(session.outputs as Record<
+			string,
+			{
+				key?: string;
+				durationMs?: number;
+				width?: number;
+				height?: number;
+				fps?: number;
+			}
+		> | null) ?? {};
 	const kinds = Object.entries(outputs)
 		.filter(([, value]) => Boolean(value?.key))
 		.map(([kind]) => kind);
+	const outputMeta: Record<string, SharedOutputMeta> = {};
+	if (session.source === "SCREEN_RECORDER") {
+		for (const kind of kinds) {
+			const output = outputs[kind];
+			outputMeta[kind] = {
+				fileType: /\.(\w+)$/.exec(output?.key ?? "")?.[1] ?? null,
+				durationMs: output?.durationMs ?? null,
+				width: output?.width ?? null,
+				height: output?.height ?? null,
+				fps: output?.fps ?? null,
+			};
+		}
+	}
 
 	const tracks: SharedSpaceTrack[] = [];
 	if (session.source === "SPACE") {
@@ -2139,6 +2171,7 @@ export async function getSharedRecording(
 		stoppedAt: session.stoppedAt,
 		ownerName: session.user?.name ?? session.space?.host?.name ?? null,
 		kinds: session.source === "SCREEN_RECORDER" ? kinds : [],
+		outputs: outputMeta,
 		tracks,
 	};
 }

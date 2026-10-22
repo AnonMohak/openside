@@ -26,7 +26,9 @@ import {
   type ScreenOutputKind,
   type ScreenRecording,
 } from "@/hooks/useScreenRecordings";
-import RecordingComments from "./RecordingComments";
+import RecordingComments, {
+  RecordingCommentsSkeleton,
+} from "./RecordingComments";
 import VideoPlayer, {
   type VideoPlayerHandle,
 } from "@/components/shared/VideoPlayer";
@@ -355,54 +357,8 @@ const ScreenProjectDetailSkeleton = () => (
         </div>
       </section>
 
-      {/* Comments: header, bubbles, composer */}
       <aside className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent">
-        <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3.5">
-          <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
-        </div>
-        {/* Chat bubbles, the last one a reply quoting an earlier message */}
-        <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-          {[
-            { body: ["w-full", "w-2/3"] },
-            { body: ["w-4/5"] },
-            { body: ["w-3/4"], reply: true },
-          ].map((bubble, index) => (
-            <div key={index} className="flex items-start gap-3">
-              <div className="size-8 shrink-0 animate-pulse rounded-full bg-muted" />
-              <div className="min-w-0 flex-1">
-                {bubble.reply && (
-                  <>
-                    <div className="mb-1 h-10 animate-pulse rounded-md bg-muted/40" />
-                    <div className="mb-1 ml-1 h-3 w-24 animate-pulse rounded-md bg-muted/60" />
-                  </>
-                )}
-                <div className="space-y-2 rounded-xl rounded-tl-none bg-muted/60 px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3.5 w-20 animate-pulse rounded-md bg-muted" />
-                    <div className="h-3 w-12 animate-pulse rounded-md bg-muted" />
-                  </div>
-                  {bubble.body.map((width, line) => (
-                    <div
-                      key={line}
-                      className={`h-3 animate-pulse rounded-md bg-muted ${width}`}
-                    />
-                  ))}
-                </div>
-                <div className="ml-1 mt-1.5 h-3 w-10 animate-pulse rounded-md bg-muted/60" />
-              </div>
-            </div>
-          ))}
-        </div>
-        {/* Composer: text area, then emoji + send */}
-        <div className="p-3">
-          <div className="rounded-xl border border-border/50 px-3 pb-2.5 pt-3">
-            <div className="h-3.5 w-32 animate-pulse rounded-md bg-muted" />
-            <div className="mt-6 flex items-center justify-end gap-1.5">
-              <div className="size-8 animate-pulse rounded-lg bg-muted" />
-              <div className="size-8 animate-pulse rounded-lg bg-muted" />
-            </div>
-          </div>
-        </div>
+        <RecordingCommentsSkeleton />
       </aside>
     </div>
   </div>

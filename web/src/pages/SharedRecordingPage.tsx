@@ -9,10 +9,12 @@
 import { useRef, useState, type Ref } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
-import { FiClock, FiLoader, FiMonitor, FiVideo } from "react-icons/fi";
+import { FiLoader, FiVideo } from "react-icons/fi";
 import { LuDownload, LuPlay } from "react-icons/lu";
 import PageTitle from "@/components/shared/PageTitle";
-import RecordingComments from "@/components/Dashboard/recordings/RecordingComments";
+import RecordingComments, {
+  RecordingCommentsSkeleton,
+} from "@/components/Dashboard/recordings/RecordingComments";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,17 +81,19 @@ const formatBitrate = (bitrate?: number | null) =>
 const SharedPlayer = ({
   token,
   kind,
+  fileType,
   playerRef,
 }: {
   token: string;
-  kind: ScreenOutputKind | null;
+  kind: ScreenOutputKind;
+  fileType: string | null;
   playerRef: Ref<VideoPlayerHandle>;
 }) => {
   const [downloading, setDownloading] = useState(false);
-  const { data: url } = useSharedOutputUrl(token, kind ?? undefined);
+  const { data: url } = useSharedOutputUrl(token, kind);
 
   const handleDownload = async () => {
-    if (!kind || downloading) return;
+    if (downloading) return;
     setDownloading(true);
     try {
       const downloadUrl = await fetchSharedOutputUrl(token, kind, true);
@@ -102,14 +106,9 @@ const SharedPlayer = ({
   };
 
   return (
-    <div className="w-full overflow-hidden rounded-2xl border border-border bg-primary p-3">
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border">
-        {!kind ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45">
-            <FiVideo className="size-6" />
-            <span className="text-sm">Nothing to play yet</span>
-          </div>
-        ) : url ? (
+    <div className="flex w-full flex-col self-start">
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border/50">
+        {url ? (
           <VideoPlayer key={url} ref={playerRef} src={url} />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
@@ -117,26 +116,109 @@ const SharedPlayer = ({
           </div>
         )}
       </div>
-      {kind && (
-        <div className="flex justify-end px-1 pb-1 pt-3">
-          <button
-            type="button"
-            disabled={downloading}
-            onClick={() => void handleDownload()}
-            className="flex shrink-0 items-center gap-2 rounded-lg bg-foreground px-3.5 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {downloading ? (
-              <FiLoader className="size-4 animate-spin" />
-            ) : (
-              <LuDownload className="size-4" />
-            )}
-            {downloading ? "Preparing" : "Download video"}
-          </button>
-        </div>
-      )}
+      <div className="flex items-center justify-end pt-3">
+        <button
+          type="button"
+          disabled={downloading}
+          onClick={() => void handleDownload()}
+          className="flex h-9 items-center gap-2 rounded-lg bg-brand pl-3 pr-1.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer"
+        >
+          {downloading ? (
+            <FiLoader className="size-4 animate-spin" />
+          ) : (
+            <LuDownload className="size-4" />
+          )}
+          {downloading ? "Preparing…" : "Download"}
+          {fileType && (
+            <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide">
+              {fileType}
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 };
+
+/** A black 16:9 frame with a message, for a take with nothing to play yet. */
+const EmptyPlayer = ({ processing }: { processing: boolean }) => (
+  <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-xl bg-black text-white/60 ring-1 ring-border/50">
+    {processing ? (
+      <FiLoader className="size-6 animate-spin" />
+    ) : (
+      <FiVideo className="size-6" />
+    )}
+    <span className="text-sm">
+      {processing
+        ? "This recording is still processing…"
+        : "Nothing to play here yet"}
+    </span>
+  </div>
+);
+
+/** Top bar: Openside branding and a nudge to record your own. */
+const SiteHeader = () => (
+  <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
+    <Link
+      to="/"
+      className="flex items-center gap-2 transition-opacity hover:opacity-80"
+    >
+      <img
+        src="/logo/logo-light.png"
+        alt=""
+        className="h-6 w-auto select-none dark:hidden"
+      />
+      <img
+        src="/logo/logo-dark.png"
+        alt=""
+        className="hidden h-6 w-auto select-none dark:block"
+      />
+      <span className="text-sm font-semibold text-foreground">Openside</span>
+    </Link>
+    <Link
+      to="/dashboard/screen-recorder"
+      className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+    >
+      <FiVideo className="size-3.5" />
+      <span className="max-sm:hidden">Record your own</span>
+      <span className="sm:hidden">Record</span>
+    </Link>
+  </header>
+);
+
+/** Second bar: what this recording is (title and details). */
+const RecordingHeader = ({ children }: { children: React.ReactNode }) => (
+  <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+    <div className="min-w-0 flex-1">{children}</div>
+  </div>
+);
+
+/** Same frame as the page: header, video + Download, comments rail. */
+const SharedRecordingSkeleton = () => (
+  <div
+    aria-label="Loading recording"
+    className="flex min-h-screen flex-col bg-[#f9f9fb] dark:bg-[#0f0f11] lg:h-screen lg:min-h-0 lg:overflow-hidden"
+  >
+    <SiteHeader />
+    <RecordingHeader>
+      <div className="space-y-1.5">
+        <div className="h-4 w-44 animate-pulse rounded-md bg-muted" />
+        <div className="h-3 w-64 max-w-full animate-pulse rounded-md bg-muted" />
+      </div>
+    </RecordingHeader>
+    <div className="grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-0 lg:p-0">
+      <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-border lg:p-6">
+        <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
+        <div className="flex items-center justify-end pt-3">
+          <div className="h-9 w-32 animate-pulse rounded-lg bg-muted" />
+        </div>
+      </section>
+      <aside className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent">
+        <RecordingCommentsSkeleton />
+      </aside>
+    </div>
+  </div>
+);
 
 type SharedSpaceTrack = {
   id: string;
@@ -167,7 +249,7 @@ const SharedSpacePlayer = ({
 }) => {
   const { data: url } = useSharedFinalOutputUrl(token, outputId ?? undefined);
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border">
+    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border/50">
       {!outputId ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45">
           <FiVideo className="size-6" />
@@ -296,11 +378,11 @@ const SharedSpaceTrackRow = ({
       aria-pressed={selected}
       className={`group flex cursor-pointer items-center gap-3 rounded-xl border px-2.5 py-2 transition-colors ${
         selected
-          ? "border-foreground/25 bg-muted"
-          : "border-border bg-primary hover:border-foreground/20"
+          ? "border-brand/40 bg-brand/5"
+          : "border-border/50 bg-primary hover:border-border"
       }`}
     >
-      <span className="relative flex aspect-[4/3] h-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted ring-1 ring-border">
+      <span className="relative flex aspect-[4/3] h-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted ring-1 ring-border/50">
         <FiVideo className="size-4 text-foreground/60" />
         {thumbnailUrl && (
           <video
@@ -326,7 +408,7 @@ const SharedSpaceTrackRow = ({
       </span>
       <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
         {track.title}
-        <span className="mt-0.5 block truncate text-xs font-normal text-foreground/45">
+        <span className="mt-0.5 block truncate text-xs font-normal text-fg-subtle">
           {specs.join(" · ")}
         </span>
       </p>
@@ -336,14 +418,14 @@ const SharedSpaceTrackRow = ({
             type="button"
             disabled={downloading || !canDownload}
             onClick={(event) => event.stopPropagation()}
-            className="flex shrink-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           >
             {downloading ? (
-              <FiLoader className="size-4 animate-spin" />
+              <FiLoader className="size-3.5 animate-spin" />
             ) : (
-              <LuDownload className="size-4 text-foreground/60" />
+              <LuDownload className="size-3.5" />
             )}
-            {downloading ? "Preparing" : "Download"}
+            {downloading ? "Preparing…" : "Download"}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -407,34 +489,28 @@ const SharedRecordingPage = () => {
   useRealtimeRecordingComments(token, "shared");
   useRecordSharedView(token, !!rec);
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-foreground/45">
-        <FiLoader className="size-5 animate-spin" />
-      </div>
-    );
-  }
+  if (isLoading) return <SharedRecordingSkeleton />;
 
   if (isError || !rec) {
     return (
       <>
         <PageTitle title="Recording unavailable" />
         <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-4 text-center">
-          <span className="flex size-14 items-center justify-center rounded-2xl bg-call-primary ring-1 ring-call-border">
-            <FiVideo className="size-7 text-foreground/45" />
+          <span className="flex size-14 items-center justify-center rounded-2xl bg-muted">
+            <FiVideo className="size-7 text-fg-muted" />
           </span>
           <div className="space-y-1.5">
             <h1 className="text-lg font-semibold text-foreground">
               This link isn't available
             </h1>
-            <p className="max-w-sm text-sm text-foreground/55">
+            <p className="max-w-sm text-sm text-fg-muted">
               The recording may have been deleted, or its owner turned off
               sharing.
             </p>
           </div>
           <Link
             to="/"
-            className="rounded-lg border border-call-border bg-call-primary px-3.5 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
+            className="flex h-9 items-center rounded-lg bg-brand px-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
           >
             Go to Openside
           </Link>
@@ -462,188 +538,133 @@ const SharedRecordingPage = () => {
       ? selectedSpaceTrackId
       : (spaceTracks[0]?.id ?? null);
 
+  const screenOutput = screenVideoKind ? rec.outputs?.[screenVideoKind] : null;
+  const meta = [
+    isSpaceRecording
+      ? "Space recording"
+      : screenVideoKind === "both"
+        ? "Screen + camera"
+        : screenVideoKind === "camera"
+          ? "Camera"
+          : "Screen recording",
+    rec.ownerName && `by ${rec.ownerName}`,
+    formatDateTime(rec.startedAt),
+    screenOutput?.durationMs && formatDuration(screenOutput.durationMs),
+    screenOutput?.width &&
+      screenOutput.height &&
+      `${screenOutput.width}×${screenOutput.height}`,
+    screenOutput?.fps && `${screenOutput.fps} fps`,
+  ].filter(Boolean);
+
   return (
     <>
       <PageTitle title={recTitle} />
       {/* Desktop: the viewport is the frame - the left pane scrolls on its own
-          and the comments pane runs full height to the bottom. Below lg the
-          panes stack and the page scrolls normally. */}
-      <div className="flex min-h-screen flex-col bg-background lg:h-screen lg:min-h-0 lg:overflow-hidden">
-        <header className="shrink-0 border-b border-call-border">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-            <Link to="/" className="flex items-center gap-2">
-              <img
-                src="/logo/logo-light.png"
-                alt=""
-                className="h-6 w-auto select-none dark:hidden"
-              />
-              <img
-                src="/logo/logo-dark.png"
-                alt=""
-                className="hidden h-6 w-auto select-none dark:block"
-              />
-              <span className="text-sm font-semibold text-foreground">
-                Openside
+          and the comments rail runs full height from the headers to the bottom.
+          Below lg the panes stack and the page scrolls normally. */}
+      <div className="flex min-h-screen flex-col bg-[#f9f9fb] dark:bg-[#0f0f11] lg:h-screen lg:min-h-0 lg:overflow-hidden">
+        <SiteHeader />
+        <RecordingHeader>
+          <h1 className="truncate text-[15px] font-semibold leading-tight text-foreground">
+            {recTitle}
+          </h1>
+          <p className="flex items-center gap-x-2 truncate text-xs text-fg-subtle">
+            {meta.map((part, index) => (
+              <span key={index} className="flex items-center gap-2">
+                {index > 0 && <span aria-hidden>·</span>}
+                {part}
               </span>
-            </Link>
-            <Link
-              to="/dashboard/screen-recorder"
-              className="rounded-lg border border-call-border bg-call-primary px-3 py-1.5 text-xs font-medium text-foreground transition-opacity hover:opacity-70"
-            >
-              Record your own
-            </Link>
-          </div>
-        </header>
+            ))}
+          </p>
+        </RecordingHeader>
 
-        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-6 lg:min-h-0 lg:pb-0">
-          <div className="mb-6 shrink-0 border-b border-call-border pb-5 lg:mb-0">
-            <h1 className="truncate text-xl font-semibold text-foreground">
-              {recTitle}
-            </h1>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-foreground/45">
-              <span className="inline-flex items-center gap-1">
-                <FiMonitor className="size-3" />
-                {isSpaceRecording ? "Space recording" : "Screen recording"}
-              </span>
-              {rec.ownerName && (
-                <>
-                  <span>·</span>
-                  <span>Shared by {rec.ownerName}</span>
-                </>
-              )}
-              {rec.startedAt && (
-                <>
-                  <span>·</span>
-                  <span className="inline-flex items-center gap-1">
-                    <FiClock className="size-3" />
-                    {formatDateTime(rec.startedAt)}
-                  </span>
-                </>
-              )}
-            </p>
-            {isSpaceRecording && rec.description && (
-              <p className="mt-2 max-w-2xl text-sm text-foreground/60">
-                {rec.description}
-              </p>
-            )}
-          </div>
-
+        <div
+          className={`grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:gap-0 lg:p-0 ${
+            showComments
+              ? "lg:grid-cols-[minmax(0,1fr)_380px]"
+              : "lg:grid-cols-1"
+          }`}
+        >
           <div
-            className={`grid gap-6 lg:min-h-0 lg:flex-1 lg:gap-0 ${
-              showComments
-                ? "lg:grid-cols-[minmax(0,1fr)_360px]"
-                : "lg:grid-cols-1"
+            className={`min-w-0 lg:min-h-0 lg:overflow-y-auto lg:p-6 ${
+              showComments ? "lg:border-r lg:border-border" : ""
             }`}
           >
-            <div
-              className={`min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5 ${
-                showComments ? "lg:pr-6" : "lg:pr-0"
-              }`}
-            >
-              {isSpaceRecording ? (
-                spaceTracks.length === 0 ? (
-                  <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-xl bg-black text-white/60 ring-1 ring-border">
-                    {isProcessing ? (
-                      <>
-                        <FiLoader className="size-6 animate-spin" />
-                        <span className="text-sm">
-                          This recording is still processing…
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <FiVideo className="size-6" />
-                        <span className="text-sm">
-                          Nothing to play here yet
-                        </span>
-                      </>
-                    )}
-                  </div>
+            {isSpaceRecording ? (
+              <section className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+                {rec.description && (
+                  <p className="text-sm text-fg-muted">{rec.description}</p>
+                )}
+                {spaceTracks.length === 0 ? (
+                  <EmptyPlayer processing={isProcessing} />
                 ) : (
-                  <section className="flex flex-col gap-4">
+                  <>
                     <SharedSpacePlayer
                       token={token}
                       outputId={activeSpaceTrackId}
                       playerRef={playerRef}
                     />
-                    {spaceTracks.length > 0 && (
-                      <>
-                        <h2 className="text-sm font-semibold text-foreground/80">
-                          Tracks
-                        </h2>
-                        <div className="flex flex-col gap-2">
-                          {spaceTracks.map((track) => (
-                            <SharedSpaceTrackRow
-                              key={track.id}
-                              token={token}
-                              track={track}
-                              selected={track.id === activeSpaceTrackId}
-                              onSelect={() => setSelectedSpaceTrackId(track.id)}
-                            />
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </section>
-                )
-              ) : !screenVideoKind ? (
-                <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-xl bg-black text-white/60 ring-1 ring-border">
-                  {isProcessing ? (
-                    <>
-                      <FiLoader className="size-6 animate-spin" />
-                      <span className="text-sm">
-                        This recording is still processing…
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <FiVideo className="size-6" />
-                      <span className="text-sm">Nothing to play here yet</span>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <SharedPlayer
-                  token={token}
-                  kind={screenVideoKind}
-                  playerRef={playerRef}
-                />
-              )}
-            </div>
-
-            {showComments && (
-              <div className="min-h-[320px] lg:h-full lg:min-h-0 lg:border-l lg:border-call-border">
-                <RecordingComments
-                  comments={comments ?? []}
-                  isLoading={areCommentsLoading}
-                  // Signed-out visitors have no account to attribute to, so they
-                  // name themselves; a signed-in one comments as their account.
-                  askForName={!isSignedIn}
-                  onSubmit={({ body, authorName, timestampMs, parentId }) =>
-                    createComment.mutate({
-                      body,
-                      authorName,
-                      timestampMs,
-                      parentId,
-                    })
-                  }
-                  getTimestampMs={() => {
-                    const seconds = playerRef.current?.getTime();
-                    return seconds == null ? null : Math.round(seconds * 1000);
-                  }}
-                  onSeek={(ms) => playerRef.current?.playFrom(ms / 1000)}
-                  // Signed-in visitors can edit or remove their own comments.
-                  onEdit={(commentId, body) =>
-                    editComment.mutate({ commentId, body })
-                  }
-                  canEdit={isOwnComment}
-                  onDelete={(commentId) => deleteComment.mutate(commentId)}
-                  canDelete={isOwnComment}
-                />
-              </div>
+                    <h2 className="mt-2 text-sm font-semibold text-foreground">
+                      Tracks
+                    </h2>
+                    <div className="flex flex-col gap-2">
+                      {spaceTracks.map((track) => (
+                        <SharedSpaceTrackRow
+                          key={track.id}
+                          token={token}
+                          track={track}
+                          selected={track.id === activeSpaceTrackId}
+                          onSelect={() => setSelectedSpaceTrackId(track.id)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+            ) : screenVideoKind ? (
+              <SharedPlayer
+                token={token}
+                kind={screenVideoKind}
+                fileType={screenOutput?.fileType ?? null}
+                playerRef={playerRef}
+              />
+            ) : (
+              <EmptyPlayer processing={isProcessing} />
             )}
           </div>
-        </main>
+
+          {showComments && (
+            <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border/50 bg-primary [&>section]:bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:[&>section]:bg-transparent">
+              <RecordingComments
+                comments={comments ?? []}
+                isLoading={areCommentsLoading}
+                // Signed-out visitors have no account to attribute to, so they
+                // name themselves; a signed-in one comments as their account.
+                askForName={!isSignedIn}
+                onSubmit={({ body, authorName, timestampMs, parentId }) =>
+                  createComment.mutate({
+                    body,
+                    authorName,
+                    timestampMs,
+                    parentId,
+                  })
+                }
+                getTimestampMs={() => {
+                  const seconds = playerRef.current?.getTime();
+                  return seconds == null ? null : Math.round(seconds * 1000);
+                }}
+                onSeek={(ms) => playerRef.current?.playFrom(ms / 1000)}
+                // Signed-in visitors can edit or remove their own comments.
+                onEdit={(commentId, body) =>
+                  editComment.mutate({ commentId, body })
+                }
+                canEdit={isOwnComment}
+                onDelete={(commentId) => deleteComment.mutate(commentId)}
+                canDelete={isOwnComment}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

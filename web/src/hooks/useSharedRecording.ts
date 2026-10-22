@@ -29,6 +29,19 @@ interface SharedRecording {
   ownerName: string | null;
   /** Output kinds that exist. The server never sends storage keys here. */
   kinds: ScreenOutputKind[];
+  /** Per-kind playback facts for a screen recording (no storage keys). */
+  outputs?: Partial<
+    Record<
+      ScreenOutputKind,
+      {
+        fileType: string | null;
+        durationMs: number | null;
+        width: number | null;
+        height: number | null;
+        fps: number | null;
+      }
+    >
+  >;
   /** Ready, playable tracks for a Space recording. */
   tracks: Array<{
     id: string;
