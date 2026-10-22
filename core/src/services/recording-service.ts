@@ -26,7 +26,10 @@ import {
 	invalidateSpaceInfraCache,
 	isSelfHostActive,
 } from "./infra-service.ts";
-import { maybeFinalizeScreenSession } from "./screen-finalization-service.ts";
+import {
+	maybeFinalizeScreenSession,
+	recoverScreenFinalize,
+} from "./screen-finalization-service.ts";
 import {
 	type PrefixTarget,
 	addStoredKey,
@@ -89,9 +92,6 @@ interface CreateSegmentData {
 }
 
 // Helper Functions
-
-const SCREEN_PROCESSING_TIMEOUT_MS =
-	Number(process.env.SCREEN_PROCESSING_TIMEOUT_MS) || 3 * 60 * 60 * 1000;
 
 /** A master/output key plus every download format cached next to it. */
 function addKey(keys: Set<string>, key?: string | null) {
@@ -1566,6 +1566,28 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 		await maybeFinalizeSession(session.id);
 	}
 
+	// Same backstop for screen takes, finalized as one job per session: every
+	// track is in, but the take is still waiting or was claimed by a worker
+	// that's gone.
+	const stuckScreens = await prisma.recordingSession.findMany({
+		where: {
+			source: "SCREEN_RECORDER",
+			status: { in: ["STOPPED", "PROCESSING"] },
+			participantRecordings: { some: {}, every: { isComplete: true } },
+		},
+		select: { id: true },
+		take: 25,
+	});
+
+	for (const session of stuckScreens) {
+		await recoverScreenFinalize(session.id).catch((error) =>
+			console.error(
+				`[Recording] screen finalize recovery failed for ${session.id}:`,
+				error,
+			),
+		);
+	}
+
 	await cleanupFinalizedChunks();
 }
 
@@ -2482,18 +2504,6 @@ export async function markScreenRecordingComplete(
 
 /** List a user's screen recordings, newest first. */
 export async function listScreenRecordings(userId: string) {
-	const staleCutoff = new Date(Date.now() - SCREEN_PROCESSING_TIMEOUT_MS);
-
-	await prisma.recordingSession.updateMany({
-		where: {
-			source: "SCREEN_RECORDER",
-			userId,
-			status: { in: ["STOPPED", "PROCESSING"] },
-			stoppedAt: { lt: staleCutoff },
-		},
-		data: { status: "FAILED" },
-	});
-
 	return await prisma.recordingSession.findMany({
 		where: { source: "SCREEN_RECORDER", userId },
 		select: {

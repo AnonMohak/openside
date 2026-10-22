@@ -24,7 +24,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { prisma } from "../db/index.ts";
 import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
-import { enqueueFinalize, isQueueConfigured } from "../lib/queue.ts";
+import {
+	enqueueFinalize,
+	getFinalizeJobState,
+	isQueueConfigured,
+} from "../lib/queue.ts";
 import {
 	describeSegmentGaps,
 	findSegmentGaps,
@@ -524,7 +528,16 @@ async function sweepChunkFolders(
 	}
 }
 
-export async function finalizeScreenSession(sessionId: string): Promise<void> {
+export async function finalizeScreenSession(
+	sessionId: string,
+	{
+		finalAttempt = true,
+	}: {
+		/** False while the queue still has retries left: a failure then throws
+		 *  (so it's retried) instead of settling the take as FAILED or partial. */
+		finalAttempt?: boolean;
+	} = {},
+): Promise<void> {
 	if (inFlight.has(sessionId)) return;
 	inFlight.add(sessionId);
 	let tmp: string | null = null;
@@ -617,6 +630,9 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 					`[ScreenFinalize] track ${rec.id} failed for ${sessionId}:`,
 					error,
 				);
+				// Retry the whole take before giving up on a track - most failures
+				// here are transient (a storage read, a worker under pressure).
+				if (!finalAttempt) throw error;
 				await prisma.participantRecording
 					.update({
 						where: { id: rec.id },
@@ -689,6 +705,7 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 						`[ScreenFinalize] fast composite also failed for ${sessionId}:`,
 						retryError,
 					);
+					if (!finalAttempt) throw retryError;
 				}
 			}
 		} else {
@@ -807,6 +824,10 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 	} catch (error) {
 		const message = errorMessage(error);
 		console.error(`[ScreenFinalize] Session ${sessionId} failed:`, error);
+		if (!finalAttempt) {
+			// Stays PROCESSING; the queue runs it again.
+			throw error;
+		}
 		await prisma.recordingSession
 			.update({ where: { id: sessionId }, data: { status: "FAILED" } })
 			.catch(() => undefined);
@@ -877,6 +898,39 @@ export async function maybeFinalizeScreenSession(
 
 	console.log(
 		`[ScreenFinalize] maybe ${sessionId}: all tracks complete, triggering finalization`,
+	);
+	await triggerScreenFinalize(sessionId);
+}
+
+/**
+ * Recovery backstop for a take that should be processing but isn't: its job
+ * was lost (enqueue failed, Redis restarted) or its worker died mid-encode
+ * (deploy, OOM, scale-down) and left it PROCESSING. A live job is left alone;
+ * one that exhausted its retries is settled as FAILED instead of re-run
+ * forever.
+ */
+export async function recoverScreenFinalize(sessionId: string): Promise<void> {
+	if (!isQueueConfigured()) {
+		if (inFlight.has(sessionId)) return;
+		void finalizeScreenSession(sessionId);
+		return;
+	}
+
+	const state = await getFinalizeJobState(sessionId).catch(
+		() => "pending" as const,
+	);
+	if (state === "pending" || state === "unconfigured") return;
+
+	if (state === "failed") {
+		await prisma.recordingSession.updateMany({
+			where: { id: sessionId, status: { in: ["STOPPED", "PROCESSING"] } },
+			data: { status: "FAILED" },
+		});
+		return;
+	}
+
+	console.warn(
+		`[ScreenFinalize] ${sessionId} had no live finalize job - re-queuing`,
 	);
 	await triggerScreenFinalize(sessionId);
 }

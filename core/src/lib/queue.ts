@@ -232,6 +232,9 @@ export async function enqueueFinalize(
 				// would never finalize (until the recovery sweep). While a job is active,
 				// re-adds are still ignored, so this keeps concurrent dedup intact.
 				removeOnComplete: true,
+				// A screen take settles as FAILED only after its last attempt, so give
+				// a storage blip room to pass (~2.5 minutes of exponential backoff).
+				attempts: 5,
 			},
 		);
 		await wakeWorker(QUEUE_ROLES[FINALIZE_QUEUE]);
@@ -300,6 +303,27 @@ export async function getFinalizeTrackJobState(
 	try {
 		const job = await getFinalizeQueue().getJob(
 			finalizeTrackJobId(recordingId),
+		);
+		if (!job) return "missing";
+		const state = await job.getState();
+		if (state === "failed") return "failed";
+		if (state === "completed" || state === "unknown") return "missing";
+		return "pending";
+	} finally {
+		endProducerOperation();
+	}
+}
+
+/** Same as getFinalizeTrackJobState, for a whole-session finalize job (the
+ *  screen recorder's). */
+export async function getFinalizeJobState(
+	recordingSessionId: string,
+): Promise<FinalizeTrackJobState> {
+	if (!isQueueConfigured()) return "unconfigured";
+	beginProducerOperation();
+	try {
+		const job = await getFinalizeQueue().getJob(
+			safeJobId("finalize", recordingSessionId),
 		);
 		if (!job) return "missing";
 		const state = await job.getState();

@@ -115,7 +115,11 @@ async function processFinalizeJob(
 		console.log(
 			`[Worker:finalize] routing ${recordingSessionId} to screen finalizer`,
 		);
-		await finalizeScreenSession(recordingSessionId);
+		// Earlier attempts throw so BullMQ retries a transient failure (a storage
+		// hiccup); only the last one salvages what it can and settles.
+		await finalizeScreenSession(recordingSessionId, {
+			finalAttempt: job.attemptsMade + 1 >= (job.opts.attempts ?? 1),
+		});
 		return;
 	}
 
