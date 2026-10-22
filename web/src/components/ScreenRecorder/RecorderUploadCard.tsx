@@ -9,7 +9,7 @@ const RING_RADIUS = 44;
 const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 
 /**
- * Shown after Stop, centered over a dimmed page: the take is still
+ * Shown after Stop, centered over the recorder's faded page: the take is still
  * uploading, and its project opens on its own once that's done (see
  * ScreenRecordingProvider).
  */
@@ -21,9 +21,10 @@ const RecorderUploadCard = ({ isClosing }: RecorderUploadCardProps) => {
   return (
     <div
       className={cn(
-        "fixed inset-0 z-[95] flex items-center justify-center bg-black/40 px-4 backdrop-blur-[2px]",
+        // The recorder's backdrop is already fading the page behind this.
+        "pointer-events-none fixed inset-0 z-[95] flex items-center justify-center px-4",
         isClosing
-          ? "pointer-events-none animate-out fade-out-0 fill-mode-forwards duration-150"
+          ? "animate-out fade-out-0 fill-mode-forwards duration-150"
           : "animate-in fade-in-0 duration-200",
       )}
     >
