@@ -2166,7 +2166,8 @@ export async function getSharedRecording(
 		id: session.id,
 		source: session.source,
 		title: session.title ?? session.space?.title ?? null,
-		description: session.description ?? session.space?.description ?? null,
+		// The recording's own description only - never the project's.
+		description: session.description ?? null,
 		status: session.status,
 		startedAt: session.startedAt,
 		stoppedAt: session.stoppedAt,

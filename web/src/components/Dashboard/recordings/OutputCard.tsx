@@ -117,8 +117,15 @@ const RowThumbnail = ({
   const avatar = participant?.user?.avatar ?? null;
   const name = participant?.displayName || participant?.user?.name || "";
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [posterFailed, setPosterFailed] = useState(false);
+  // A frame of the video itself (the poster made at finalize time) comes
+  // first, like the share page's track rows.
+  const poster =
+    output.hasVideo && output.thumbnailUrl && !posterFailed
+      ? output.thumbnailUrl
+      : null;
   const showPerson =
-    !output.sourceRecording?.isScreenShare && (!!name || !!avatar);
+    !poster && !output.sourceRecording?.isScreenShare && (!!name || !!avatar);
 
   return (
     <span
@@ -128,7 +135,15 @@ const RowThumbnail = ({
           : "rounded-lg bg-muted text-fg-muted"
       }`}
     >
-      {showPerson ? (
+      {poster ? (
+        <img
+          src={poster}
+          alt=""
+          loading="lazy"
+          onError={() => setPosterFailed(true)}
+          className="h-full w-full object-cover"
+        />
+      ) : showPerson ? (
         avatar && !avatarFailed ? (
           <img
             src={avatar}

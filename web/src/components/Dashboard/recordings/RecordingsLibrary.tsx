@@ -739,9 +739,9 @@ const SpaceOutputs = ({
       title: take.title || `Recording ${index + 1}`,
     }));
 
-  // Default to the newest take; fall back if the chosen one was deleted.
+  // Default to the first take; fall back to it if the chosen one was deleted.
   const activeTake =
-    takes.find((take) => take.id === selectedTakeId) ?? takes[takes.length - 1];
+    takes.find((take) => take.id === selectedTakeId) ?? takes[0];
   const groupedRows = groupRowsByParticipant(activeTake.rows);
   const playableIds = groupedRows
     .flat()

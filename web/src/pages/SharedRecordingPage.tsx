@@ -10,7 +10,7 @@ import { useRef, useState, type Ref } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { FiLoader, FiVideo } from "react-icons/fi";
-import { LuDownload, LuPlay } from "react-icons/lu";
+import { LuChevronDown, LuDownload, LuPlay } from "react-icons/lu";
 import PageTitle from "@/components/shared/PageTitle";
 import RecordingDescription from "@/components/Dashboard/recordings/RecordingDescription";
 import { useCommentsRailResizer } from "@/components/shared/CommentsRailResizer";
@@ -382,13 +382,11 @@ const SharedSpaceTrackRow = ({
     <div
       onClick={onSelect}
       aria-pressed={selected}
-      className={`group flex cursor-pointer items-center gap-3 rounded-xl border px-2.5 py-2 transition-colors ${
-        selected
-          ? "border-brand/40 bg-brand/5"
-          : "border-border/50 bg-primary hover:border-border"
+      className={`group flex cursor-pointer items-center gap-3 px-3.5 py-2.5 transition-colors ${
+        selected ? "bg-muted/50" : "hover:bg-muted/30"
       }`}
     >
-      <span className="relative flex aspect-[4/3] h-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted ring-1 ring-border/50">
+      <span className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
         <FiVideo className="size-4 text-foreground/60" />
         {thumbnailUrl && (
           <video
@@ -412,7 +410,7 @@ const SharedSpaceTrackRow = ({
           </span>
         )}
       </span>
-      <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+      <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
         {track.title}
         <span className="mt-0.5 block truncate text-xs font-normal text-fg-subtle">
           {specs.join(" · ")}
@@ -424,14 +422,15 @@ const SharedSpaceTrackRow = ({
             type="button"
             disabled={downloading || !canDownload}
             onClick={(event) => event.stopPropagation()}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            className="group/trigger flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted pl-3 pr-2 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:opacity-80 cursor-pointer"
           >
             {downloading ? (
               <FiLoader className="size-3.5 animate-spin" />
             ) : (
               <LuDownload className="size-3.5" />
             )}
-            {downloading ? "Preparing…" : "Download"}
+            {downloading ? "Preparing" : "Download"}
+            <LuChevronDown className="size-3.5 text-fg-muted transition-transform duration-150 group-data-[state=open]/trigger:rotate-180" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -483,7 +482,16 @@ const SharedRecordingPage = () => {
   >(null);
   const { isSignedIn } = useClerkAuth();
   const playerRef = useRef<VideoPlayerHandle>(null);
-  const railResizer = useCommentsRailResizer();
+  // The rail beside the video: comments for a screen recording, tracks for a
+  // Space recording. Each remembers its own width.
+  const commentsRail = useCommentsRailResizer();
+  const tracksRail = useCommentsRailResizer({
+    storageKey: "openside:tracks-rail-width",
+    label: "Resize tracks",
+    defaultWidth: 560,
+    minWidth: 560,
+    maxWidth: 760,
+  });
   const { data: rec, isLoading, isError } = useSharedRecording(token);
   const { data: comments, isLoading: areCommentsLoading } =
     useSharedComments(token);
@@ -538,7 +546,7 @@ const SharedRecordingPage = () => {
   const recTitle = rec.title || "Untitled recording";
   const isProcessing = rec.status === "STOPPED" || rec.status === "PROCESSING";
   const isSpaceRecording = rec.source === "SPACE";
-  const showComments = !isSpaceRecording;
+  const railResizer = isSpaceRecording ? tracksRail : commentsRail;
   const activeSpaceTrackId =
     selectedSpaceTrackId &&
     spaceTracks.some((track) => track.id === selectedSpaceTrackId)
@@ -587,49 +595,20 @@ const SharedRecordingPage = () => {
 
         <div
           style={railResizer.gridStyle}
-          className={`relative grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:gap-0 lg:p-0 ${
-            showComments
-              ? "lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)]"
-              : "lg:grid-cols-1"
-          }`}
+          className="relative grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)] lg:gap-0 lg:p-0"
         >
-          {showComments && railResizer.handle}
-          <div
-            className={`min-w-0 lg:min-h-0 lg:overflow-y-auto lg:p-6 ${
-              showComments ? "lg:border-r lg:border-border" : ""
-            }`}
-          >
+          {railResizer.handle}
+          <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-border lg:p-6">
             {isSpaceRecording ? (
-              <section className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-                {rec.description && (
-                  <p className="text-sm text-fg-muted">{rec.description}</p>
-                )}
-                {spaceTracks.length === 0 ? (
-                  <EmptyPlayer processing={isProcessing} />
-                ) : (
-                  <>
-                    <SharedSpacePlayer
-                      token={token}
-                      outputId={activeSpaceTrackId}
-                      playerRef={playerRef}
-                    />
-                    <h2 className="mt-2 text-sm font-semibold text-foreground">
-                      Tracks
-                    </h2>
-                    <div className="flex flex-col gap-2">
-                      {spaceTracks.map((track) => (
-                        <SharedSpaceTrackRow
-                          key={track.id}
-                          token={token}
-                          track={track}
-                          selected={track.id === activeSpaceTrackId}
-                          onSelect={() => setSelectedSpaceTrackId(track.id)}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
-              </section>
+              spaceTracks.length === 0 ? (
+                <EmptyPlayer processing={isProcessing} />
+              ) : (
+                <SharedSpacePlayer
+                  token={token}
+                  outputId={activeSpaceTrackId}
+                  playerRef={playerRef}
+                />
+              )
             ) : screenVideoKind ? (
               <SharedPlayer
                 token={token}
@@ -640,12 +619,40 @@ const SharedRecordingPage = () => {
             ) : (
               <EmptyPlayer processing={isProcessing} />
             )}
-            {!isSpaceRecording && (
-              <RecordingDescription value={rec.description} />
-            )}
+            <RecordingDescription value={rec.description} />
           </div>
 
-          {showComments && (
+          {isSpaceRecording && (
+            // Tracks of this recording, full height beside the player.
+            <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:rounded-none lg:border-0 lg:bg-transparent">
+              <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+                <h2 className="text-sm font-semibold text-foreground">
+                  Tracks
+                </h2>
+              </div>
+              {spaceTracks.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-fg-subtle">
+                  {isProcessing
+                    ? "Tracks appear here as they finish."
+                    : "No tracks to show."}
+                </p>
+              ) : (
+                <div className="flex min-w-0 flex-col divide-y divide-border/50 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:[&>*:last-child]:border-b lg:[&>*:last-child]:border-border/50">
+                  {spaceTracks.map((track) => (
+                    <SharedSpaceTrackRow
+                      key={track.id}
+                      token={token}
+                      track={track}
+                      selected={track.id === activeSpaceTrackId}
+                      onSelect={() => setSelectedSpaceTrackId(track.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </aside>
+          )}
+
+          {!isSpaceRecording && (
             <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border/50 bg-primary [&>section]:bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:[&>section]:bg-transparent">
               <RecordingComments
                 comments={comments ?? []}
