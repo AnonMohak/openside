@@ -70,6 +70,27 @@ interface UseScreenRecordingManagerReturn {
   restartRecording: () => Promise<void>;
 }
 
+/** How long Stop waits for the upload queue before handing back the UI. */
+const UPLOAD_DRAIN_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** A few quick retries for the stop-time calls (a blip shouldn't lose them;
+ *  the server's recovery sweep backstops anything that still fails). */
+async function withRetries<T>(
+  call: () => Promise<T>,
+  attempts = 3,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
 function generateSessionId(): string {
   return `scr_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
@@ -404,24 +425,12 @@ export default function useScreenRecordingManager({
 
     try {
       setRecordingState("stopping");
-      await stopLocal();
-
+      const recordedCounts = await stopLocal();
       flushPendingChunks();
-      setRecordingState("uploading");
-      let drained = await uploader.waitUntilDrained();
-      if (!drained) {
-        // Don't fail the whole recording over a slow uplink. Stop the session
-        // NOW so usage metering ends, then keep waiting while the queue drains
-        // in the background. If chunks never make it, the server's recovery
-        // sweep salvages whatever uploaded.
-        console.warn(
-          "[ScreenRecordingManager] upload queue still draining; stopping session early and waiting",
-        );
-        await stopSession();
-        drained = await uploader.waitUntilDrained(10 * 60 * 1000);
-      }
 
-      // Mark each recording complete with its final segment count.
+      // Report how many chunks each track RECORDED, right away. The server
+      // completes a track when the last of them lands, so a slow uplink can't
+      // cut the end off (reporting the uploaded count used to do exactly that).
       await Promise.allSettled(
         (
           Object.entries(recordingIdsRef.current) as [ScreenTrackType, string][]
@@ -430,19 +439,23 @@ export default function useScreenRecordingManager({
           // start: a shared surface resizes mid-capture (tab switch, window
           // resize), and finalization pins the master to this geometry.
           const size = getMaxTrackSize(trackType);
-          return api.post(
-            `/recording/screen/recording/${recordingId}/complete`,
-            {
-              expectedSegments: uploader.getUploadedCount(recordingId),
+          return withRetries(() =>
+            api.post(`/recording/screen/recording/${recordingId}/complete`, {
+              expectedSegments: recordedCounts[trackType] ?? 0,
               ...(size ? { width: size.width, height: size.height } : {}),
-            },
+            }),
           );
         }),
       );
 
+      // Stop metering now; processing starts on its own once every chunk is in.
       await stopSession();
 
+      setRecordingState("uploading");
+      const drained = await uploader.waitUntilDrained(UPLOAD_DRAIN_TIMEOUT_MS);
       if (!drained) {
+        // Still trickling in: the queue (and IndexedDB, if the tab closes)
+        // keeps going, and the server finishes the take when they land.
         toast.error(
           "Some parts of the recording are still uploading - it will finish processing automatically.",
           8000,

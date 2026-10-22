@@ -51,7 +51,8 @@ interface UseScreenLocalRecordingReturn {
   recordingDurationMs: number;
   chunkCounts: Record<ScreenTrackType, number>;
   startRecording: (streams: ScreenStreams) => Promise<void>;
-  stopRecording: () => Promise<void>;
+  /** Stops every recorder; resolves with how many chunks each one emitted. */
+  stopRecording: () => Promise<Record<ScreenTrackType, number>>;
   pauseRecording: () => void;
   resumeRecording: () => void;
   /** Largest frame size seen on a video track over the whole take (see the
@@ -135,13 +136,17 @@ export default function useScreenLocalRecording(
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordingDurationMs, setRecordingDurationMs] = useState(0);
-  const [chunkCounts, setChunkCounts] = useState<Record<ScreenTrackType, number>>({
+  const [chunkCounts, setChunkCounts] = useState<
+    Record<ScreenTrackType, number>
+  >({
     combined: 0,
     camera: 0,
     audio: 0,
   });
 
-  const recordersRef = useRef<Partial<Record<ScreenTrackType, MediaRecorder>>>({});
+  const recordersRef = useRef<Partial<Record<ScreenTrackType, MediaRecorder>>>(
+    {},
+  );
   const audioContextsRef = useRef<AudioContext[]>([]);
   const startTimeRef = useRef<number>(0);
   // Paused time so far, and when the current pause began (null while running).
@@ -157,12 +162,15 @@ export default function useScreenLocalRecording(
     camera: 0,
     audio: 0,
   });
-  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
 
   // Milliseconds of actual capture since start - frozen while paused.
   const recordedMs = useCallback((): number => {
     const now = performance.now();
-    const pausedNow = pausedAtRef.current === null ? 0 : now - pausedAtRef.current;
+    const pausedNow =
+      pausedAtRef.current === null ? 0 : now - pausedAtRef.current;
     return now - startTimeRef.current - pausedTotalRef.current - pausedNow;
   }, []);
 
@@ -173,7 +181,9 @@ export default function useScreenLocalRecording(
   // Finalization has to know the biggest geometry to normalize the master to,
   // so we sample getSettings() instead of trusting the size at start.
   // (Sampled, not event-driven: MediaStreamTrack has no reliable resize event.)
-  const videoTracksRef = useRef<Partial<Record<ScreenTrackType, MediaStreamTrack>>>({});
+  const videoTracksRef = useRef<
+    Partial<Record<ScreenTrackType, MediaStreamTrack>>
+  >({});
   const maxSizeRef = useRef<Partial<Record<ScreenTrackType, TrackSize>>>({});
   const sizeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -218,7 +228,8 @@ export default function useScreenLocalRecording(
       durationIntervalRef.current = null;
     }
     return () => {
-      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      if (durationIntervalRef.current)
+        clearInterval(durationIntervalRef.current);
     };
   }, [isRecording, isPaused, recordedMs]);
 
@@ -375,7 +386,9 @@ export default function useScreenLocalRecording(
         onRecordingStart?.(metadata);
       } catch (error) {
         const err =
-          error instanceof Error ? error : new Error("Failed to start recording");
+          error instanceof Error
+            ? error
+            : new Error("Failed to start recording");
         // Best-effort cleanup of anything that started.
         for (const type of TRACK_TYPES) {
           try {
@@ -401,7 +414,9 @@ export default function useScreenLocalRecording(
     ],
   );
 
-  const stopRecording = useCallback(async (): Promise<void> => {
+  const stopRecording = useCallback(async (): Promise<
+    Record<ScreenTrackType, number>
+  > => {
     return new Promise((resolve) => {
       const recorders = recordersRef.current;
       const active = TRACK_TYPES.filter(
@@ -409,7 +424,7 @@ export default function useScreenLocalRecording(
       );
 
       if (!isRecording || active.length === 0) {
-        resolve();
+        resolve({ ...sequenceRef.current });
         return;
       }
 
@@ -434,7 +449,7 @@ export default function useScreenLocalRecording(
         audioContextsRef.current = [];
         videoTracksRef.current = {};
         onRecordingStop?.({ ...sequenceRef.current });
-        resolve();
+        resolve({ ...sequenceRef.current });
       };
 
       for (const type of active) {

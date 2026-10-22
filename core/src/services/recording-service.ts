@@ -2417,12 +2417,6 @@ export async function markScreenRecordingComplete(
 	const recording = await prisma.participantRecording.findUnique({
 		where: { id: recordingId },
 		select: {
-			id: true,
-			uploadedSegments: true,
-			status: true,
-			width: true,
-			height: true,
-			segments: { select: { sequenceNumber: true } },
 			recordingSession: { select: { source: true, userId: true } },
 		},
 	});
@@ -2435,44 +2429,10 @@ export async function markScreenRecordingComplete(
 		throw new Error("RECORDING_NOT_FOUND");
 	}
 
-	if (recording.status === "READY") {
-		throw new Error("RECORDING_ALREADY_COMPLETE");
-	}
-
-	const normalizedExpectedSegments = Math.max(0, Math.round(expectedSegments));
-	const actualUploadedSegments = recording.segments.length;
-	const isComplete =
-		actualUploadedSegments >= normalizedExpectedSegments &&
-		hasContiguousSegments(recording.segments, normalizedExpectedSegments);
-
-	// Keep the larger of (start snapshot, observed max) - never shrink, so the
-	// finalizer downscales a grown surface instead of cropping it.
-	const observedWidth = observedSize?.width ?? null;
-	const observedHeight = observedSize?.height ?? null;
-	const grew =
-		observedWidth !== null &&
-		observedHeight !== null &&
-		observedWidth > 0 &&
-		observedHeight > 0 &&
-		observedWidth * observedHeight >
-			(recording.width ?? 0) * (recording.height ?? 0);
-
-	const updatedRecording = await prisma.participantRecording.update({
-		where: { id: recordingId },
-		data: {
-			expectedSegments: normalizedExpectedSegments,
-			uploadedSegments: actualUploadedSegments,
-			isComplete,
-			status: isComplete ? "UPLOADED" : "UPLOADING",
-			...(grew ? { width: observedWidth, height: observedHeight } : {}),
-		},
-	});
-
-	if (isComplete) {
-		void maybeFinalizeScreenSession(updatedRecording.recordingSessionId);
-	}
-
-	return updatedRecording;
+	// Same rules as a meeting track: the client reports how many chunks it
+	// RECORDED, and the track completes when the last of them lands - never at
+	// whatever had uploaded by the time it called.
+	return markRecordingComplete(recordingId, expectedSegments, observedSize);
 }
 
 /** List a user's screen recordings, newest first. */

@@ -1561,14 +1561,6 @@ export async function markScreenRecordingCompleteController(
 				});
 				return;
 			}
-			if (error.message === "RECORDING_ALREADY_COMPLETE") {
-				res.status(400).json({
-					success: false,
-					data: null,
-					message: "Recording is already complete!",
-				});
-				return;
-			}
 		}
 		const errorMessage =
 			error instanceof Error ? error.message : "Unknown error";
