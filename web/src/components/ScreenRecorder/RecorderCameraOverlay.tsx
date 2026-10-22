@@ -54,70 +54,79 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
       style={style}
       {...handleProps}
       className={cn(
-        "group/camera fixed z-[90] touch-none select-none",
+        "group/camera fixed z-[88] touch-none select-none",
         isClosing && "pointer-events-none",
         isDragging ? "cursor-grabbing" : "cursor-grab",
       )}
     >
       <div
         className={cn(
-          "flex flex-col items-center gap-2",
+          "flex flex-col items-center",
           isClosing
             ? "animate-out fade-out-0 zoom-out-95 fill-mode-forwards duration-150 ease-in"
             : "animate-in fade-in-0 zoom-in-95 duration-200 ease-out",
         )}
       >
-        {/* Shape + size, above the camera on hover. They're part of the
-          take's layout, so they're gone while recording. */}
-        {showsCamera && !isActive && (
-          <div className="flex items-center gap-0.5 rounded-full border border-call-border bg-call-background p-1 opacity-0 shadow-lg transition-opacity duration-150 group-hover/camera:opacity-100 has-[:focus-visible]:opacity-100">
-            {SHAPE_OPTIONS.map((option) => (
-              <CameraToolButton
-                key={option.value}
-                label={option.label}
-                active={cameraShape === option.value}
-                onClick={() => setCameraShape(option.value)}
-              >
-                {option.icon}
-              </CameraToolButton>
-            ))}
-            <span className="mx-0.5 h-4 w-px bg-call-border" />
-            <CameraToolButton
-              label={isBig ? "Make smaller" : "Make bigger"}
-              onClick={() => setCameraSize(isBig ? "normal" : "big")}
-            >
-              {isBig ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            </CameraToolButton>
-          </div>
-        )}
         {showsCamera && (
-          <div
-            className={cn(
-              "relative overflow-hidden border border-call-border bg-neutral-900 shadow-2xl transition-[width,border-radius] duration-200",
-              cameraShape === "circle" ? "rounded-full" : "rounded-3xl",
-              "aspect-square",
-              isBig ? "w-72" : "w-52",
-            )}
-          >
-            {cameraStream ? (
-              <PreviewVideo stream={cameraStream} />
-            ) : isCameraLoading ? (
-              <CameraLoader />
-            ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-white/70">
-                <VideoOff size={20} />
-                <p className="text-xs">Camera is off</p>
-                {!isActive && (
-                  <button
-                    type="button"
-                    onClick={() => void toggleCamera().catch(() => undefined)}
-                    className="cursor-pointer rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
-                  >
-                    Turn on camera
-                  </button>
+          // Shape + size sit inside the top of the camera on hover. They're
+          // part of the take's layout, so they're gone while recording. A
+          // sibling of the clipped box, so the circle's edge can't cut them.
+          <div className="relative">
+            {!isActive && (
+              <div
+                className={cn(
+                  "absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-call-border/50 bg-call-background/90 p-1 opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-150 group-hover/camera:opacity-100 has-[:focus-visible]:opacity-100",
+                  // Lower on a circle, where the top edge is too narrow to hold it.
+                  cameraShape === "circle" ? "top-5" : "top-3",
                 )}
+              >
+                {SHAPE_OPTIONS.map((option) => (
+                  <CameraToolButton
+                    key={option.value}
+                    label={option.label}
+                    active={cameraShape === option.value}
+                    onClick={() => setCameraShape(option.value)}
+                  >
+                    {option.icon}
+                  </CameraToolButton>
+                ))}
+                <span className="mx-0.5 h-4 w-px bg-call-border" />
+                <CameraToolButton
+                  label={isBig ? "Make smaller" : "Make bigger"}
+                  onClick={() => setCameraSize(isBig ? "normal" : "big")}
+                >
+                  {isBig ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </CameraToolButton>
               </div>
             )}
+            <div
+              className={cn(
+                "relative overflow-hidden border border-call-border bg-neutral-900 shadow-2xl transition-[width,border-radius] duration-200",
+                cameraShape === "circle" ? "rounded-full" : "rounded-3xl",
+                "aspect-square",
+                isBig ? "w-72" : "w-52",
+              )}
+            >
+              {cameraStream ? (
+                <PreviewVideo stream={cameraStream} />
+              ) : isCameraLoading ? (
+                <CameraLoader />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-white/70">
+                  <VideoOff size={20} />
+                  <p className="text-xs">Camera is off</p>
+                  {!isActive && (
+                    <button
+                      type="button"
+                      onClick={() => void toggleCamera().catch(() => undefined)}
+                      className="cursor-pointer rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
+                    >
+                      Turn on camera
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

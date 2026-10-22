@@ -75,7 +75,7 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
     // scale never fights the vertical centering transform.
     <div
       className={cn(
-        "fixed left-4 top-1/2 z-[90] -translate-y-1/2 select-none",
+        "fixed left-4 top-1/2 z-[95] -translate-y-1/2 select-none",
         isClosing && "pointer-events-none",
       )}
     >

@@ -152,7 +152,7 @@ const RecorderSettingsOverlay = ({
   return (
     <div
       className={cn(
-        "fixed bottom-6 left-1/2 z-[90] w-max max-w-[calc(100vw-32px)] -translate-x-1/2",
+        "fixed bottom-6 left-1/2 z-[95] w-max max-w-[calc(100vw-32px)] -translate-x-1/2",
         isClosing && "pointer-events-none",
       )}
     >
@@ -286,7 +286,7 @@ const SplitMediaControl = ({
             {isOpen ? <FiChevronUp /> : <FiChevronDown />}
           </button>
         </DropdownMenuTrigger>
-        {/* z-[100]: above the recorder overlays (z-[90]). */}
+        {/* z-[100]: above the recorder overlays (z-[95]). */}
         <DropdownMenuContent
           align="start"
           alignOffset={-46}
@@ -388,7 +388,7 @@ const SourceMenu = ({
           <ChevronsUpDown size={14} className="shrink-0 text-foreground/40" />
         </button>
       </DropdownMenuTrigger>
-      {/* z-[100]: above the recorder overlays (z-[90]). */}
+      {/* z-[100]: above the recorder overlays (z-[95]). */}
       <DropdownMenuContent
         align="start"
         collisionPadding={8}
