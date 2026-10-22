@@ -606,8 +606,8 @@ const RecordingComments = ({
           </div>
         ) : comments.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 py-8 text-center">
-            <span className="flex size-11 items-center justify-center rounded-full bg-muted text-fg-muted">
-              <FiMessageSquare className="size-5" />
+            <span className="flex items-center justify-center text-fg-subtle">
+              <FiMessageSquare className="size-6" />
             </span>
             <div className="space-y-0.5">
               <p className="text-sm font-medium text-foreground">
