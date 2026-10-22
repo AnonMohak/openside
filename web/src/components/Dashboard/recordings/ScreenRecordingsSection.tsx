@@ -206,11 +206,6 @@ const ScreenRecordingsSection = ({
         <h2 className="text-sm font-semibold text-foreground">
           Screen recordings
         </h2>
-        {!isLoading && (
-          <span className="rounded-full bg-muted px-2.5 py-0.5 text-[0.7rem] font-medium text-fg-muted ring-1 ring-border">
-            {recordings.length}
-          </span>
-        )}
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
         {isLoading

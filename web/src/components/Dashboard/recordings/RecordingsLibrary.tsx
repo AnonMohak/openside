@@ -870,7 +870,6 @@ const SkeletonSection = ({ title }: { title: string }) => (
   <section className="flex flex-col gap-4">
     <div className="flex items-center gap-2">
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-      <div className="skeleton-shimmer h-5 w-7 rounded-full" />
     </div>
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
       {Array.from({ length: 4 }).map((_, index) => (
@@ -1483,9 +1482,6 @@ const RecordingsLibrary = () => {
             <h2 className="text-sm font-semibold text-foreground">
               Space Recordings
             </h2>
-            <span className="rounded-full bg-muted px-2.5 py-0.5 text-[0.7rem] font-medium text-fg-muted ring-1 ring-border">
-              {spacesWithRecordings.length}
-            </span>
           </div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             {visibleSpaces.map((space) => (
