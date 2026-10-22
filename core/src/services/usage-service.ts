@@ -330,6 +330,15 @@ export async function heartbeatSession(
 
 	if (!session) return null;
 
+	// Liveness for the abandoned-session sweep: a paused take sends no chunks
+	// but keeps heartbeating.
+	if (session.status === "ACTIVE") {
+		await prisma.recordingSession.update({
+			where: { id: sessionId },
+			data: { lastHeartbeatAt: new Date() },
+		});
+	}
+
 	const usage = await meterSession(session as MeterableSession);
 	if (usage?.exhausted && session.status === "ACTIVE") {
 		await stopExhaustedSession(session as MeterableSession);

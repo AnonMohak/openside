@@ -1429,6 +1429,13 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 			participantRecordings: {
 				none: { lastChunkAt: { gt: cutoff } },
 			},
+			// A paused screen take uploads nothing for as long as it's paused,
+			// but its tab still heartbeats - only a silent one is abandoned.
+			OR: [
+				{ source: "SPACE" },
+				{ lastHeartbeatAt: null },
+				{ lastHeartbeatAt: { lte: cutoff } },
+			],
 		},
 		select: { id: true, spaceId: true, space: { select: { joinCode: true } } },
 	});
