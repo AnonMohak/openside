@@ -233,6 +233,8 @@ const ScreenVideoCard = ({
 }) => {
   const [downloading, setDownloading] = useState(false);
   const { data: url } = useScreenOutputUrl(rec.id, kind);
+  // The container, read off the stored key (e.g. ".../both.mp4" -> "mp4").
+  const fileType = /\.(\w+)$/.exec(rec.outputs?.[kind]?.key ?? "")?.[1];
 
   const handleDownload = async () => {
     if (downloading) return;
@@ -259,21 +261,24 @@ const ScreenVideoCard = ({
         )}
       </div>
       <div className="flex items-center justify-end pt-3">
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            disabled={downloading}
-            onClick={() => void handleDownload()}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-          >
-            {downloading ? (
-              <FiLoader className="size-3.5 animate-spin" />
-            ) : (
-              <LuDownload className="size-3.5" />
-            )}
-            {downloading ? "Preparing" : "Download"}
-          </button>
-        </div>
+        <button
+          type="button"
+          disabled={downloading}
+          onClick={() => void handleDownload()}
+          className="flex h-9 items-center gap-2 rounded-lg bg-brand pl-3 pr-1.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer"
+        >
+          {downloading ? (
+            <FiLoader className="size-4 animate-spin" />
+          ) : (
+            <LuDownload className="size-4" />
+          )}
+          {downloading ? "Preparing…" : "Download"}
+          {fileType && (
+            <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide">
+              {fileType}
+            </span>
+          )}
+        </button>
       </div>
     </div>
   );
@@ -343,7 +348,7 @@ const ScreenProjectDetailSkeleton = () => (
         <div className="flex w-full flex-col">
           <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
           <div className="flex items-center justify-end pt-3">
-            <div className="h-8 w-24 animate-pulse rounded-lg bg-muted" />
+            <div className="h-9 w-32 animate-pulse rounded-lg bg-muted" />
           </div>
         </div>
       </section>
@@ -532,12 +537,10 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
             aria-label="Recording actions"
             className="flex shrink-0 items-center gap-2"
           >
-            {rec.shareToken && (
-              <span className="flex h-9 items-center gap-1.5 px-1 text-sm text-fg-muted">
-                <FiEye className="size-3.5" />
-                {rec.viewCount ?? 0} {rec.viewCount === 1 ? "view" : "views"}
-              </span>
-            )}
+            <span className="mr-2 flex h-9 items-center gap-1.5 px-1 text-sm text-fg-muted">
+              <FiEye className="size-3.5" />
+              {rec.viewCount ?? 0} {rec.viewCount === 1 ? "view" : "views"}
+            </span>
             {screenVideoKind && (
               <button
                 type="button"
