@@ -30,18 +30,20 @@ import {
 	listScreenRecordingsController,
 	listSharedCommentsController,
 	markScreenRecordingCompleteController,
+	pauseScreenSessionController,
 	presignScreenSegmentController,
 	renameScreenSessionController,
+	resumeScreenSessionController,
 	shareScreenSessionController,
 	startScreenSessionController,
 	stopScreenSessionController,
 	unshareScreenSessionController,
 } from "../controllers/screen-recording-controller";
+import { sensitiveLimiter } from "../lib/rate-limit";
 import {
 	authMiddleware,
 	optionalAuthMiddleware,
 } from "../middlewares/auth-middleware";
-import { sensitiveLimiter } from "../lib/rate-limit";
 
 const router = express.Router();
 
@@ -55,6 +57,16 @@ router.post(
 	"/screen/session/:sessionId/stop",
 	authMiddleware,
 	stopScreenSessionController,
+);
+router.post(
+	"/screen/session/:sessionId/pause",
+	authMiddleware,
+	pauseScreenSessionController,
+);
+router.post(
+	"/screen/session/:sessionId/resume",
+	authMiddleware,
+	resumeScreenSessionController,
 );
 router.patch(
 	"/screen/:sessionId",

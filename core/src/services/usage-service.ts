@@ -155,6 +155,7 @@ type MeterableSession = {
 	status: string;
 	startedAt: Date;
 	lastMeteredAt: Date | null;
+	pausedAt: Date | null;
 	selfHosted: boolean | null;
 };
 
@@ -166,6 +167,7 @@ const METER_SESSION_SELECT = {
 	status: true,
 	startedAt: true,
 	lastMeteredAt: true,
+	pausedAt: true,
 	selfHosted: true,
 } as const;
 
@@ -205,7 +207,14 @@ async function meterSession(
 
 	const period = await getOrCreateCurrentPeriod(ownerUserId, entitlements);
 
-	if (deltaSeconds <= 0 || session.status !== "ACTIVE" || !creditable) {
+	// Paused: nothing is being recorded, so nothing is credited (resume moves
+	// lastMeteredAt past the pause).
+	if (
+		deltaSeconds <= 0 ||
+		session.status !== "ACTIVE" ||
+		!creditable ||
+		session.pausedAt
+	) {
 		return toSnapshot(entitlements, period.secondsUsed);
 	}
 
@@ -247,6 +256,84 @@ export async function meterSessionById(
 
 	if (!session) return null;
 	return meterSession(session as MeterableSession);
+}
+
+/**
+ * Pause a screen take's meter: credit everything up to now, then stop the
+ * clock until resume.
+ */
+export async function pauseSessionMetering(sessionId: string): Promise<void> {
+	await meterSessionById(sessionId);
+	await prisma.recordingSession.updateMany({
+		where: { id: sessionId, status: "ACTIVE", pausedAt: null },
+		data: { pausedAt: new Date() },
+	});
+}
+
+/**
+ * Restart a paused take's meter. lastMeteredAt moves forward by the length of
+ * the pause, so the paused stretch is never credited while the sub-second
+ * remainder from before it still is.
+ */
+export async function resumeSessionMetering(sessionId: string): Promise<void> {
+	const session = await prisma.recordingSession.findUnique({
+		where: { id: sessionId },
+		select: { pausedAt: true, lastMeteredAt: true, startedAt: true },
+	});
+	if (!session?.pausedAt) return;
+	const pausedMs = Math.max(0, Date.now() - session.pausedAt.getTime());
+	const meteredTo = session.lastMeteredAt ?? session.startedAt;
+	await prisma.recordingSession.updateMany({
+		where: { id: sessionId, pausedAt: session.pausedAt },
+		data: {
+			pausedAt: null,
+			lastMeteredAt: new Date(meteredTo.getTime() + pausedMs),
+		},
+	});
+}
+
+/** Recorded footage beyond this much over the metered time is billed. */
+const RECONCILE_SLACK_SECONDS = 30;
+
+/**
+ * Bill a finished screen take for footage the meter didn't count. Pausing
+ * stops the meter on the client's word, so the final video's real length is
+ * the check: a take can't record more than it was charged for. Idempotent - a
+ * re-finalize only bills what's still missing.
+ */
+export async function reconcileRecordedSeconds(
+	sessionId: string,
+	recordedSeconds: number,
+): Promise<void> {
+	const session = await prisma.recordingSession.findUnique({
+		where: { id: sessionId },
+		select: { userId: true, selfHosted: true, meteredSeconds: true },
+	});
+	if (!session?.userId) return;
+
+	const entitlements = await getEntitlements(
+		session.userId,
+		session.selfHosted,
+	);
+	if (!entitlements.metered) return;
+
+	const missing = Math.floor(recordedSeconds) - session.meteredSeconds;
+	if (missing <= RECONCILE_SLACK_SECONDS) return;
+
+	const claimed = await prisma.recordingSession.updateMany({
+		where: { id: sessionId, meteredSeconds: session.meteredSeconds },
+		data: { meteredSeconds: { increment: missing } },
+	});
+	if (claimed.count === 0) return;
+
+	const period = await getOrCreateCurrentPeriod(session.userId, entitlements);
+	await prisma.usagePeriod.update({
+		where: { id: period.id },
+		data: { secondsUsed: { increment: missing } },
+	});
+	console.warn(
+		`[Usage] ${sessionId}: billed ${missing}s of recorded footage the meter missed`,
+	);
 }
 
 /**

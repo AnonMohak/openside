@@ -47,6 +47,7 @@ import {
 	resolvePrefixTarget,
 	trackChunkPrefix,
 } from "./storage-service.ts";
+import { reconcileRecordedSeconds } from "./usage-service.ts";
 
 /** Bottom-right "openside.pro" badge burned into DEMO masters only. Points
  *  drawtext at a bundled font so it renders on the deploy image (no system
@@ -764,6 +765,19 @@ export async function finalizeScreenSession(sessionId: string): Promise<void> {
 			where: { id: sessionId },
 			data: { status: "READY", outputs: outputs as never },
 		});
+
+		// Bill what was actually recorded if the meter came up short (pause is
+		// the client's word; the video's length is the proof).
+		const recordedMs = Math.max(
+			...Object.values(outputs).map((output) => output.durationMs || 0),
+		);
+		await reconcileRecordedSeconds(sessionId, recordedMs / 1000).catch(
+			(error) =>
+				console.error(
+					`[ScreenFinalize] usage reconcile failed for ${sessionId}:`,
+					error,
+				),
+		);
 		console.log(
 			`[ScreenFinalize] Session ${sessionId} ready.`,
 			Object.keys(outputs),

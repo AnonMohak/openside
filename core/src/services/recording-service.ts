@@ -36,7 +36,12 @@ import {
 	sessionStoragePrefix,
 	trackChunkPrefix,
 } from "./storage-service.ts";
-import { assertCanRecord, meterSessionById } from "./usage-service.ts";
+import {
+	assertCanRecord,
+	meterSessionById,
+	pauseSessionMetering,
+	resumeSessionMetering,
+} from "./usage-service.ts";
 
 interface StartSessionData {
 	spaceId: string;
@@ -2349,7 +2354,7 @@ export async function stopScreenRecordingSession(
 
 	return await prisma.recordingSession.update({
 		where: { id: sessionId },
-		data: { status: "STOPPED", stoppedAt: new Date() },
+		data: { status: "STOPPED", stoppedAt: new Date(), pausedAt: null },
 		include: {
 			participantRecordings: {
 				select: {
@@ -2361,6 +2366,39 @@ export async function stopScreenRecordingSession(
 			},
 		},
 	});
+}
+
+/**
+ * Pause or resume a live screen take's meter (the recorder itself pauses on
+ * the client). Ownership is the session's userId.
+ */
+export async function setScreenSessionPaused(
+	sessionId: string,
+	userId: string,
+	paused: boolean,
+): Promise<void> {
+	const session = await prisma.recordingSession.findUnique({
+		where: { id: sessionId },
+		select: { status: true, source: true, userId: true },
+	});
+
+	if (
+		!session ||
+		session.source !== "SCREEN_RECORDER" ||
+		session.userId !== userId
+	) {
+		throw new Error("SESSION_NOT_FOUND");
+	}
+
+	if (session.status !== "ACTIVE") {
+		throw new Error("SESSION_NOT_ACTIVE");
+	}
+
+	if (paused) {
+		await pauseSessionMetering(sessionId);
+	} else {
+		await resumeSessionMetering(sessionId);
+	}
 }
 
 interface CreateScreenRecordingData {

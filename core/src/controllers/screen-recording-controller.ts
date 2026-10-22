@@ -27,6 +27,7 @@ import {
 	listScreenRecordings,
 	markScreenRecordingComplete,
 	renameScreenRecordingSession,
+	setScreenSessionPaused,
 	startScreenRecordingSession,
 	stopScreenRecordingSession,
 } from "../services/recording-service";
@@ -201,6 +202,71 @@ export async function stopScreenSessionController(
 		});
 	}
 }
+
+/** POST /screen/session/:sessionId/pause and /resume - see setScreenSessionPaused. */
+function screenSessionPauseController(paused: boolean) {
+	return async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+		try {
+			if (!req.user) {
+				res.status(401).json({
+					success: false,
+					data: null,
+					message: "Authentication required!",
+				});
+				return;
+			}
+
+			const sessionId = req.params.sessionId as string | undefined;
+			if (!sessionId) {
+				res.status(400).json({
+					success: false,
+					data: null,
+					message: "Session ID is required!",
+				});
+				return;
+			}
+
+			const user = await findOrCreateUser(req.user);
+			await setScreenSessionPaused(sessionId, user.id, paused);
+
+			res.status(200).json({
+				success: true,
+				data: null,
+				message: paused ? "Recording paused!" : "Recording resumed!",
+			});
+		} catch (error: unknown) {
+			if (error instanceof Error) {
+				if (error.message === "SESSION_NOT_FOUND") {
+					res.status(404).json({
+						success: false,
+						data: null,
+						message: "Recording session not found!",
+					});
+					return;
+				}
+				if (error.message === "SESSION_NOT_ACTIVE") {
+					res.status(400).json({
+						success: false,
+						data: null,
+						message: "Recording session is not active!",
+					});
+					return;
+				}
+			}
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			res.status(500).json({
+				success: false,
+				data: null,
+				message: `Failed to ${paused ? "pause" : "resume"} recording: ${errorMessage}!`,
+			});
+		}
+	};
+}
+
+export const pauseScreenSessionController = screenSessionPauseController(true);
+export const resumeScreenSessionController =
+	screenSessionPauseController(false);
 
 export async function renameScreenSessionController(
 	req: AuthenticatedRequest,

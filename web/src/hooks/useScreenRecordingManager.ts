@@ -504,17 +504,31 @@ export default function useScreenRecordingManager({
     void startRecording();
   }, [recordingState, startRecording, stopRecording]);
 
+  // Paused time isn't metered: tell the server so its clock stops too.
+  const notifyPaused = useCallback((paused: boolean) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    void withRetries(() =>
+      api.post(
+        `/recording/screen/session/${sessionId}/${paused ? "pause" : "resume"}`,
+        {},
+      ),
+    ).catch(() => undefined);
+  }, []);
+
   const pauseRecording = useCallback(() => {
     if (recordingState !== "recording") return;
     pauseLocal();
     setRecordingState("paused");
-  }, [recordingState, pauseLocal]);
+    notifyPaused(true);
+  }, [recordingState, pauseLocal, notifyPaused]);
 
   const resumeRecording = useCallback(() => {
     if (recordingState !== "paused") return;
     resumeLocal();
     setRecordingState("recording");
-  }, [recordingState, resumeLocal]);
+    notifyPaused(false);
+  }, [recordingState, resumeLocal, notifyPaused]);
 
   // Throw the current take away: stop capture without uploading the tail,
   // drop whatever is still queued, then delete the session (rows + storage).
