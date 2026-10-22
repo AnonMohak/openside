@@ -3,7 +3,13 @@ import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
 
-export type ScreenOutputKind = "screen" | "screenAligned" | "camera" | "both";
+/** "preview" is a quick stream copy shown while the real video renders. */
+export type ScreenOutputKind =
+  | "screen"
+  | "screenAligned"
+  | "camera"
+  | "both"
+  | "preview";
 
 export interface ScreenRecording {
   id: string;
@@ -134,14 +140,19 @@ export const useShareScreenRecording = () => {
 
   return useMutation({
     mutationFn: async (sessionId: string) => {
-      const { data } = await api.post(`/recording/screen/${sessionId}/share`, {});
+      const { data } = await api.post(
+        `/recording/screen/${sessionId}/share`,
+        {},
+      );
       return data.data as { shareToken: string };
     },
     onSuccess: ({ shareToken }, sessionId) => {
-      queryClient.setQueryData<ScreenRecording[]>(["screen-recordings"], (recs) =>
-        recs?.map((rec) =>
-          rec.id === sessionId ? { ...rec, shareToken } : rec,
-        ),
+      queryClient.setQueryData<ScreenRecording[]>(
+        ["screen-recordings"],
+        (recs) =>
+          recs?.map((rec) =>
+            rec.id === sessionId ? { ...rec, shareToken } : rec,
+          ),
       );
     },
   });
@@ -156,10 +167,12 @@ export const useUnshareScreenRecording = () => {
       await api.delete(`/recording/screen/${sessionId}/share`);
     },
     onSuccess: (_data, sessionId) => {
-      queryClient.setQueryData<ScreenRecording[]>(["screen-recordings"], (recs) =>
-        recs?.map((rec) =>
-          rec.id === sessionId ? { ...rec, shareToken: null } : rec,
-        ),
+      queryClient.setQueryData<ScreenRecording[]>(
+        ["screen-recordings"],
+        (recs) =>
+          recs?.map((rec) =>
+            rec.id === sessionId ? { ...rec, shareToken: null } : rec,
+          ),
       );
     },
   });

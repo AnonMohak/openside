@@ -19,7 +19,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import {
+	appendFile,
+	copyFile,
+	mkdtemp,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { prisma } from "../db/index.ts";
@@ -43,7 +50,11 @@ import {
 import { evenDim, probeMedia } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
-import { getObjectBuffer, putFileObject } from "./storage-service.ts";
+import {
+	deleteObjects,
+	getObjectBuffer,
+	putFileObject,
+} from "./storage-service.ts";
 import { reconcileRecordedSeconds } from "./usage-service.ts";
 
 /** Bottom-right "openside.pro" badge burned into DEMO masters only. Points
@@ -267,39 +278,35 @@ async function downloadParts(
 	return { parts, missing };
 }
 
-/**
- * Build one track's master on local disk: its chunks → recorder parts → one
- * CFR H.264/AAC timeline (the meeting pipeline's composer: gaps filled, audio
- * drift-corrected, every frame pinned to one size). Not uploaded - the caller
- * decides whether it's an output or just a composite input.
- */
-async function buildMaster(
-	rec: {
-		id: string;
-		hasVideo: boolean;
-		isScreenShare: boolean;
-		width: number | null;
-		height: number | null;
-		fps: number | null;
-		expectedSegments: number | null;
-		segments: {
-			sequenceNumber: number;
-			assetKey: string;
-			startMs: number;
-			durationMs: number;
-		}[];
-	},
+type TrackRec = {
+	id: string;
+	hasVideo: boolean;
+	isScreenShare: boolean;
+	width: number | null;
+	height: number | null;
+	fps: number | null;
+	expectedSegments: number | null;
+	segments: {
+		sequenceNumber: number;
+		assetKey: string;
+		startMs: number;
+		durationMs: number;
+	}[];
+};
+
+/** A track's chunks on local disk, split into recorder parts. */
+interface FetchedTrack {
+	ordered: TrackRec["segments"];
+	parts: TimelinePart[];
+	/** Salvage notes (gaps, missing objects) so far. */
+	notes: string[];
+}
+
+/** Download a track's chunks into recorder parts (null: it has none). */
+async function fetchTrack(
+	rec: TrackRec,
 	tmpDir: string,
-	opts: {
-		watermark: boolean;
-		/** Flip horizontally (the camera's mirror view). */
-		mirror: boolean;
-		maxShortSide: number;
-		maxFps: number;
-		/** Composited in the same encode - the screen take's camera PiP. */
-		overlay?: VideoOverlay;
-	},
-): Promise<MasterInfo | null> {
+): Promise<FetchedTrack | null> {
 	let segments = rec.segments;
 	if (segments.length === 0) {
 		// The client can mark a recording "complete" with 0 segments if its very
@@ -333,7 +340,6 @@ async function buildMaster(
 		data: { status: "PROCESSING", processingError: null },
 	});
 
-	const role = roleOf(rec);
 	const ordered = [...segments].sort(
 		(a, b) => a.sequenceNumber - b.sequenceNumber,
 	);
@@ -355,6 +361,32 @@ async function buildMaster(
 	if (missing > 0) {
 		notes.push(`${missing} chunk object(s) were missing from storage`);
 	}
+	return { ordered, parts, notes };
+}
+
+/**
+ * Build one track's master on local disk from its fetched parts: one CFR
+ * H.264/AAC timeline (the meeting pipeline's composer: gaps filled, audio
+ * drift-corrected, every frame pinned to one size). Not uploaded - the caller
+ * decides whether it's an output or just a composite input.
+ */
+async function buildMaster(
+	rec: TrackRec,
+	fetched: FetchedTrack,
+	tmpDir: string,
+	opts: {
+		watermark: boolean;
+		/** Flip horizontally (the camera's mirror view). */
+		mirror: boolean;
+		maxShortSide: number;
+		maxFps: number;
+		/** Composited in the same encode - the screen take's camera PiP. */
+		overlay?: VideoOverlay;
+	},
+): Promise<MasterInfo> {
+	const role = roleOf(rec);
+	const { ordered, parts } = fetched;
+	const notes = [...fetched.notes];
 
 	const fps = Math.min(
 		rec.fps && rec.fps >= 10 ? Math.round(rec.fps) : DEFAULT_FPS,
@@ -545,6 +577,82 @@ function roundedAlphaExpr(r: number): string {
 	return `if(gt(${tl}+${tr}+${bl}+${br},0),0,255)`;
 }
 
+/** The session already has a real (non-preview) video. */
+function hasFinalOutput(outputs: unknown): boolean {
+	if (!outputs || typeof outputs !== "object") return false;
+	return Object.keys(outputs).some((kind) => kind !== "preview");
+}
+
+/**
+ * A watchable copy of the capture, up within seconds of the last chunk:
+ * the recorder's own H.264/AAC (or VP8/Opus) stream copied into a seekable
+ * file - no encoding, no camera PiP. It plays while the real video renders,
+ * then is replaced. Best effort: any failure just means no preview.
+ */
+async function publishPreview(
+	fetched: FetchedTrack,
+	userId: string,
+	sessionId: string,
+	tmpDir: string,
+): Promise<string | null> {
+	try {
+		if (fetched.parts.length === 0) return null;
+		// Parts are joined as-is; a part that's encoded differently (a codec
+		// fallback) makes the copy fail, and the take just has no preview.
+		const listPath = path.join(tmpDir, "preview-list.txt");
+		await writeFile(
+			listPath,
+			`${fetched.parts
+				.map((part) => `file '${part.rawPath.replace(/'/g, "'\\''")}'`)
+				.join("\n")}\n`,
+		);
+		// MP4 holds H.264 (and Opus) from any recorder container; VP8/VP9
+		// captures only fit WebM.
+		let ext: MasterExt | null = null;
+		for (const candidate of ["mp4", "webm"] as const) {
+			try {
+				await runFfmpeg([
+					"-y",
+					"-fflags",
+					"+genpts",
+					"-f",
+					"concat",
+					"-safe",
+					"0",
+					"-i",
+					listPath,
+					"-c",
+					"copy",
+					...(candidate === "mp4" ? ["-movflags", "+faststart"] : []),
+					"-f",
+					candidate,
+					path.join(tmpDir, `preview.${candidate}`),
+				]);
+				ext = candidate;
+				break;
+			} catch {
+				// Try the next container.
+			}
+		}
+		if (!ext) return null;
+		const outPath = path.join(tmpDir, `preview.${ext}`);
+		// Kept under a fixed name too, for the all-encodes-failed fallback.
+		await copyFile(outPath, path.join(tmpDir, "preview.bin"));
+		const durationMs = (await probeMedia(outPath)).durationMs ?? 0;
+		const key = screenKey(userId, sessionId, "preview", ext);
+		await putFileObject(key, outPath, masterContentType(ext));
+		await prisma.recordingSession.updateMany({
+			where: { id: sessionId, status: "PROCESSING" },
+			data: { outputs: { preview: { key, durationMs } } as never },
+		});
+		console.log(`[ScreenFinalize] ${sessionId}: preview up (${key})`);
+		return key;
+	} catch (error) {
+		console.warn(`[ScreenFinalize] ${sessionId}: no quick preview:`, error);
+		return null;
+	}
+}
+
 /**
  * The camera master as a bottom-right PiP over the screen, matching the size
  * and shape the user picked. Sized from the screen master's final height;
@@ -591,6 +699,8 @@ export async function finalizeScreenSession(
 	if (inFlight.has(sessionId)) return;
 	inFlight.add(sessionId);
 	let tmp: string | null = null;
+	// The quick preview this pass published, replaced by the real output.
+	let previewKey: string | null = null;
 
 	try {
 		const session = await prisma.recordingSession.findUnique({
@@ -672,28 +782,26 @@ export async function finalizeScreenSession(
 			});
 		}
 
-		// Screen and camera build in parallel. A camera that's only a PiP
-		// is built small - it never shows bigger than ~30% of the screen.
 		const limits = {
 			watermark,
 			maxShortSide: session.videoResolution,
 			maxFps: session.targetFps,
 		};
-		const build = async (
-			rec: (typeof recs)[number] | undefined,
-			opts: Parameters<typeof buildMaster>[2],
-		): Promise<MasterInfo | null> => {
-			if (!rec) return null;
+		// A track that fails is retried with the whole take (most failures are
+		// transient - a storage read, a worker under pressure); only the last
+		// attempt gives up on it and carries on with the rest.
+		const guarded = async <T>(
+			rec: TrackRec,
+			work: () => Promise<T>,
+		): Promise<T | null> => {
 			try {
-				return await buildMaster(rec, tmp as string, opts);
+				return await work();
 			} catch (error) {
 				const message = errorMessage(error);
 				console.error(
 					`[ScreenFinalize] track ${rec.id} failed for ${sessionId}:`,
 					error,
 				);
-				// Retry the whole take before giving up on a track - most failures
-				// here are transient (a storage read, a worker under pressure).
 				if (!finalAttempt) throw error;
 				await prisma.participantRecording
 					.update({
@@ -704,26 +812,54 @@ export async function finalizeScreenSession(
 				return null;
 			}
 		};
+		const fetch = (rec: TrackRec | undefined) =>
+			rec ? guarded(rec, () => fetchTrack(rec, tmp as string)) : null;
+
+		// The track the video's sound and picture come from is fetched first,
+		// so a watchable preview is up within seconds - before any encoding.
+		const screenFetched = await fetch(screenRec);
+		const cameraFirst = screenRec ? null : await fetch(cameraRec);
+		const primary = screenFetched ?? cameraFirst;
+		if (primary && !hasFinalOutput(session.outputs)) {
+			previewKey = await publishPreview(
+				primary,
+				session.userId,
+				sessionId,
+				tmp,
+			);
+		}
+		const cameraFetched = screenRec ? await fetch(cameraRec) : cameraFirst;
+
 		// For a screen + camera take the (small, fast) camera goes first, then
 		// the screen is built with it composited in the same encode - one pass
 		// over the full-size video instead of two.
-		const camera = await build(cameraRec, {
-			...limits,
-			// The PiP's mirror is applied in the overlay; a camera-only take is
-			// mirrored here.
-			watermark: watermark && !wantsBoth,
-			mirror: !wantsBoth && Boolean(comp.cameraMirror),
-			maxShortSide: wantsBoth
-				? Math.min(session.videoResolution, PIP_CAMERA_MAX_SHORT_SIDE)
-				: session.videoResolution,
-		});
-		const screen = await build(screenRec, {
-			...limits,
-			mirror: false,
-			...(wantsBoth && camera?.pinned
-				? { overlay: cameraOverlay(camera, comp) }
-				: {}),
-		});
+		const camera =
+			cameraRec && cameraFetched
+				? await guarded(cameraRec, () =>
+						buildMaster(cameraRec, cameraFetched, tmp as string, {
+							...limits,
+							// The PiP's mirror is applied in the overlay; a camera-only
+							// take is mirrored here.
+							watermark: watermark && !wantsBoth,
+							mirror: !wantsBoth && Boolean(comp.cameraMirror),
+							maxShortSide: wantsBoth
+								? Math.min(session.videoResolution, PIP_CAMERA_MAX_SHORT_SIDE)
+								: session.videoResolution,
+						}),
+					)
+				: null;
+		const screen =
+			screenRec && screenFetched
+				? await guarded(screenRec, () =>
+						buildMaster(screenRec, screenFetched, tmp as string, {
+							...limits,
+							mirror: false,
+							...(wantsBoth && camera?.pinned
+								? { overlay: cameraOverlay(camera, comp) }
+								: {}),
+						}),
+					)
+				: null;
 
 		console.log(
 			`[ScreenFinalize] ${sessionId} masters`,
@@ -779,6 +915,16 @@ export async function finalizeScreenSession(
 			}
 		}
 
+		// Every encode failed but the preview made it: a stream copy of the
+		// capture beats losing the take.
+		if (Object.keys(outputs).length === 0 && previewKey) {
+			const durationMs = (await probeMedia(path.join(tmp, "preview.bin")))
+				.durationMs;
+			outputs.screen = { key: previewKey, durationMs: durationMs ?? 0 };
+			outputs.screenAligned = outputs.screen;
+			previewKey = null;
+		}
+
 		if (Object.keys(outputs).length === 0) {
 			await prisma.recordingSession.update({
 				where: { id: sessionId },
@@ -794,6 +940,10 @@ export async function finalizeScreenSession(
 			where: { id: sessionId },
 			data: { status: "READY", outputs: outputs as never },
 		});
+
+		if (previewKey) {
+			await deleteObjects([previewKey]).catch(() => undefined);
+		}
 
 		// Bill what was actually recorded if the meter came up short (pause is
 		// the client's word; the video's length is the proof).

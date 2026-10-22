@@ -281,7 +281,9 @@ const ScreenVideoCard = ({
                 ? "Screen + camera"
                 : kind === "camera"
                   ? "Camera"
-                  : "Screen",
+                  : kind === "preview"
+                    ? "Preview"
+                    : "Screen",
             ]
               .filter(Boolean)
               .map((part, index) => (
@@ -305,19 +307,22 @@ const ScreenVideoCard = ({
             <FiShare2 className="size-3.5" />
             {rec.shareToken ? "Shared" : "Share"}
           </button>
-          <button
-            type="button"
-            disabled={downloading}
-            onClick={() => void handleDownload()}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-          >
-            {downloading ? (
-              <FiLoader className="size-3.5 animate-spin" />
-            ) : (
-              <LuDownload className="size-3.5" />
-            )}
-            {downloading ? "Preparing" : "Download"}
-          </button>
+          {/* The preview is a stand-in - download the real video once it's in. */}
+          {kind !== "preview" && (
+            <button
+              type="button"
+              disabled={downloading}
+              onClick={() => void handleDownload()}
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            >
+              {downloading ? (
+                <FiLoader className="size-3.5 animate-spin" />
+              ) : (
+                <LuDownload className="size-3.5" />
+              )}
+              {downloading ? "Preparing" : "Download"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -583,7 +588,22 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
 
         <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
-            {isProcessing && !screenVideoKind ? (
+            {isProcessing && !screenVideoKind && outputs.preview?.key ? (
+              // A quick copy of the capture is up: let them watch it while
+              // the full-quality video renders.
+              <section className="flex flex-col gap-3">
+                <p className="flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2.5 text-xs text-fg-muted ring-1 ring-border/50">
+                  <FiLoader className="size-3.5 shrink-0 animate-spin" />
+                  Quick preview - the full-quality video is still processing and
+                  will replace it automatically.
+                </p>
+                <ScreenVideoCard
+                  rec={rec}
+                  kind="preview"
+                  onShare={() => setShareOpen(true)}
+                />
+              </section>
+            ) : isProcessing && !screenVideoKind ? (
               <section className="flex flex-col gap-4">
                 <ProcessingStagePanel rec={rec} />
               </section>
