@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
 import RenameDialog from "@/components/shared/RenameDialog";
+import ProcessingThumbnail from "./ProcessingThumbnail";
 
 const formatDate = (value?: string) =>
   value
@@ -88,7 +89,22 @@ const OutputThumb = ({ output }: { output: FinalOutput }) => {
 // Mosaic of participant video tiles: one tile per participant (up to four), so a
 // one-person recording shows a single frame, two split, three a mix.
 const ProjectThumbnail = ({ spaceId }: { spaceId: string }) => {
-  const { data: outputs } = useGetOutputsBySpace(spaceId);
+  // While nothing is playable yet, keep checking so the card flips from
+  // "Processing…" to the real frames on its own.
+  const { data: outputs, isLoading } = useGetOutputsBySpace(
+    spaceId,
+    true,
+    (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const hasReadyVideo = data.some(
+        (o) => o.status === "READY" && o.hasVideo,
+      );
+      const allFailed =
+        data.length > 0 && data.every((o) => o.status === "FAILED");
+      return hasReadyVideo || allFailed ? false : 5000;
+    },
+  );
 
   const ready = (outputs ?? []).filter(
     (o) => o.status === "READY" && o.hasVideo,
@@ -112,9 +128,15 @@ const ProjectThumbnail = ({ spaceId }: { spaceId: string }) => {
   }
 
   if (tiles.length === 0) {
-    return (
-      <div className="skeleton-shimmer aspect-video overflow-hidden rounded-lg" />
-    );
+    if (isLoading) {
+      return (
+        <div className="skeleton-shimmer aspect-video overflow-hidden rounded-lg" />
+      );
+    }
+    const allFailed =
+      (outputs ?? []).length > 0 &&
+      (outputs ?? []).every((o) => o.status === "FAILED");
+    return <ProcessingThumbnail failed={allFailed} />;
   }
 
   const count = tiles.length;

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiChevronDown, FiClock, FiLoader } from "react-icons/fi";
+import { FiChevronDown, FiClock } from "react-icons/fi";
 import {
   useScreenOutputUrl,
   type ScreenOutputKind,
@@ -8,6 +8,7 @@ import {
 } from "@/hooks/useScreenRecordings";
 import { cn } from "@/lib/utils";
 import { capturePoster, getCachedPoster } from "@/lib/posterCache";
+import ProcessingThumbnail from "./ProcessingThumbnail";
 
 const formatDate = (value?: string | null) => {
   if (!value) return "";
@@ -27,32 +28,6 @@ const formatDate = (value?: string | null) => {
 // the combined "both" first, then screen, then camera.
 const KIND_ORDER: ScreenOutputKind[] = ["both", "screen", "camera"];
 const RECORDINGS_PER_PAGE = 8;
-
-const StatusBadge = ({ status }: { status: ScreenRecording["status"] }) => {
-  if (status === "READY") return null;
-  // ACTIVE = still recording (or uploading): not a failure.
-  const processing =
-    status === "PROCESSING" || status === "STOPPED" || status === "ACTIVE";
-  return (
-    <span
-      className={cn(
-        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.7rem] font-medium",
-        processing
-          ? "bg-warning/15 text-warning"
-          : "bg-danger/15 text-danger",
-      )}
-    >
-      {processing ? (
-        <>
-          <FiLoader className="size-3 animate-spin" />
-          Processing
-        </>
-      ) : (
-        "Failed"
-      )}
-    </span>
-  );
-};
 
 // Poster frame for a screen recording, preferring the combined screen+camera
 // output, then screen, then camera. Seeks a little in to skip a black intro.
@@ -160,11 +135,10 @@ export const ScreenRecordingCard = ({
       )}
     >
       <div className="relative w-full">
-        <ScreenThumbnail rec={rec} />
-        {rec.status !== "READY" && (
-          <div className="absolute right-2 top-2">
-            <StatusBadge status={rec.status} />
-          </div>
+        {rec.status === "READY" ? (
+          <ScreenThumbnail rec={rec} />
+        ) : (
+          <ProcessingThumbnail failed={rec.status === "FAILED"} />
         )}
       </div>
 
@@ -259,9 +233,7 @@ const ScreenRecordingsSection = ({
             className="flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
           >
             Show more
-            <span className="text-fg-subtle">
-              ({remainingRecordings} more)
-            </span>
+            <span className="text-fg-subtle">({remainingRecordings} more)</span>
             <FiChevronDown size={14} />
           </button>
         </div>
