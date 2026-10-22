@@ -24,7 +24,7 @@ import useScreenLocalRecording, {
   type ScreenStreams,
   type ScreenTrackType,
 } from "./useScreenLocalRecording";
-import type { RecordingChunk, RecordingMetadata } from "./useLocalRecording";
+import type { LocalChunk } from "./useLocalRecording";
 
 export type ScreenRecordingState =
   | "idle"
@@ -132,13 +132,10 @@ export default function useScreenRecordingManager({
   const clientSessionIdRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const recordingIdsRef = useRef<Partial<Record<ScreenTrackType, string>>>({});
-  const metaRef = useRef<Partial<Record<ScreenTrackType, RecordingMetadata>>>(
-    {},
-  );
 
   // Chunks that arrived before their recording row id existed.
   const pendingChunksRef = useRef<
-    { trackType: ScreenTrackType; chunk: RecordingChunk }[]
+    { trackType: ScreenTrackType; chunk: LocalChunk }[]
   >([]);
   // Set while a take is being discarded: its last chunks are thrown away.
   const discardingRef = useRef(false);
@@ -172,7 +169,7 @@ export default function useScreenRecordingManager({
   }, [uploader]);
 
   const enqueueChunk = useCallback(
-    (trackType: ScreenTrackType, chunk: RecordingChunk) => {
+    (trackType: ScreenTrackType, chunk: LocalChunk) => {
       if (discardingRef.current) return;
       const recordingId = recordingIdsRef.current[trackType];
       const sessionId = sessionIdRef.current;
@@ -180,7 +177,6 @@ export default function useScreenRecordingManager({
         pendingChunksRef.current.push({ trackType, chunk });
         return;
       }
-      const meta = metaRef.current[trackType];
       void uploader.enqueue({
         // spaceId / participantSessionId are unused by the screen backend
         // (ownership is the session's userId) - sent as placeholders. Both
@@ -196,7 +192,9 @@ export default function useScreenRecordingManager({
         sequenceNumber: chunk.sequenceNumber,
         startMs: chunk.startMs,
         durationMs: chunk.durationMs,
-        mimeType: meta?.mimeType ?? "application/octet-stream",
+        // Per chunk: a later recorder part may have fallen back to another
+        // codec.
+        mimeType: chunk.mimeType || "application/octet-stream",
         blob: chunk.blob,
       });
     },
@@ -209,15 +207,29 @@ export default function useScreenRecordingManager({
     for (const { trackType, chunk } of pending) enqueueChunk(trackType, chunk);
   }, [enqueueChunk]);
 
+  // stopRecording is defined further down; the recorder's error handler and
+  // the usage heartbeat reach it through this ref.
+  const stopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+
   const recorder = useScreenLocalRecording({
     onChunkReady: (trackType, chunk) => enqueueChunk(trackType, chunk),
-    onRecordingStart: (metadata) => {
-      metaRef.current = metadata;
-    },
+    // A track's recorder couldn't be restarted even after retries. Without
+    // the screen there's nothing left worth recording, so save what was
+    // captured; a lost camera just leaves the rest of the take camera-less.
     onError: (err, trackType) => {
-      setError(`${trackType}: ${err.message}`);
-      toast.error("Recording failed - please try again.");
-      setRecordingState("error");
+      console.error(`[ScreenRecordingManager] ${trackType} stopped:`, err);
+      if (trackType === "camera" && recordingIdsRef.current.combined) {
+        toast.error(
+          "The camera stopped recording - the rest of the take continues without it.",
+          8000,
+        );
+        return;
+      }
+      toast.error(
+        "Recording stopped unexpectedly - everything captured so far is being saved.",
+        8000,
+      );
+      void stopRecordingRef.current?.();
     },
   });
 
@@ -348,8 +360,7 @@ export default function useScreenRecordingManager({
   // Usage heartbeat while recording: credits metered seconds server-side (a
   // crashed tab still counts what ran), warns near the limit, and reacts to a
   // server-forced stop when credit runs out - captured footage is saved.
-  // stopRecording is defined below the effect, so it's reached through a ref.
-  const stopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+  // stopRecording is defined below the effect (see stopRecordingRef).
   const usageWarnedRef = useRef(false);
   // Paused takes keep heartbeating: the server meters an ACTIVE session either
   // way, and a forced stop must still reach a paused recorder.
@@ -494,7 +505,9 @@ export default function useScreenRecordingManager({
     uploader,
     getMaxTrackSize,
   ]);
-  stopRecordingRef.current = stopRecording;
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
 
   const toggleRecording = useCallback(() => {
     // Ignore presses while a transition is mid-flight.

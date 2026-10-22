@@ -1,25 +1,36 @@
 /**
  * HOOK: useScreenLocalRecording
  *
- * Single-user screen-recorder capture. Records up to THREE local tracks:
- *   1. combined - screen video + mic audio (the master you'd watch)
- *   2. camera   - webcam video only (separate, for flexible compositing later)
- *   3. audio    - mic only (for audio replacement / overdub)
+ * Single-user screen-recorder capture. Records up to two local tracks:
+ *   1. combined - screen video + mic/system audio (the master you'd watch)
+ *   2. camera   - webcam video (+ mic when there's no screen)
  *
- * Each track is an independent MediaRecorder emitting timed chunks, mirroring
- * the Space recorder (useLocalRecording) but driven from explicit per-track
- * MediaStreams instead of a single stream. Timing uses performance.now() so a
- * clock adjustment can't corrupt the segment timeline.
+ * PARTS:
+ * Each track records in "parts" - one MediaRecorder per part, each a
+ * self-contained stream (its first chunk carries a fresh container header).
+ * Every part's chunks continue the track's one sequence on one timeline, and
+ * the server lays the parts out end to end (see media-compose.ts). A new part
+ * starts when:
+ *   - the encoder dies mid-take (the next part walks down the codec ladder),
+ *   - a source track ends (e.g. a mic unplugged - recording carries on with
+ *     what's still live),
+ *   - the take is paused and resumed (a paused span is simply not recorded),
+ *   - the part has run for ROTATE_PART_MS, so a chunk lost in transit can only
+ *     damage the rest of its own part, never the whole take.
  *
- * Pausing pauses every recorder at once. MediaRecorder leaves the paused span
- * out of the encoded media, so chunk timing runs on a "recorded" clock that
- * stops while paused too - otherwise the finalizer would read the pause as a
- * capture break and pad it with silence, pushing audio out of sync.
+ * TIMING:
+ * Chunk offsets run on a "recorded" clock - performance.now() (monotonic,
+ * immune to clock adjustments) minus paused time - so parts on either side of
+ * a pause sit back to back with no gap to pad.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { firstSupportedVideoMime } from "@/lib/recorderCodecs";
-import type { RecordingChunk, RecordingMetadata } from "./useLocalRecording";
+import {
+  getSupportedAudioMimeTypes,
+  getSupportedVideoMimeTypes,
+  startRecorderWithFallback,
+} from "@/lib/recorderCodecs";
+import type { LocalChunk, RecordingMetadata } from "./useLocalRecording";
 
 export type ScreenTrackType = "combined" | "camera" | "audio";
 
@@ -31,11 +42,11 @@ export interface ScreenStreams {
 }
 
 interface UseScreenLocalRecordingOptions {
-  onChunkReady?: (trackType: ScreenTrackType, chunk: RecordingChunk) => void;
+  onChunkReady?: (trackType: ScreenTrackType, chunk: LocalChunk) => void;
   onRecordingStart?: (
     metadata: Partial<Record<ScreenTrackType, RecordingMetadata>>,
   ) => void;
-  onRecordingStop?: (counts: Record<ScreenTrackType, number>) => void;
+  /** A track's recorder couldn't run at all, even after retries. */
   onError?: (error: Error, trackType: ScreenTrackType) => void;
   chunkIntervalMs?: number;
 }
@@ -60,28 +71,6 @@ interface UseScreenLocalRecordingReturn {
   getMaxTrackSize: (trackType: ScreenTrackType) => TrackSize | null;
 }
 
-function getBestAudioMimeType() {
-  const types = [
-    { mimeType: "audio/webm;codecs=opus", codec: "opus", container: "webm" },
-    { mimeType: "audio/webm", codec: "opus", container: "webm" },
-    { mimeType: "audio/mp4", codec: "aac", container: "mp4" },
-  ];
-  for (const type of types) {
-    if (MediaRecorder.isTypeSupported(type.mimeType)) return type;
-  }
-  return { mimeType: "", codec: "unknown", container: "webm" };
-}
-
-// Shared H.264-first ladder with the correct 4K level (see recorderCodecs).
-// NOTE: this standalone screen recorder drives THREE concurrent recorders
-// through one start path, so it uses the preferred codec but does NOT yet run
-// the combined recorder's full runtime EncodingError fallback loop - deferred to
-// avoid destabilizing the multi-recorder start. See the space recorder
-// (useLocalRecording) for the full fallback implementation.
-function getBestVideoMimeType() {
-  return firstSupportedVideoMime();
-}
-
 function videoBitrateFor(width?: number, height?: number): number {
   if (!width || !height) return 4000000;
   const pixels = width * height;
@@ -94,74 +83,119 @@ function videoBitrateFor(width?: number, height?: number): number {
 
 const AUDIO_BITRATE = 128000;
 const TRACK_TYPES: ScreenTrackType[] = ["combined", "camera", "audio"];
+/** A part this old is rotated, bounding what one lost chunk can damage. */
+const ROTATE_PART_MS = 10 * 60 * 1000;
+/** Retries when no codec at all could start for a track. */
+const MAX_FATAL_RETRIES = 3;
+const FATAL_RETRY_DELAY_MS = 2000;
+/** onstop can fail to fire on a recorder whose encoder crashed. */
+const STOP_TIMEOUT_MS = 3000;
 
-// MediaRecorder only captures the first audio track of a stream, so when a
-// stream carries multiple (e.g. mic + system audio for the screen) we mix them
-// down to one track via the Web Audio API. The created AudioContext is pushed
-// to `contexts` so it can be closed when recording stops.
-function mixAudioTracks(
-  stream: MediaStream,
-  contexts: AudioContext[],
-): MediaStream {
+const emptyCounts = (): Record<ScreenTrackType, number> => ({
+  combined: 0,
+  camera: 0,
+  audio: 0,
+});
+
+/**
+ * MediaRecorder only captures the first audio track of a stream, so several
+ * (mic + system audio) are mixed down to one via the Web Audio API. Returns
+ * the stream to record and a cleanup that closes the mixer.
+ */
+function mixAudioTracks(stream: MediaStream): {
+  stream: MediaStream;
+  close: () => void;
+} {
   const audioTracks = stream.getAudioTracks();
-  if (audioTracks.length <= 1) return stream;
+  if (audioTracks.length <= 1) return { stream, close: () => undefined };
 
   const Ctx =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext })
       .webkitAudioContext;
   const ctx = new Ctx();
+  // Created after the countdown, not in the click itself - make sure it runs.
+  void ctx.resume().catch(() => undefined);
   const dest = ctx.createMediaStreamDestination();
   for (const track of audioTracks) {
     ctx.createMediaStreamSource(new MediaStream([track])).connect(dest);
   }
-  contexts.push(ctx);
-  return new MediaStream([
-    ...stream.getVideoTracks(),
-    ...dest.stream.getAudioTracks(),
-  ]);
+  return {
+    stream: new MediaStream([
+      ...stream.getVideoTracks(),
+      ...dest.stream.getAudioTracks(),
+    ]),
+    close: () => void ctx.close().catch(() => undefined),
+  };
+}
+
+function stopRecorder(recorder: MediaRecorder | null): Promise<void> {
+  if (!recorder || recorder.state === "inactive") return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    // onstop fires after the final ondataavailable, so the last chunk is
+    // captured before we resolve.
+    const timeout = setTimeout(done, STOP_TIMEOUT_MS);
+    recorder.addEventListener("stop", done, { once: true });
+    try {
+      recorder.stop();
+    } catch {
+      done();
+    }
+  });
+}
+
+interface RecorderPart {
+  recorder: MediaRecorder | null;
+  mimeType: string;
+  /** Recorded-clock start of the chunk being captured now. */
+  chunkStart: number;
+  startedAt: number;
+  stopped: boolean;
+  /** No codec could start (or the encoder died) - this part records nothing. */
+  dead: boolean;
+  cleanup: () => void;
+}
+
+interface TrackState {
+  type: ScreenTrackType;
+  /** The track's source stream (before any audio mixing). */
+  source: MediaStream;
+  part: RecorderPart | null;
+  sequence: number;
+  /** Codecs that died mid-take on this track; later parts skip them. */
+  failedMimes: Set<string>;
+  fatalRetries: number;
+  /** Every part start/stop runs in order, so two can't interleave. */
+  chain: Promise<void>;
 }
 
 export default function useScreenLocalRecording(
   options: UseScreenLocalRecordingOptions = {},
 ): UseScreenLocalRecordingReturn {
-  const {
-    onChunkReady,
-    onRecordingStart,
-    onRecordingStop,
-    onError,
-    chunkIntervalMs = 5000,
-  } = options;
+  const { chunkIntervalMs = 5000 } = options;
+  // Callbacks via a ref: recorder event handlers live far longer than a render.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordingDurationMs, setRecordingDurationMs] = useState(0);
-  const [chunkCounts, setChunkCounts] = useState<
-    Record<ScreenTrackType, number>
-  >({
-    combined: 0,
-    camera: 0,
-    audio: 0,
-  });
+  const [chunkCounts, setChunkCounts] =
+    useState<Record<ScreenTrackType, number>>(emptyCounts);
 
-  const recordersRef = useRef<Partial<Record<ScreenTrackType, MediaRecorder>>>(
-    {},
-  );
-  const audioContextsRef = useRef<AudioContext[]>([]);
+  const activeRef = useRef(false);
+  const tracksRef = useRef<Partial<Record<ScreenTrackType, TrackState>>>({});
+  const metadataRef = useRef<
+    Partial<Record<ScreenTrackType, RecordingMetadata>>
+  >({});
   const startTimeRef = useRef<number>(0);
   // Paused time so far, and when the current pause began (null while running).
   const pausedTotalRef = useRef<number>(0);
   const pausedAtRef = useRef<number | null>(null);
-  const sequenceRef = useRef<Record<ScreenTrackType, number>>({
-    combined: 0,
-    camera: 0,
-    audio: 0,
-  });
-  const chunkStartRef = useRef<Record<ScreenTrackType, number>>({
-    combined: 0,
-    camera: 0,
-    audio: 0,
-  });
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
@@ -174,22 +208,17 @@ export default function useScreenLocalRecording(
     return now - startTimeRef.current - pausedTotalRef.current - pausedNow;
   }, []);
 
-  // Live video tracks + the largest frame size each has reported. A screen
-  // capture RESIZES mid-recording whenever the shared surface changes shape
-  // (switching tabs, resizing/maximizing the shared window, a display-scale
-  // change), and MediaRecorder encodes that as a mid-stream resolution switch.
-  // Finalization has to know the biggest geometry to normalize the master to,
-  // so we sample getSettings() instead of trusting the size at start.
+  // The largest frame size each video track has reported. A screen capture
+  // RESIZES mid-recording whenever the shared surface changes shape (switching
+  // tabs, resizing/maximizing the shared window, a display-scale change), and
+  // finalization has to know the biggest geometry to normalize the master to.
   // (Sampled, not event-driven: MediaStreamTrack has no reliable resize event.)
-  const videoTracksRef = useRef<
-    Partial<Record<ScreenTrackType, MediaStreamTrack>>
-  >({});
   const maxSizeRef = useRef<Partial<Record<ScreenTrackType, TrackSize>>>({});
   const sizeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sampleTrackSizes = useCallback(() => {
     for (const type of TRACK_TYPES) {
-      const track = videoTracksRef.current[type];
+      const track = tracksRef.current[type]?.source.getVideoTracks()[0];
       if (!track || track.readyState !== "live") continue;
       const { width, height } = track.getSettings();
       if (!width || !height) continue;
@@ -233,259 +262,359 @@ export default function useScreenLocalRecording(
     };
   }, [isRecording, isPaused, recordedMs]);
 
-  const buildRecorder = useCallback(
-    (
-      trackType: ScreenTrackType,
-      stream: MediaStream,
-      recorderOptions: MediaRecorderOptions,
-    ): MediaRecorder => {
-      const recorder = new MediaRecorder(stream, recorderOptions);
-
-      recorder.ondataavailable = (event) => {
-        if (!event.data || event.data.size === 0) return;
-        const now = recordedMs();
-        const seq = sequenceRef.current[trackType];
-        const chunk: RecordingChunk = {
-          blob: event.data,
-          sequenceNumber: seq,
-          startMs: chunkStartRef.current[trackType],
-          durationMs: now - chunkStartRef.current[trackType],
-          timestamp: performance.now(),
-        };
-        sequenceRef.current[trackType] = seq + 1;
-        chunkStartRef.current[trackType] = now;
-        setChunkCounts((prev) => ({ ...prev, [trackType]: seq + 1 }));
-        onChunkReady?.(trackType, chunk);
-      };
-
-      recorder.onerror = () => {
-        onError?.(new Error(`${trackType} MediaRecorder error`), trackType);
-      };
-
-      return recorder;
+  const runOnTrack = useCallback(
+    (track: TrackState, op: () => Promise<void>): Promise<void> => {
+      const next = track.chain.then(op).catch((error) => {
+        console.error(`[ScreenRecording] ${track.type} part op failed:`, error);
+      });
+      track.chain = next;
+      return next;
     },
-    [onChunkReady, onError, recordedMs],
+    [],
   );
+
+  const emitChunk = useCallback(
+    (track: TrackState, part: RecorderPart, blob: Blob) => {
+      const now = recordedMs();
+      const chunk: LocalChunk = {
+        blob,
+        sequenceNumber: track.sequence,
+        startMs: Math.max(0, part.chunkStart),
+        durationMs: Math.max(0, now - part.chunkStart),
+        timestamp: performance.now(),
+        mimeType: part.mimeType,
+      };
+      track.sequence += 1;
+      part.chunkStart = now;
+      const sequence = track.sequence;
+      setChunkCounts((prev) => ({ ...prev, [track.type]: sequence }));
+      optionsRef.current.onChunkReady?.(track.type, chunk);
+    },
+    [recordedMs],
+  );
+
+  // Forward refs so part handlers can reach the logic defined below.
+  const rotateRef = useRef<(track: TrackState) => void>(() => undefined);
+  const retryAfterFatalRef = useRef<
+    (track: TrackState, part: RecorderPart, error: Error) => void
+  >(() => undefined);
+
+  /** Start a part on the track's live source tracks (null if none are left). */
+  const startPart = useCallback(
+    (track: TrackState): RecorderPart | null => {
+      const live = track.source
+        .getTracks()
+        .filter((sourceTrack) => sourceTrack.readyState === "live");
+      if (live.length === 0) return null;
+
+      const mixed = mixAudioTracks(new MediaStream(live));
+      const stream = mixed.stream;
+      const hasVideo = stream.getVideoTracks().length > 0;
+      const video = stream.getVideoTracks()[0]?.getSettings() ?? {};
+      const audio = stream.getAudioTracks()[0]?.getSettings() ?? {};
+      const videoBitrate = videoBitrateFor(video.width, video.height);
+
+      const ladder = hasVideo
+        ? getSupportedVideoMimeTypes()
+        : getSupportedAudioMimeTypes();
+      const candidates = ladder.filter(
+        (candidate) =>
+          !candidate.mimeType || !track.failedMimes.has(candidate.mimeType),
+      );
+
+      const part: RecorderPart = {
+        recorder: null,
+        mimeType: "",
+        chunkStart: recordedMs(),
+        startedAt: performance.now(),
+        stopped: false,
+        dead: false,
+        cleanup: () => undefined,
+      };
+
+      // A source track ending (a mic unplugged) leaves this part recording a
+      // dead track: move to a new part on whatever is still live.
+      const onEnded = () => {
+        if (track.part === part && !part.stopped) rotateRef.current(track);
+      };
+      for (const sourceTrack of live) {
+        sourceTrack.addEventListener("ended", onEnded);
+      }
+      part.cleanup = () => {
+        for (const sourceTrack of live) {
+          sourceTrack.removeEventListener("ended", onEnded);
+        }
+        mixed.close();
+      };
+
+      const started = startRecorderWithFallback({
+        stream,
+        candidates,
+        recorderOptions: hasVideo
+          ? {
+              videoBitsPerSecond: videoBitrate,
+              audioBitsPerSecond: AUDIO_BITRATE,
+            }
+          : { audioBitsPerSecond: AUDIO_BITRATE },
+        timesliceMs: chunkIntervalMs,
+        handlers: {
+          onActiveRecorder: (recorder, candidate) => {
+            part.recorder = recorder;
+            part.mimeType = recorder.mimeType || candidate.mimeType;
+            part.chunkStart = recordedMs();
+            if (!metadataRef.current[track.type]) {
+              metadataRef.current[track.type] = {
+                container: candidate.container,
+                codec: candidate.codec,
+                width: video.width,
+                height: video.height,
+                fps: video.frameRate,
+                bitrate: hasVideo ? videoBitrate : AUDIO_BITRATE,
+                sampleRate: audio.sampleRate,
+                channels: audio.channelCount,
+                hasAudio: stream.getAudioTracks().length > 0,
+                hasVideo,
+                mimeType: part.mimeType,
+              };
+            }
+          },
+          onFirstData: () => {
+            track.fatalRetries = 0;
+          },
+          onData: (blob) => emitChunk(track, part, blob),
+          onMidSessionFailure: (error) => {
+            if (part.stopped) return;
+            console.warn(
+              `[ScreenRecording] ${track.type} encoder failed mid-take:`,
+              error,
+            );
+            if (part.mimeType) track.failedMimes.add(part.mimeType);
+            rotateRef.current(track);
+          },
+          onFatal: (error) => {
+            part.dead = true;
+            if (part.stopped) return;
+            retryAfterFatalRef.current(track, part, error);
+          },
+        },
+      });
+      if (!started) part.dead = true;
+      return part;
+    },
+    [chunkIntervalMs, emitChunk, recordedMs],
+  );
+
+  const stopPart = useCallback(async (part: RecorderPart | null) => {
+    if (!part || part.stopped) return;
+    part.stopped = true;
+    await stopRecorder(part.recorder);
+    part.cleanup();
+  }, []);
+
+  /** New part first, then stop the old one: the overlap is trimmed when the
+   *  take is finalized, while a gap would be lost footage. */
+  const replacePart = useCallback(
+    async (track: TrackState) => {
+      if (!activeRef.current || pausedAtRef.current !== null) return;
+      const current = track.part;
+      const next = startPart(track);
+      track.part = next;
+      await stopPart(current);
+      // No codec could even construct (onFatal fired before this part was
+      // current, so it couldn't schedule its own retry).
+      if (next?.dead && track.part === next) {
+        retryAfterFatalRef.current(
+          track,
+          next,
+          new Error("No recorder could start"),
+        );
+      }
+    },
+    [startPart, stopPart],
+  );
+
+  rotateRef.current = (track: TrackState) => {
+    void runOnTrack(track, () => replacePart(track));
+  };
+
+  retryAfterFatalRef.current = (
+    track: TrackState,
+    part: RecorderPart,
+    error: Error,
+  ) => {
+    if (track.part !== part) return;
+    if (track.fatalRetries >= MAX_FATAL_RETRIES) {
+      console.error(
+        `[ScreenRecording] no recorder could start for ${track.type}:`,
+        error,
+      );
+      optionsRef.current.onError?.(error, track.type);
+      return;
+    }
+    track.fatalRetries += 1;
+    setTimeout(() => {
+      void runOnTrack(track, async () => {
+        if (track.part !== part || !activeRef.current) return;
+        // A failed codec isn't necessarily permanent (a busy hardware
+        // encoder) - give the whole ladder another go.
+        track.failedMimes.clear();
+        await replacePart(track);
+      });
+    }, FATAL_RETRY_DELAY_MS);
+  };
+
+  // Rotate long-running parts.
+  useEffect(() => {
+    if (!isRecording) return;
+    const interval = setInterval(() => {
+      if (pausedAtRef.current !== null) return;
+      const now = performance.now();
+      for (const track of Object.values(tracksRef.current)) {
+        if (track.part && now - track.part.startedAt >= ROTATE_PART_MS) {
+          rotateRef.current(track);
+        }
+      }
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [isRecording]);
 
   const startRecording = useCallback(
     async (streams: ScreenStreams) => {
-      if (isRecording) return;
+      if (activeRef.current) return;
 
-      const metadata: Partial<Record<ScreenTrackType, RecordingMetadata>> = {};
-      const recorders: Partial<Record<ScreenTrackType, MediaRecorder>> = {};
-
-      try {
-        // Reset counters.
-        sequenceRef.current = { combined: 0, camera: 0, audio: 0 };
-        setChunkCounts({ combined: 0, camera: 0, audio: 0 });
-        videoTracksRef.current = {};
-        maxSizeRef.current = {};
-
-        // 1. COMBINED (screen video + mic + system audio, mixed to one track)
-        if (streams.combined && streams.combined.getVideoTracks().length > 0) {
-          const s = mixAudioTracks(streams.combined, audioContextsRef.current);
-          const screenTrack = s.getVideoTracks()[0];
-          if (screenTrack) videoTracksRef.current.combined = screenTrack;
-          const v = screenTrack?.getSettings() ?? {};
-          const a = s.getAudioTracks()[0]?.getSettings() ?? {};
-          const mime = getBestVideoMimeType();
-          const bitrate = videoBitrateFor(v.width, v.height);
-          const recorder = buildRecorder("combined", s, {
-            mimeType: mime.mimeType || undefined,
-            videoBitsPerSecond: bitrate,
-            audioBitsPerSecond: AUDIO_BITRATE,
-          });
-          recorders.combined = recorder;
-          metadata.combined = {
-            container: mime.container,
-            codec: mime.codec,
-            width: v.width,
-            height: v.height,
-            fps: v.frameRate,
-            bitrate,
-            sampleRate: a.sampleRate,
-            channels: a.channelCount,
-            hasAudio: s.getAudioTracks().length > 0,
-            hasVideo: true,
-            mimeType: recorder.mimeType,
-          };
-        }
-
-        // 2. CAMERA (webcam video + mic audio)
-        if (streams.camera && streams.camera.getVideoTracks().length > 0) {
-          const s = streams.camera;
-          const cameraTrack = s.getVideoTracks()[0];
-          if (cameraTrack) videoTracksRef.current.camera = cameraTrack;
-          const v = cameraTrack?.getSettings() ?? {};
-          const a = s.getAudioTracks()[0]?.getSettings() ?? {};
-          const hasAudio = s.getAudioTracks().length > 0;
-          const mime = getBestVideoMimeType();
-          const bitrate = videoBitrateFor(v.width, v.height);
-          const recorder = buildRecorder("camera", s, {
-            mimeType: mime.mimeType || undefined,
-            videoBitsPerSecond: bitrate,
-            audioBitsPerSecond: AUDIO_BITRATE,
-          });
-          recorders.camera = recorder;
-          metadata.camera = {
-            container: mime.container,
-            codec: mime.codec,
-            width: v.width,
-            height: v.height,
-            fps: v.frameRate,
-            bitrate,
-            sampleRate: a.sampleRate,
-            channels: a.channelCount,
-            hasAudio,
-            hasVideo: true,
-            mimeType: recorder.mimeType,
-          };
-        }
-
-        // 3. AUDIO (mic only)
-        if (streams.audio && streams.audio.getAudioTracks().length > 0) {
-          const s = streams.audio;
-          const a = s.getAudioTracks()[0]?.getSettings() ?? {};
-          const mime = getBestAudioMimeType();
-          const recorder = buildRecorder("audio", s, {
-            mimeType: mime.mimeType || undefined,
-            audioBitsPerSecond: AUDIO_BITRATE,
-          });
-          recorders.audio = recorder;
-          metadata.audio = {
-            container: mime.container,
-            codec: mime.codec,
-            sampleRate: a.sampleRate,
-            channels: a.channelCount,
-            bitrate: AUDIO_BITRATE,
-            hasAudio: true,
-            hasVideo: false,
-            mimeType: recorder.mimeType,
-          };
-        }
-
-        if (Object.keys(recorders).length === 0) {
-          throw new Error("No tracks to record");
-        }
-
-        recordersRef.current = recorders;
-
-        // Start all recorders on the same timeline.
-        startTimeRef.current = performance.now();
-        pausedTotalRef.current = 0;
-        pausedAtRef.current = null;
-        for (const type of TRACK_TYPES) {
-          chunkStartRef.current[type] = 0;
-          recorders[type]?.start(chunkIntervalMs);
-        }
-
-        sampleTrackSizes();
-        setRecordingDurationMs(0);
-        setIsPaused(false);
-        setIsRecording(true);
-        onRecordingStart?.(metadata);
-      } catch (error) {
-        const err =
-          error instanceof Error
-            ? error
-            : new Error("Failed to start recording");
-        // Best-effort cleanup of anything that started.
-        for (const type of TRACK_TYPES) {
-          try {
-            if (recorders[type]?.state === "recording") recorders[type]?.stop();
-          } catch {
-            /* ignore */
-          }
-        }
-        recordersRef.current = {};
-        audioContextsRef.current.forEach((c) => void c.close().catch(() => {}));
-        audioContextsRef.current = [];
-        onError?.(err, "combined");
-        throw err;
+      const tracks: Partial<Record<ScreenTrackType, TrackState>> = {};
+      for (const type of TRACK_TYPES) {
+        const source = streams[type];
+        if (!source || source.getTracks().length === 0) continue;
+        tracks[type] = {
+          type,
+          source,
+          part: null,
+          sequence: 0,
+          failedMimes: new Set(),
+          fatalRetries: 0,
+          chain: Promise.resolve(),
+        };
       }
+      if (Object.keys(tracks).length === 0) {
+        throw new Error("No tracks to record");
+      }
+
+      activeRef.current = true;
+      tracksRef.current = tracks;
+      metadataRef.current = {};
+      maxSizeRef.current = {};
+      startTimeRef.current = performance.now();
+      pausedTotalRef.current = 0;
+      pausedAtRef.current = null;
+      setChunkCounts(emptyCounts());
+
+      await Promise.all(
+        Object.values(tracks).map((track) =>
+          runOnTrack(track, () => replacePart(track)),
+        ),
+      );
+
+      // Every track failed outright - nothing is being recorded.
+      if (
+        Object.values(tracks).every((track) => !track.part || track.part.dead)
+      ) {
+        activeRef.current = false;
+        for (const track of Object.values(tracks)) await stopPart(track.part);
+        tracksRef.current = {};
+        throw new Error("No recorder could start");
+      }
+
+      sampleTrackSizes();
+      setRecordingDurationMs(0);
+      setIsPaused(false);
+      setIsRecording(true);
+      optionsRef.current.onRecordingStart?.(metadataRef.current);
     },
-    [
-      isRecording,
-      chunkIntervalMs,
-      buildRecorder,
-      onRecordingStart,
-      onError,
-      sampleTrackSizes,
-    ],
+    [replacePart, runOnTrack, sampleTrackSizes, stopPart],
   );
 
   const stopRecording = useCallback(async (): Promise<
     Record<ScreenTrackType, number>
   > => {
-    return new Promise((resolve) => {
-      const recorders = recordersRef.current;
-      const active = TRACK_TYPES.filter(
-        (t) => recorders[t] && recorders[t]?.state !== "inactive",
-      );
+    const tracks = Object.values(tracksRef.current);
+    const counts = (): Record<ScreenTrackType, number> => {
+      const result = emptyCounts();
+      for (const track of tracks) result[track.type] = track.sequence;
+      return result;
+    };
+    if (!activeRef.current) return counts();
 
-      if (!isRecording || active.length === 0) {
-        resolve({ ...sequenceRef.current });
-        return;
-      }
+    // Last sample while the tracks are still live - a resize in the final
+    // second still has to make it into the finalizer's target geometry.
+    sampleTrackSizes();
+    activeRef.current = false;
 
-      // Last sample while the tracks are still live - a resize in the final
-      // second still has to make it into the finalizer's target geometry.
-      sampleTrackSizes();
+    await Promise.all(
+      tracks.map((track) =>
+        runOnTrack(track, async () => {
+          const part = track.part;
+          track.part = null;
+          await stopPart(part);
+        }),
+      ),
+    );
 
-      let stopped = 0;
-      const onOneStopped = () => {
-        stopped += 1;
-        if (stopped < active.length) return;
+    // Close an open pause so the clock is final.
+    if (pausedAtRef.current !== null) {
+      pausedTotalRef.current += performance.now() - pausedAtRef.current;
+      pausedAtRef.current = null;
+    }
+    setIsRecording(false);
+    setIsPaused(false);
+    return counts();
+  }, [runOnTrack, sampleTrackSizes, stopPart]);
 
-        // Close an open pause so the clock is final for any last chunk.
-        if (pausedAtRef.current !== null) {
-          pausedTotalRef.current += performance.now() - pausedAtRef.current;
-          pausedAtRef.current = null;
-        }
-        setIsRecording(false);
-        setIsPaused(false);
-        recordersRef.current = {};
-        audioContextsRef.current.forEach((c) => void c.close().catch(() => {}));
-        audioContextsRef.current = [];
-        videoTracksRef.current = {};
-        onRecordingStop?.({ ...sequenceRef.current });
-        resolve({ ...sequenceRef.current });
-      };
-
-      for (const type of active) {
-        const recorder = recorders[type];
-        if (!recorder) continue;
-        recorder.onstop = onOneStopped;
-        try {
-          recorder.stop();
-        } catch {
-          onOneStopped();
-        }
-      }
-    });
-  }, [isRecording, onRecordingStop, sampleTrackSizes]);
-
+  // Pausing ends each track's part (its last chunk flushes) and resuming
+  // starts a new one: the paused span is never recorded, and the recorded
+  // clock puts the next part right where the last one ended.
   const pauseRecording = useCallback(() => {
-    if (!isRecording || pausedAtRef.current !== null) return;
-    for (const type of TRACK_TYPES) {
-      const recorder = recordersRef.current[type];
-      if (recorder?.state === "recording") recorder.pause();
+    if (!activeRef.current || pausedAtRef.current !== null) return;
+    for (const track of Object.values(tracksRef.current)) {
+      void runOnTrack(track, async () => {
+        const part = track.part;
+        track.part = null;
+        await stopPart(part);
+      });
     }
     pausedAtRef.current = performance.now();
     setRecordingDurationMs(recordedMs());
     setIsPaused(true);
-  }, [isRecording, recordedMs]);
+  }, [recordedMs, runOnTrack, stopPart]);
 
   const resumeRecording = useCallback(() => {
-    if (!isRecording || pausedAtRef.current === null) return;
+    if (!activeRef.current || pausedAtRef.current === null) return;
     pausedTotalRef.current += performance.now() - pausedAtRef.current;
     pausedAtRef.current = null;
-    for (const type of TRACK_TYPES) {
-      const recorder = recordersRef.current[type];
-      if (recorder?.state === "paused") recorder.resume();
+    for (const track of Object.values(tracksRef.current)) {
+      void runOnTrack(track, () => replacePart(track));
     }
     setIsPaused(false);
-  }, [isRecording]);
+  }, [replacePart, runOnTrack]);
+
+  // Cleanup on unmount.
+  useEffect(() => {
+    return () => {
+      activeRef.current = false;
+      for (const track of Object.values(tracksRef.current)) {
+        const part = track.part;
+        track.part = null;
+        if (!part) continue;
+        part.stopped = true;
+        try {
+          if (part.recorder?.state !== "inactive") part.recorder?.stop();
+        } catch {
+          /* already stopped */
+        }
+        part.cleanup();
+      }
+    };
+  }, []);
 
   return {
     isRecording,
