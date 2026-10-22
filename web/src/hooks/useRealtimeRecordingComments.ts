@@ -41,7 +41,14 @@ export const useRealtimeRecordingComments = (
         void queryClient.invalidateQueries({ queryKey });
       });
     });
+    const updateComment = (comment: RecordingComment) => {
+      queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) =>
+        comments?.map((c) => (c.id === comment.id ? comment : c)),
+      );
+    };
+
     socket.on("recording-comment-created", addComment);
+    socket.on("recording-comment-updated", updateComment);
 
     return () => {
       socket.disconnect();

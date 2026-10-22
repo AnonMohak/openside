@@ -7,19 +7,26 @@
  * once; it's remembered locally so they don't retype it on every comment.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
 import { useTheme } from "next-themes";
 import {
   FiArrowUp,
+  FiCornerDownRight,
+  FiCornerUpLeft,
+  FiEdit2,
   FiLoader,
   FiMessageSquare,
   FiMoreHorizontal,
   FiSmile,
   FiTrash2,
+  FiX,
 } from "react-icons/fi";
-import type { RecordingComment } from "@/hooks/useScreenRecordings";
+import {
+  isPendingComment,
+  type RecordingComment,
+} from "@/hooks/useScreenRecordings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -176,7 +183,13 @@ const EmojiButton = ({
 };
 
 // Revealed on hover; stays visible while its menu is open.
-const CommentOptions = ({ onDelete }: { onDelete: () => void }) => {
+const CommentOptions = ({
+  onEdit,
+  onDelete,
+}: {
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) => {
   const [open, setOpen] = useState(false);
 
   return (
@@ -186,7 +199,7 @@ const CommentOptions = ({ onDelete }: { onDelete: () => void }) => {
           type="button"
           aria-label="Comment options"
           title="Options"
-          className={`-my-1 -mr-1.5 ml-auto flex size-6 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer ${
+          className={`-my-1 -mr-1.5 ml-auto flex size-6 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100 cursor-pointer ${
             open
               ? "bg-background text-foreground opacity-100"
               : "text-fg-subtle opacity-0"
@@ -196,13 +209,21 @@ const CommentOptions = ({ onDelete }: { onDelete: () => void }) => {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          onSelect={onDelete}
-          className="text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
-        >
-          <FiTrash2 />
-          Delete
-        </DropdownMenuItem>
+        {onEdit && (
+          <DropdownMenuItem onSelect={onEdit}>
+            <FiEdit2 />
+            Edit
+          </DropdownMenuItem>
+        )}
+        {onDelete && (
+          <DropdownMenuItem
+            onSelect={onDelete}
+            className="text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
+          >
+            <FiTrash2 />
+            Delete
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -230,48 +251,289 @@ const Avatar = ({ comment }: { comment: RecordingComment }) => {
   );
 };
 
+/**
+ * Inline editor for a message. Enter saves, Shift+Enter breaks the line, Esc
+ * cancels.
+ */
+const EditComposer = ({
+  initialValue,
+  onSubmit,
+  onCancel,
+}: {
+  initialValue: string;
+  onSubmit: (body: string) => void;
+  onCancel: () => void;
+}) => {
+  const [value, setValue] = useState(initialValue);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const trimmed = value.trim();
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  const submit = () => {
+    if (trimmed) onSubmit(trimmed);
+  };
+
+  return (
+    <div className="mt-1 overflow-hidden rounded-lg border border-border/50 bg-background">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            submit();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+        rows={2}
+        maxLength={2000}
+        aria-label="Edit comment"
+        className="block w-full resize-none bg-transparent px-2.5 pt-2 text-sm leading-relaxed text-foreground outline-none"
+      />
+      <div className="flex items-center justify-end gap-1.5 px-2 pb-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-7 rounded-md bg-muted px-2.5 text-xs font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!trimmed}
+          className="h-7 rounded-md bg-brand px-2.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/** A one-line quote of the message a reply answers. */
+const QuotedMessage = ({
+  comment,
+  onClick,
+}: {
+  comment: RecordingComment;
+  onClick?: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title="Jump to message"
+    className="mb-1 flex w-full min-w-0 flex-col rounded-md border-l-2 border-brand/60 bg-muted/40 px-2 py-1 text-left transition-colors hover:bg-muted/70 cursor-pointer"
+  >
+    <span className="truncate text-[0.7rem] font-semibold text-fg-muted">
+      {comment.authorName}
+    </span>
+    <span className="line-clamp-1 break-all text-xs text-fg-subtle">
+      {comment.body}
+    </span>
+  </button>
+);
+
+const CommentItem = ({
+  comment,
+  quoted,
+  highlighted,
+  onJumpToQuoted,
+  onSeek,
+  onReply,
+  onEdit,
+  onDelete,
+}: {
+  comment: RecordingComment;
+  /** The message this one replies to, when it still exists. */
+  quoted?: RecordingComment;
+  highlighted: boolean;
+  onJumpToQuoted: () => void;
+  onSeek?: (timestampMs: number) => void;
+  onReply: () => void;
+  onEdit?: (body: string) => void;
+  onDelete?: () => void;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const pending = isPendingComment(comment);
+
+  const timestamp = comment.timestampMs != null && (
+    <button
+      type="button"
+      disabled={!onSeek}
+      onClick={() => onSeek?.(comment.timestampMs as number)}
+      title={`Play from ${formatPosition(comment.timestampMs)}`}
+      className="shrink-0 text-xs font-medium tabular-nums text-blue-500 hover:underline disabled:cursor-default disabled:no-underline cursor-pointer"
+    >
+      {formatPosition(comment.timestampMs)}
+    </button>
+  );
+
+  return (
+    <div
+      id={`comment-${comment.id}`}
+      className={`group/comment flex items-start gap-3 transition-opacity ${
+        pending ? "opacity-60" : ""
+      }`}
+    >
+      <Avatar comment={comment} />
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <EditComposer
+            initialValue={comment.body}
+            onCancel={() => setEditing(false)}
+            onSubmit={(body) => {
+              setEditing(false);
+              if (body !== comment.body) onEdit?.(body);
+            }}
+          />
+        ) : (
+          <>
+            {quoted && (
+              // Outside the bubble: what this answers, then who it answers.
+              <>
+                <QuotedMessage comment={quoted} onClick={onJumpToQuoted} />
+                <p className="mb-1 ml-1 flex items-center gap-1 text-xs text-fg-subtle">
+                  <FiCornerDownRight className="size-3 shrink-0" />
+                  <span className="truncate">
+                    Replied to{" "}
+                    <span className="font-medium text-fg-muted">
+                      {quoted.authorName}
+                    </span>
+                  </span>
+                </p>
+              </>
+            )}
+            <div
+              // Sharp top-left corner with a small tail pointing at the avatar.
+              className={`relative rounded-xl rounded-tl-none px-3 py-2 transition-colors duration-500 before:absolute before:-left-1.5 before:top-0 before:size-1.5 before:bg-inherit before:content-[''] before:[clip-path:polygon(0_0,100%_0,100%_100%)] ${
+                highlighted ? "bg-brand/15" : "bg-muted/60"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-semibold text-foreground">
+                  {comment.authorName}
+                </span>
+                <span className="shrink-0 text-xs text-fg-subtle">
+                  {formatWhen(comment.createdAt)}
+                  {comment.editedAt && " · edited"}
+                </span>
+                {timestamp}
+                {!pending && (onEdit || onDelete) && (
+                  <CommentOptions
+                    onEdit={onEdit ? () => setEditing(true) : undefined}
+                    onDelete={onDelete}
+                  />
+                )}
+              </div>
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/80">
+                {comment.body}
+              </p>
+            </div>
+            {!pending && (
+              <button
+                type="button"
+                onClick={onReply}
+                className="ml-1 mt-1 flex items-center gap-1 text-xs font-medium text-fg-subtle transition-colors hover:text-foreground cursor-pointer"
+              >
+                <FiCornerUpLeft className="size-3" />
+                Reply
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 interface RecordingCommentsProps {
   comments: RecordingComment[];
   isLoading?: boolean;
-  isPosting?: boolean;
   /** Anonymous visitors (share page, signed out) must name themselves. */
   askForName?: boolean;
   onSubmit: (input: {
     body: string;
     authorName?: string;
     timestampMs: number | null;
+    /** Set for replies: the message being answered. */
+    parentId?: string;
   }) => void;
   /** Where the viewer is in the video (ms), stamped onto a new comment. */
   getTimestampMs?: () => number | null;
   /** Clicking a comment's timestamp plays the video from there. */
   onSeek?: (timestampMs: number) => void;
+  onEdit?: (commentId: string, body: string) => void;
+  /** Which comments the viewer may edit (their own). */
+  canEdit?: (comment: RecordingComment) => boolean;
   onDelete?: (commentId: string) => void;
   /** Which comments show a delete affordance (own comment, or owner moderating). */
   canDelete?: (comment: RecordingComment) => boolean;
 }
 
+/** Within this many px of the bottom, new messages keep the list pinned there. */
+const STICK_TO_BOTTOM_PX = 80;
+
 const RecordingComments = ({
   comments,
   isLoading = false,
-  isPosting = false,
   askForName = false,
   onSubmit,
   getTimestampMs,
   onSeek,
+  onEdit,
+  canEdit,
   onDelete,
   canDelete,
 }: RecordingCommentsProps) => {
   const [body, setBody] = useState("");
   const [name, setName] = useState("");
+  const [replyingTo, setReplyingTo] = useState<RecordingComment | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const highlightTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (askForName) setName(readGuestName());
   }, [askForName]);
 
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  // Chat behaviour: open at the latest message, and follow new ones while the
+  // viewer is at the bottom (or just sent one themselves).
+  const lastComment = comments[comments.length - 1];
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el || !lastComment) return;
+    if (nearBottomRef.current || isPendingComment(lastComment)) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lastComment?.id, isLoading]);
+
+  // A quoted message that was deleted simply isn't shown.
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+
   const trimmedBody = body.trim();
   const trimmedName = name.trim();
-  const canPost = !!trimmedBody && (!askForName || !!trimmedName) && !isPosting;
+  const canPost = !!trimmedBody && (!askForName || !!trimmedName);
 
   // Drop the emoji at the caret (or over the selection), then park the caret
   // after it.
@@ -288,6 +550,25 @@ const RecordingComments = ({
     });
   };
 
+  const startReply = (comment: RecordingComment) => {
+    setReplyingTo(comment);
+    textareaRef.current?.focus();
+  };
+
+  const jumpTo = (commentId: string) => {
+    document
+      .getElementById(`comment-${commentId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedId(commentId);
+    if (highlightTimerRef.current) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = window.setTimeout(
+      () => setHighlightedId(null),
+      1400,
+    );
+  };
+
   const submit = () => {
     if (!canPost) return;
     if (askForName) rememberGuestName(trimmedName);
@@ -295,8 +576,10 @@ const RecordingComments = ({
       body: trimmedBody,
       authorName: askForName ? trimmedName : undefined,
       timestampMs: getTimestampMs?.() ?? null,
+      parentId: replyingTo?.id,
     });
     setBody("");
+    setReplyingTo(null);
   };
 
   return (
@@ -307,7 +590,16 @@ const RecordingComments = ({
         <h3 className="text-sm font-semibold text-foreground">Comments</h3>
       </div>
 
-      <div className="flex min-h-[160px] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+      <div
+        ref={listRef}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          nearBottomRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight <
+            STICK_TO_BOTTOM_PX;
+        }}
+        className="flex min-h-[160px] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+      >
         {isLoading ? (
           <div className="flex flex-1 items-center justify-center text-fg-subtle">
             <FiLoader className="size-4 animate-spin" />
@@ -327,43 +619,64 @@ const RecordingComments = ({
             </div>
           </div>
         ) : (
-          comments.map((comment) => (
-            <div key={comment.id} className="group flex items-start gap-3">
-              <Avatar comment={comment} />
-              <div className="min-w-0 flex-1 rounded-xl rounded-tl-sm bg-muted/60 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold text-foreground">
-                    {comment.authorName}
-                  </span>
-                  <span className="shrink-0 text-xs text-fg-subtle">
-                    {formatWhen(comment.createdAt)}
-                  </span>
-                  {comment.timestampMs != null && (
-                    <button
-                      type="button"
-                      disabled={!onSeek}
-                      onClick={() => onSeek?.(comment.timestampMs as number)}
-                      title={`Play from ${formatPosition(comment.timestampMs)}`}
-                      className="shrink-0 text-xs font-medium tabular-nums text-blue-500 hover:underline disabled:cursor-default disabled:no-underline cursor-pointer"
-                    >
-                      {formatPosition(comment.timestampMs)}
-                    </button>
-                  )}
-                  {onDelete && canDelete?.(comment) && (
-                    <CommentOptions onDelete={() => onDelete(comment.id)} />
-                  )}
-                </div>
-                <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/80">
-                  {comment.body}
-                </p>
-              </div>
-            </div>
-          ))
+          comments.map((comment) => {
+            const quoted = comment.parentId
+              ? byId.get(comment.parentId)
+              : undefined;
+            return (
+              <CommentItem
+                key={comment.id}
+                comment={comment}
+                quoted={quoted}
+                highlighted={highlightedId === comment.id}
+                onJumpToQuoted={() => quoted && jumpTo(quoted.id)}
+                onSeek={onSeek}
+                onReply={() => startReply(comment)}
+                onEdit={
+                  onEdit && canEdit?.(comment)
+                    ? (next) => onEdit(comment.id, next)
+                    : undefined
+                }
+                onDelete={
+                  onDelete && canDelete?.(comment)
+                    ? () => {
+                        if (replyingTo?.id === comment.id) setReplyingTo(null);
+                        onDelete(comment.id);
+                      }
+                    : undefined
+                }
+              />
+            );
+          })
         )}
       </div>
 
       <div className="p-3">
         <div className="overflow-hidden rounded-xl border border-border/50 bg-background">
+          {replyingTo && (
+            <div className="mx-2 mt-2 flex items-center gap-2 rounded-lg border-l-2 border-brand bg-muted/60 py-1.5 pl-2.5 pr-1.5 animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1 text-xs font-semibold text-brand">
+                  <FiCornerUpLeft className="size-3 shrink-0" />
+                  <span className="truncate">
+                    Replying to {replyingTo.authorName}
+                  </span>
+                </p>
+                <p className="mt-0.5 line-clamp-1 break-all text-xs text-fg-muted">
+                  {replyingTo.body}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                aria-label="Cancel reply"
+                title="Cancel reply"
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-background hover:text-foreground cursor-pointer"
+              >
+                <FiX className="size-3.5" />
+              </button>
+            </div>
+          )}
           {askForName && (
             <input
               value={name}
@@ -379,15 +692,22 @@ const RecordingComments = ({
             value={body}
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={(event) => {
-              // Enter posts; Shift+Enter starts a new line.
+              // Enter posts; Shift+Enter starts a new line; Esc drops a reply.
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 submit();
+              } else if (event.key === "Escape" && replyingTo) {
+                event.preventDefault();
+                setReplyingTo(null);
               }
             }}
             rows={2}
             maxLength={2000}
-            placeholder="Write a comment…"
+            placeholder={
+              replyingTo
+                ? `Reply to ${replyingTo.authorName}…`
+                : "Write a comment…"
+            }
             aria-label="Comment"
             className="block w-full resize-none bg-transparent px-3 pt-2.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-fg-faint"
           />
@@ -407,11 +727,7 @@ const RecordingComments = ({
               title="Post comment"
               className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
             >
-              {isPosting ? (
-                <FiLoader className="size-4 animate-spin" />
-              ) : (
-                <FiArrowUp className="size-4" />
-              )}
+              <FiArrowUp className="size-4" />
             </button>
           </div>
         </div>

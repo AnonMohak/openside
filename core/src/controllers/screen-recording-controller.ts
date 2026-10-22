@@ -32,6 +32,7 @@ import {
 	setScreenSessionPaused,
 	startScreenRecordingSession,
 	stopScreenRecordingSession,
+	updateRecordingComment,
 } from "../services/recording-service";
 import { maybeFinalizeScreenSession } from "../services/screen-finalization-service";
 import {
@@ -40,7 +41,10 @@ import {
 	presignGet,
 	presignPut,
 } from "../services/storage-service";
-import { emitRecordingCommentCreated } from "../sockets/index";
+import {
+	emitRecordingCommentCreated,
+	emitRecordingCommentUpdated,
+} from "../sockets/index";
 import { serializeBigInt } from "../utils/serialize";
 
 const VALID_TRACK_TYPES: TrackType[] = [
@@ -1391,6 +1395,8 @@ export async function createSharedCommentController(
 			authorName,
 			body,
 			timestampMs: parseCommentTimestamp(req.body.timestampMs),
+			parentId:
+				typeof req.body.parentId === "string" ? req.body.parentId : null,
 		});
 		emitRecordingCommentCreated(sessionId, comment);
 
@@ -1400,6 +1406,14 @@ export async function createSharedCommentController(
 			message: "Comment posted successfully!",
 		});
 	} catch (error: unknown) {
+		if (error instanceof Error && error.message === "PARENT_NOT_FOUND") {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: "The comment you're replying to no longer exists!",
+			});
+			return;
+		}
 		const errorMessage =
 			error instanceof Error ? error.message : "Unknown error";
 		res.status(500).json({
@@ -1511,6 +1525,8 @@ export async function createScreenCommentController(
 			authorName: user.name?.trim() || "User",
 			body,
 			timestampMs: parseCommentTimestamp(req.body.timestampMs),
+			parentId:
+				typeof req.body.parentId === "string" ? req.body.parentId : null,
 		});
 		emitRecordingCommentCreated(sessionId, comment);
 
@@ -1520,6 +1536,14 @@ export async function createScreenCommentController(
 			message: "Comment posted successfully!",
 		});
 	} catch (error: unknown) {
+		if (error instanceof Error && error.message === "PARENT_NOT_FOUND") {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: "The comment you're replying to no longer exists!",
+			});
+			return;
+		}
 		const errorMessage =
 			error instanceof Error ? error.message : "Unknown error";
 		res.status(500).json({
@@ -1531,6 +1555,82 @@ export async function createScreenCommentController(
 }
 
 /** Delete a comment (its author, or the recording's owner as moderator). */
+/** Edit a comment's text (its signed-in author only). */
+export async function updateCommentController(
+	req: AuthenticatedRequest,
+	res: Response,
+): Promise<void> {
+	try {
+		if (!req.user) {
+			res.status(401).json({
+				success: false,
+				data: null,
+				message: "Authentication required!",
+			});
+			return;
+		}
+
+		const commentId = req.params.commentId as string | undefined;
+		const body = typeof req.body.body === "string" ? req.body.body.trim() : "";
+		if (!commentId) {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: "Comment ID is required!",
+			});
+			return;
+		}
+		if (!body || body.length > COMMENT_MAX_LENGTH) {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: `Comment must be between 1 and ${COMMENT_MAX_LENGTH} characters!`,
+			});
+			return;
+		}
+
+		const user = await findOrCreateUser(req.user);
+		const { recordingSessionId, ...comment } = await updateRecordingComment(
+			commentId,
+			user.id,
+			body,
+		);
+		emitRecordingCommentUpdated(recordingSessionId, comment);
+
+		res.status(200).json({
+			success: true,
+			data: { comment },
+			message: "Comment updated successfully!",
+		});
+	} catch (error: unknown) {
+		if (error instanceof Error) {
+			if (error.message === "COMMENT_NOT_FOUND") {
+				res.status(404).json({
+					success: false,
+					data: null,
+					message: "Comment not found!",
+				});
+				return;
+			}
+			if (error.message === "FORBIDDEN") {
+				res.status(403).json({
+					success: false,
+					data: null,
+					message: "You can't edit this comment!",
+				});
+				return;
+			}
+		}
+		const errorMessage =
+			error instanceof Error ? error.message : "Unknown error";
+		res.status(500).json({
+			success: false,
+			data: null,
+			message: `Failed to update comment: ${errorMessage}!`,
+		});
+	}
+}
+
 export async function deleteScreenCommentController(
 	req: AuthenticatedRequest,
 	res: Response,

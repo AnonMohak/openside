@@ -269,9 +269,16 @@ model RecordingComment {
   body               String
   // Playback position (ms) the commenter was at; null when they hadn't played.
   timestampMs        Int?
+  // The message a reply quotes. Deleting that message keeps the reply and
+  // just clears this.
+  parentId           String?
+  parent             RecordingComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies            RecordingComment[] @relation("CommentReplies")
+  editedAt           DateTime?
   createdAt          DateTime         @default(now())
 
   @@index([recordingSessionId, createdAt])
+  @@index([parentId])
 }
 
 enum RecordingSource {

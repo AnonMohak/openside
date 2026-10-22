@@ -14,7 +14,8 @@ import { LuDownload } from "react-icons/lu";
 import {
   fetchScreenOutputUrl,
   useCreateScreenComment,
-  useDeleteScreenComment,
+  useDeleteRecordingComment,
+  useEditRecordingComment,
   useDeleteScreenRecording,
   useRenameScreenRecording,
   useScreenComments,
@@ -33,6 +34,7 @@ import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
 import { toast } from "@/lib/toast";
 import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
+import { useGetMe } from "@/hooks/useUserQuery";
 import InlineTitle, {
   type InlineTitleHandle,
 } from "@/components/shared/InlineTitle";
@@ -385,7 +387,12 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   const { data: comments, isLoading: areCommentsLoading } =
     useScreenComments(sessionId);
   const createComment = useCreateScreenComment(sessionId);
-  const deleteComment = useDeleteScreenComment(sessionId);
+  const deleteComment = useDeleteRecordingComment([
+    "screen-comments",
+    sessionId,
+  ]);
+  const editComment = useEditRecordingComment(["screen-comments", sessionId]);
+  const { data: me } = useGetMe();
   const rec = recordings?.find((recording) => recording.id === sessionId);
   // The owner joins the same verified stream as public viewers when sharing is
   // active, so incoming comments land in this panel without a refresh.
@@ -604,15 +611,18 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
             <RecordingComments
               comments={comments ?? []}
               isLoading={areCommentsLoading}
-              isPosting={createComment.isPending}
-              onSubmit={({ body, timestampMs }) =>
-                createComment.mutate({ body, timestampMs })
+              onSubmit={({ body, timestampMs, parentId }) =>
+                createComment.mutate({ body, timestampMs, parentId })
               }
               getTimestampMs={() => {
                 const seconds = playerRef.current?.getTime();
                 return seconds == null ? null : Math.round(seconds * 1000);
               }}
               onSeek={(ms) => playerRef.current?.playFrom(ms / 1000)}
+              onEdit={(commentId, body) =>
+                editComment.mutate({ commentId, body })
+              }
+              canEdit={(comment) => !!me && comment.user?.id === me.id}
               onDelete={(commentId) => deleteComment.mutate(commentId)}
               // The recording's owner is viewing, so every comment is theirs to
               // moderate.

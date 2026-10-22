@@ -2222,6 +2222,8 @@ export async function listRecordingComments(sessionId: string) {
 			authorName: true,
 			body: true,
 			timestampMs: true,
+			parentId: true,
+			editedAt: true,
 			createdAt: true,
 			user: { select: { id: true, avatar: true } },
 		},
@@ -2246,12 +2248,24 @@ export async function createRecordingComment(data: {
 	authorName: string;
 	body: string;
 	timestampMs: number | null;
+	parentId: string | null;
 }) {
 	const session = await prisma.recordingSession.findUnique({
 		where: { id: data.sessionId },
 		select: { id: true },
 	});
 	if (!session) throw new Error("SESSION_NOT_FOUND");
+
+	// A reply quotes one message, which must belong to the same recording.
+	if (data.parentId) {
+		const parent = await prisma.recordingComment.findUnique({
+			where: { id: data.parentId },
+			select: { recordingSessionId: true },
+		});
+		if (!parent || parent.recordingSessionId !== data.sessionId) {
+			throw new Error("PARENT_NOT_FOUND");
+		}
+	}
 
 	return await prisma.recordingComment.create({
 		data: {
@@ -2260,12 +2274,47 @@ export async function createRecordingComment(data: {
 			authorName: data.authorName.slice(0, COMMENT_AUTHOR_MAX_LENGTH),
 			body: data.body.slice(0, COMMENT_MAX_LENGTH),
 			timestampMs: data.timestampMs,
+			parentId: data.parentId,
 		},
 		select: {
 			id: true,
 			authorName: true,
 			body: true,
 			timestampMs: true,
+			parentId: true,
+			editedAt: true,
+			createdAt: true,
+			user: { select: { id: true, avatar: true } },
+		},
+	});
+}
+
+/** Edit a comment's text. Only its (signed-in) author may. */
+export async function updateRecordingComment(
+	commentId: string,
+	userId: string,
+	body: string,
+) {
+	const comment = await prisma.recordingComment.findUnique({
+		where: { id: commentId },
+		select: { userId: true },
+	});
+	if (!comment) throw new Error("COMMENT_NOT_FOUND");
+	if (!comment.userId || comment.userId !== userId) {
+		throw new Error("FORBIDDEN");
+	}
+
+	return await prisma.recordingComment.update({
+		where: { id: commentId },
+		data: { body: body.slice(0, COMMENT_MAX_LENGTH), editedAt: new Date() },
+		select: {
+			id: true,
+			recordingSessionId: true,
+			authorName: true,
+			body: true,
+			timestampMs: true,
+			parentId: true,
+			editedAt: true,
 			createdAt: true,
 			user: { select: { id: true, avatar: true } },
 		},

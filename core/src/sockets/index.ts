@@ -29,6 +29,9 @@ type RecordingCommentEvent = {
 	id: string;
 	authorName: string;
 	body: string;
+	timestampMs: number | null;
+	parentId: string | null;
+	editedAt: Date | null;
 	createdAt: Date;
 	user: { id: string; avatar: string | null } | null;
 };
@@ -47,6 +50,16 @@ export function emitRecordingCommentCreated(
 	socketServer
 		?.to(recordingCommentsRoom(sessionId))
 		.emit("recording-comment-created", comment);
+}
+
+/** Deliver an edited comment to every viewer of that recording. */
+export function emitRecordingCommentUpdated(
+	sessionId: string,
+	comment: RecordingCommentEvent,
+) {
+	socketServer
+		?.to(recordingCommentsRoom(sessionId))
+		.emit("recording-comment-updated", comment);
 }
 
 export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {

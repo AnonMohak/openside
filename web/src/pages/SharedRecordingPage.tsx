@@ -18,7 +18,13 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
-import type { ScreenOutputKind } from "@/hooks/useScreenRecordings";
+import {
+  useDeleteRecordingComment,
+  useEditRecordingComment,
+  type RecordingComment,
+  type ScreenOutputKind,
+} from "@/hooks/useScreenRecordings";
+import { useGetMe } from "@/hooks/useUserQuery";
 import {
   fetchSharedOutputUrl,
   fetchSharedFinalOutputDownload,
@@ -393,6 +399,11 @@ const SharedRecordingPage = () => {
   const { data: comments, isLoading: areCommentsLoading } =
     useSharedComments(token);
   const createComment = useCreateSharedComment(token);
+  const editComment = useEditRecordingComment(["shared-comments", token]);
+  const deleteComment = useDeleteRecordingComment(["shared-comments", token]);
+  const { data: me } = useGetMe();
+  const isOwnComment = (comment: RecordingComment) =>
+    !!me && comment.user?.id === me.id;
   useRealtimeRecordingComments(token, "shared");
   useRecordSharedView(token, !!rec);
 
@@ -605,18 +616,29 @@ const SharedRecordingPage = () => {
                 <RecordingComments
                   comments={comments ?? []}
                   isLoading={areCommentsLoading}
-                  isPosting={createComment.isPending}
                   // Signed-out visitors have no account to attribute to, so they
                   // name themselves; a signed-in one comments as their account.
                   askForName={!isSignedIn}
-                  onSubmit={({ body, authorName, timestampMs }) =>
-                    createComment.mutate({ body, authorName, timestampMs })
+                  onSubmit={({ body, authorName, timestampMs, parentId }) =>
+                    createComment.mutate({
+                      body,
+                      authorName,
+                      timestampMs,
+                      parentId,
+                    })
                   }
                   getTimestampMs={() => {
                     const seconds = playerRef.current?.getTime();
                     return seconds == null ? null : Math.round(seconds * 1000);
                   }}
                   onSeek={(ms) => playerRef.current?.playFrom(ms / 1000)}
+                  // Signed-in visitors can edit or remove their own comments.
+                  onEdit={(commentId, body) =>
+                    editComment.mutate({ commentId, body })
+                  }
+                  canEdit={isOwnComment}
+                  onDelete={(commentId) => deleteComment.mutate(commentId)}
+                  canDelete={isOwnComment}
                 />
               </div>
             )}

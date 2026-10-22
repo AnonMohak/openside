@@ -11,10 +11,12 @@ import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import api from "@/lib/axiosInstance";
-import type {
-  RecordingComment,
-  ScreenOutputKind,
+import {
+  optimisticCommentHandlers,
+  type RecordingComment,
+  type ScreenOutputKind,
 } from "@/hooks/useScreenRecordings";
+import { useGetMe } from "@/hooks/useUserQuery";
 
 interface SharedRecording {
   id: string;
@@ -170,30 +172,24 @@ export const useSharedComments = (token: string) =>
 
 export const useCreateSharedComment = (token: string) => {
   const queryClient = useQueryClient();
+  // Signed-in visitors post as their account; the optimistic row shows them.
+  const { data: me } = useGetMe();
 
   return useMutation({
     mutationFn: async (input: {
       body: string;
       authorName?: string;
       timestampMs: number | null;
+      parentId?: string;
     }) => {
       const { data } = await api.post(`/recording/shared/${token}/comments`, {
         body: input.body,
         authorName: input.authorName,
         timestampMs: input.timestampMs,
+        parentId: input.parentId,
       });
       return data.data.comment as RecordingComment;
     },
-    onSuccess: (comment) => {
-      queryClient.setQueryData<RecordingComment[]>(
-        ["shared-comments", token],
-        (comments) => {
-          const current = comments ?? [];
-          return current.some(({ id }) => id === comment.id)
-            ? current
-            : [...current, comment];
-        },
-      );
-    },
+    ...optimisticCommentHandlers(queryClient, ["shared-comments", token], me),
   });
 };

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
+import { useGetMe, type MeUser } from "@/hooks/useUserQuery";
 
 export type ScreenOutputKind = "screen" | "screenAligned" | "camera" | "both";
 
@@ -39,6 +40,9 @@ export interface RecordingComment {
   body: string;
   /** Playback position the comment was left at; null if not tied to one. */
   timestampMs: number | null;
+  /** Set on replies: the top-level comment of the thread. */
+  parentId: string | null;
+  editedAt: string | null;
   createdAt: string;
   /** Null for anonymous share-link commenters. */
   user: { id: string; avatar: string | null } | null;
@@ -199,32 +203,141 @@ export const useScreenComments = (sessionId: string, enabled = true) =>
     retry: false,
   });
 
+/** Optimistic comments carry this id prefix until the server's row lands. */
+export const PENDING_COMMENT_PREFIX = "pending-";
+
+export const isPendingComment = (comment: RecordingComment) =>
+  comment.id.startsWith(PENDING_COMMENT_PREFIX);
+
+/**
+ * Optimistic create, shared by the owner and share-page hooks: the comment
+ * shows at once, is swapped for the server's row on success (in place, or
+ * dropped if the live socket already delivered it), and removed on failure.
+ */
+export const optimisticCommentHandlers = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  queryKey: readonly unknown[],
+  me: MeUser | null | undefined,
+) => ({
+  onMutate: async (input: {
+    body: string;
+    authorName?: string;
+    timestampMs: number | null;
+    parentId?: string;
+  }) => {
+    await queryClient.cancelQueries({ queryKey });
+    const pending: RecordingComment = {
+      id: `${PENDING_COMMENT_PREFIX}${crypto.randomUUID()}`,
+      authorName: me?.name?.trim() || input.authorName || "You",
+      body: input.body,
+      timestampMs: input.timestampMs,
+      parentId: input.parentId ?? null,
+      editedAt: null,
+      createdAt: new Date().toISOString(),
+      user: me ? { id: me.id, avatar: me.avatar ?? null } : null,
+    };
+    queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) => [
+      ...(comments ?? []),
+      pending,
+    ]);
+    return { pendingId: pending.id };
+  },
+  onSuccess: (
+    comment: RecordingComment,
+    _input: unknown,
+    context: { pendingId: string } | undefined,
+  ) => {
+    queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) => {
+      const current = comments ?? [];
+      if (current.some(({ id }) => id === comment.id)) {
+        return current.filter(({ id }) => id !== context?.pendingId);
+      }
+      return current.some(({ id }) => id === context?.pendingId)
+        ? current.map((c) => (c.id === context?.pendingId ? comment : c))
+        : [...current, comment];
+    });
+  },
+  onError: (
+    _error: unknown,
+    _input: unknown,
+    context: { pendingId: string } | undefined,
+  ) => {
+    queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) =>
+      comments?.filter(({ id }) => id !== context?.pendingId),
+    );
+    toast.error("Couldn't post your comment. Try again.");
+  },
+});
+
 export const useCreateScreenComment = (sessionId: string) => {
   const queryClient = useQueryClient();
+  const { data: me } = useGetMe();
 
   return useMutation({
-    mutationFn: async (input: { body: string; timestampMs: number | null }) => {
+    mutationFn: async (input: {
+      body: string;
+      timestampMs: number | null;
+      parentId?: string;
+    }) => {
       const { data } = await api.post(
         `/recording/screen/${sessionId}/comments`,
         input,
       );
       return data.data.comment as RecordingComment;
     },
-    onSuccess: (comment) => {
-      queryClient.setQueryData<RecordingComment[]>(
-        ["screen-comments", sessionId],
-        (comments) => {
-          const current = comments ?? [];
-          return current.some(({ id }) => id === comment.id)
-            ? current
-            : [...current, comment];
-        },
+    ...optimisticCommentHandlers(
+      queryClient,
+      ["screen-comments", sessionId],
+      me,
+    ),
+  });
+};
+
+/**
+ * Edit a comment's text (authors only). Optimistic: the new text shows at
+ * once and reverts on failure. `queryKey` is the comment list it lives in.
+ */
+export const useEditRecordingComment = (queryKey: readonly unknown[]) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { commentId: string; body: string }) => {
+      const { data } = await api.patch(
+        `/recording/screen/comment/${input.commentId}`,
+        { body: input.body },
       );
+      return data.data.comment as RecordingComment;
+    },
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<RecordingComment[]>(queryKey);
+      queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) =>
+        comments?.map((c) =>
+          c.id === input.commentId
+            ? { ...c, body: input.body, editedAt: new Date().toISOString() }
+            : c,
+        ),
+      );
+      return { previous };
+    },
+    onSuccess: (comment) => {
+      queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) =>
+        comments?.map((c) => (c.id === comment.id ? comment : c)),
+      );
+    },
+    onError: (_error, _input, context) => {
+      queryClient.setQueryData(queryKey, context?.previous);
+      toast.error("Couldn't save your edit.");
     },
   });
 };
 
-export const useDeleteScreenComment = (sessionId: string) => {
+/**
+ * Delete a comment. Optimistic: it disappears at once (replies to it stay,
+ * just without the quote) and comes back on failure. `queryKey` is the
+ * comment list it lives in.
+ */
+export const useDeleteRecordingComment = (queryKey: readonly unknown[]) => {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -232,11 +345,21 @@ export const useDeleteScreenComment = (sessionId: string) => {
       await api.delete(`/recording/screen/comment/${commentId}`);
       return commentId;
     },
-    onSuccess: (commentId) => {
-      queryClient.setQueryData<RecordingComment[]>(
-        ["screen-comments", sessionId],
-        (comments) => comments?.filter((c) => c.id !== commentId),
+    onMutate: async (commentId: string) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<RecordingComment[]>(queryKey);
+      queryClient.setQueryData<RecordingComment[]>(queryKey, (comments) =>
+        comments
+          ?.filter((c) => c.id !== commentId)
+          .map((c) =>
+            c.parentId === commentId ? { ...c, parentId: null } : c,
+          ),
       );
+      return { previous };
+    },
+    onError: (_error, _commentId, context) => {
+      queryClient.setQueryData(queryKey, context?.previous);
+      toast.error("Couldn't delete that comment.");
     },
   });
 };

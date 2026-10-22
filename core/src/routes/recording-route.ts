@@ -39,6 +39,7 @@ import {
 	startScreenSessionController,
 	stopScreenSessionController,
 	unshareScreenSessionController,
+	updateCommentController,
 } from "../controllers/screen-recording-controller";
 import { sensitiveLimiter } from "../lib/rate-limit";
 import {
@@ -126,6 +127,12 @@ router.post(
 	"/screen/:sessionId/comments",
 	authMiddleware,
 	createScreenCommentController,
+);
+// Authors edit their own comments from either the project or the share page.
+router.patch(
+	"/screen/comment/:commentId",
+	authMiddleware,
+	updateCommentController,
 );
 router.delete(
 	"/screen/comment/:commentId",
