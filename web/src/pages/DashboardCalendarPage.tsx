@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Mail,
+  Monitor,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -22,6 +23,10 @@ import {
 } from "@/components/shared/ui/dropdown-menu";
 import ScheduleModal from "@/components/Dashboard/ScheduleModal";
 import { useDeleteSpace, useGetUserSpaces } from "@/hooks/useSpace";
+import {
+  useScreenRecordings,
+  type ScreenRecording,
+} from "@/hooks/useScreenRecordings";
 import { useGetMe } from "@/hooks/useUserQuery";
 import { toast } from "@/lib/toast";
 import CallWarningDialog from "@/components/Space/ui/CallWarningDialog";
@@ -34,6 +39,8 @@ const CALENDAR_VIEWS: CalendarView[] = ["week", "month", "list"];
 
 interface CalendarEvent {
   id: string;
+  /** A space session (meeting recording) or a solo screen recording. */
+  source: "space" | "screen";
   title: string;
   joinCode: string;
   status: string;
@@ -95,18 +102,56 @@ const eventDate = (space: Space): Date | null => {
 const isRecordingSession = (space: Space): boolean =>
   (space._count?.recordingSessions ?? 0) > 0 || space.status === "SCHEDULED";
 
+const spaceEvent = (space: Space): CalendarEvent | null => {
+  const date = eventDate(space);
+  if (!date) return null;
+  return {
+    id: space.id,
+    source: "space",
+    title: space.title || "Untitled recording",
+    joinCode: space.joinCode,
+    status: space.status,
+    hostId: space.hostId,
+    invitedBy:
+      space.userRole === "INVITED"
+        ? (space.host?.name ?? "the host")
+        : undefined,
+    date,
+  };
+};
+
+// A screen recording sits on the day it was recorded. It's always the
+// user's own and always a finished (or finishing) recording.
+const screenEvent = (rec: ScreenRecording): CalendarEvent | null => {
+  const date = new Date(rec.startedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    id: rec.id,
+    source: "screen",
+    title: rec.title || "Untitled recording",
+    joinCode: "",
+    status: rec.status,
+    hostId: "",
+    date,
+  };
+};
+
+const eventKey = (event: CalendarEvent) => `${event.source}-${event.id}`;
+
 const statusStyles = () => "border-border/50 bg-primary text-foreground";
 
-type EventKind = "upcoming" | "missed" | "invited" | "recorded";
+type EventKind = "upcoming" | "missed" | "invited" | "recorded" | "screen";
 
 const eventKind = (event: CalendarEvent): EventKind => {
+  if (event.source === "screen") return "screen";
   if (event.status !== "SCHEDULED") return "recorded";
   // Scheduled but its time already passed without the host starting it.
   if (event.date.getTime() < Date.now()) return "missed";
   return event.invitedBy ? "invited" : "upcoming";
 };
 
-// One icon per kind so upcoming, missed, invited and recorded read apart.
+// One icon per kind so upcoming, missed, invited, space recordings (film) and
+// screen recordings (monitor) read apart.
 const EventIcon = ({ kind, size = 12 }: { kind: EventKind; size?: number }) =>
   kind === "upcoming" ? (
     <CalendarClock size={size} className="shrink-0 text-danger" />
@@ -114,6 +159,8 @@ const EventIcon = ({ kind, size = 12 }: { kind: EventKind; size?: number }) =>
     <CalendarX size={size} className="shrink-0 text-fg-subtle" />
   ) : kind === "invited" ? (
     <Mail size={size} className="shrink-0 text-brand dark:text-blue-300" />
+  ) : kind === "screen" ? (
+    <Monitor size={size} className="shrink-0 opacity-70" />
   ) : (
     <RiMovie2Line size={size + 1} className="shrink-0 opacity-70" />
   );
@@ -133,7 +180,11 @@ const EventPill = ({
       type="button"
       onClick={onClick}
       title={`${formatTime(event.date)} - ${event.title}${
-        event.invitedBy ? ` (invited by ${event.invitedBy})` : ""
+        event.source === "screen"
+          ? " (screen recording)"
+          : event.invitedBy
+            ? ` (invited by ${event.invitedBy})`
+            : ""
       }`}
       className={`flex w-full items-center gap-1.5 truncate rounded-lg border px-2 py-2 text-left text-xs leading-tight transition-colors hover:bg-muted cursor-pointer ${statusStyles()}`}
     >
@@ -171,7 +222,11 @@ const DashboardCalendarPage = () => {
   const [focusDate, setFocusDate] = useState(() => new Date());
   const [view, setView] = useState<CalendarView>("month");
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
-  const { data: spaces = [], isLoading } = useGetUserSpaces("all");
+  const { data: spaces = [], isLoading: areSpacesLoading } =
+    useGetUserSpaces("all");
+  const { data: screenRecordings = [], isLoading: areScreenLoading } =
+    useScreenRecordings();
+  const isLoading = areSpacesLoading || areScreenLoading;
   const { data: user } = useGetMe();
   const deleteSpace = useDeleteSpace();
   const [pendingDelete, setPendingDelete] = useState<CalendarEvent | null>(
@@ -197,23 +252,12 @@ const DashboardCalendarPage = () => {
 
   const eventsByDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    for (const space of spaces) {
-      if (!isRecordingSession(space)) continue;
-      const date = eventDate(space);
-      if (!date) continue;
-      const event: CalendarEvent = {
-        id: space.id,
-        title: space.title || "Untitled recording",
-        joinCode: space.joinCode,
-        status: space.status,
-        hostId: space.hostId,
-        invitedBy:
-          space.userRole === "INVITED"
-            ? (space.host?.name ?? "the host")
-            : undefined,
-        date,
-      };
-      const key = dayKey(date);
+    const events = [
+      ...spaces.filter(isRecordingSession).map(spaceEvent),
+      ...screenRecordings.map(screenEvent),
+    ].filter((e): e is CalendarEvent => e !== null);
+    for (const event of events) {
+      const key = dayKey(event.date);
       const existing = map.get(key);
       if (existing) existing.push(event);
       else map.set(key, [event]);
@@ -223,12 +267,14 @@ const DashboardCalendarPage = () => {
       list.sort((a, b) => a.date.getTime() - b.date.getTime());
     }
     return map;
-  }, [spaces]);
+  }, [spaces, screenRecordings]);
 
   const openEvent = (event: CalendarEvent) => {
     // A still-scheduled session opens the space/join link so the host can start
     // it; everything else is a recording and opens its project.
-    if (event.status === "SCHEDULED") {
+    if (event.source === "screen") {
+      navigate(`/dashboard/project/screen/${event.id}`);
+    } else if (event.status === "SCHEDULED") {
       navigate(`/${event.joinCode}`);
     } else {
       navigate(`/dashboard/project/${event.id}`);
@@ -237,7 +283,8 @@ const DashboardCalendarPage = () => {
 
   const renderRow = (event: CalendarEvent) => {
     const onDelete = deleteHandler(event);
-    const isScheduled = event.status === "SCHEDULED";
+    const isScreen = event.source === "screen";
+    const isScheduled = !isScreen && event.status === "SCHEDULED";
     // Scheduled but its time already passed without the host starting it.
     const isMissed = isScheduled && event.date.getTime() < Date.now();
     const isUpcoming = isScheduled && !isMissed;
@@ -249,7 +296,7 @@ const DashboardCalendarPage = () => {
     }).format(event.date);
     return (
       <div
-        key={event.id}
+        key={eventKey(event)}
         className="group flex items-center gap-1 pr-2 transition-colors hover:bg-muted/50"
       >
         <button
@@ -281,7 +328,11 @@ const DashboardCalendarPage = () => {
               <EventIcon kind={eventKind(event)} />
               <span className="truncate">
                 {time}
-                {event.invitedBy && ` · Invited by ${event.invitedBy}`}
+                {isScreen
+                  ? " · Screen recording"
+                  : event.invitedBy
+                    ? ` · Invited by ${event.invitedBy}`
+                    : !isScheduled && " · Space recording"}
               </span>
             </span>
           </span>
@@ -300,7 +351,9 @@ const DashboardCalendarPage = () => {
                 ? "Invited"
                 : isUpcoming
                   ? "Upcoming"
-                  : "Recorded"}
+                  : isScreen
+                    ? "Screen"
+                    : "Recorded"}
           </span>
         </button>
         {onDelete ? (
@@ -371,29 +424,12 @@ const DashboardCalendarPage = () => {
   // "Upcoming", then everything that has actually recorded under "Recordings",
   // grouped by the month it happened in. Months with no recordings are skipped.
   const { upcomingEvents, missedEvents, pastMonths } = useMemo(() => {
-    const toEvent = (space: Space): CalendarEvent | null => {
-      const date = eventDate(space);
-      if (!date) return null;
-      return {
-        id: space.id,
-        title: space.title || "Untitled recording",
-        joinCode: space.joinCode,
-        status: space.status,
-        hostId: space.hostId,
-        invitedBy:
-          space.userRole === "INVITED"
-            ? (space.host?.name ?? "the host")
-            : undefined,
-        date,
-      };
-    };
-
     // Still-scheduled sessions: upcoming if their time hasn't come yet,
     // missed if it passed without the host ever starting them.
     const now = Date.now();
     const scheduled = spaces
       .filter((space) => space.status === "SCHEDULED")
-      .map(toEvent)
+      .map(spaceEvent)
       .filter((e): e is CalendarEvent => e !== null);
     const upcoming = scheduled
       .filter((event) => event.date.getTime() >= now)
@@ -402,11 +438,14 @@ const DashboardCalendarPage = () => {
       .filter((event) => event.date.getTime() < now)
       .sort((a, b) => b.date.getTime() - a.date.getTime());
 
-    // Recordings = sessions that produced a recording, regardless of date.
-    const recordings = spaces
-      .filter((space) => (space._count?.recordingSessions ?? 0) > 0)
-      .map(toEvent)
-      .filter((e): e is CalendarEvent => e !== null);
+    // Recordings = sessions that produced a recording plus screen
+    // recordings, regardless of date.
+    const recordings = [
+      ...spaces
+        .filter((space) => (space._count?.recordingSessions ?? 0) > 0)
+        .map(spaceEvent),
+      ...screenRecordings.map(screenEvent),
+    ].filter((e): e is CalendarEvent => e !== null);
 
     // Bucket recordings by calendar month, newest month first.
     const buckets = new Map<string, CalendarEvent[]>();
@@ -432,7 +471,7 @@ const DashboardCalendarPage = () => {
       missedEvents: missed,
       pastMonths: months,
     };
-  }, [spaces]);
+  }, [spaces, screenRecordings]);
 
   return (
     <>
@@ -736,7 +775,7 @@ const DashboardCalendarPage = () => {
                             >
                               {dayEvents.slice(0, maxEvents).map((event) => (
                                 <EventPill
-                                  key={event.id}
+                                  key={eventKey(event)}
                                   event={event}
                                   onClick={() => openEvent(event)}
                                   onDelete={deleteHandler(event)}
