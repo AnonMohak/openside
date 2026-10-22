@@ -2381,10 +2381,11 @@ export async function deleteRecordingComment(
 }
 
 /** Rename a SCREEN_RECORDER session; ownership is the session's userId. */
-export async function renameScreenRecordingSession(
+/** Change a screen recording's title and/or description (owner only). */
+export async function updateScreenRecordingSession(
 	sessionId: string,
 	userId: string,
-	title: string,
+	changes: { title?: string; description?: string | null },
 ) {
 	const session = await prisma.recordingSession.findUnique({
 		where: { id: sessionId },
@@ -2401,8 +2402,8 @@ export async function renameScreenRecordingSession(
 
 	return await prisma.recordingSession.update({
 		where: { id: sessionId },
-		data: { title },
-		select: { id: true, title: true },
+		data: changes,
+		select: { id: true, title: true, description: true },
 	});
 }
 

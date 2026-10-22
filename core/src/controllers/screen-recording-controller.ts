@@ -28,11 +28,11 @@ import {
 	markScreenRecordingComplete,
 	parseCommentTimestamp,
 	recordSharedView,
-	renameScreenRecordingSession,
 	setScreenSessionPaused,
 	startScreenRecordingSession,
 	stopScreenRecordingSession,
 	updateRecordingComment,
+	updateScreenRecordingSession,
 } from "../services/recording-service";
 import { maybeFinalizeScreenSession } from "../services/screen-finalization-service";
 import {
@@ -274,6 +274,8 @@ export const pauseScreenSessionController = screenSessionPauseController(true);
 export const resumeScreenSessionController =
 	screenSessionPauseController(false);
 
+const SCREEN_DESCRIPTION_MAX_LENGTH = 2000;
+
 export async function renameScreenSessionController(
 	req: AuthenticatedRequest,
 	res: Response,
@@ -289,8 +291,6 @@ export async function renameScreenSessionController(
 		}
 
 		const sessionId = req.params.sessionId as string | undefined;
-		const title =
-			typeof req.body.title === "string" ? req.body.title.trim() : "";
 		if (!sessionId) {
 			res.status(400).json({
 				success: false,
@@ -299,26 +299,57 @@ export async function renameScreenSessionController(
 			});
 			return;
 		}
-		if (!title || title.length > 120) {
+
+		// Either field may be sent alone. A blank description clears it.
+		const changes: { title?: string; description?: string | null } = {};
+		if (req.body.title !== undefined) {
+			const title =
+				typeof req.body.title === "string" ? req.body.title.trim() : "";
+			if (!title || title.length > 120) {
+				res.status(400).json({
+					success: false,
+					data: null,
+					message: "Recording title must be between 1 and 120 characters!",
+				});
+				return;
+			}
+			changes.title = title;
+		}
+		if (req.body.description !== undefined) {
+			const description =
+				typeof req.body.description === "string"
+					? req.body.description.trim()
+					: "";
+			if (description.length > SCREEN_DESCRIPTION_MAX_LENGTH) {
+				res.status(400).json({
+					success: false,
+					data: null,
+					message: `Description must be at most ${SCREEN_DESCRIPTION_MAX_LENGTH} characters!`,
+				});
+				return;
+			}
+			changes.description = description || null;
+		}
+		if (Object.keys(changes).length === 0) {
 			res.status(400).json({
 				success: false,
 				data: null,
-				message: "Recording title must be between 1 and 120 characters!",
+				message: "Nothing to update!",
 			});
 			return;
 		}
 
 		const user = await findOrCreateUser(req.user);
-		const session = await renameScreenRecordingSession(
+		const session = await updateScreenRecordingSession(
 			sessionId,
 			user.id,
-			title,
+			changes,
 		);
 
 		res.status(200).json({
 			success: true,
 			data: session,
-			message: "Recording renamed successfully!",
+			message: "Recording updated successfully!",
 		});
 	} catch (error: unknown) {
 		if (error instanceof Error) {

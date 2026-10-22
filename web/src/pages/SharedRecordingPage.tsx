@@ -12,6 +12,8 @@ import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { FiLoader, FiVideo } from "react-icons/fi";
 import { LuDownload, LuPlay } from "react-icons/lu";
 import PageTitle from "@/components/shared/PageTitle";
+import RecordingDescription from "@/components/Dashboard/recordings/RecordingDescription";
+import { useCommentsRailResizer } from "@/components/shared/CommentsRailResizer";
 import RecordingComments, {
   RecordingCommentsSkeleton,
 } from "@/components/Dashboard/recordings/RecordingComments";
@@ -211,6 +213,10 @@ const SharedRecordingSkeleton = () => (
         <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
         <div className="flex items-center justify-end pt-3">
           <div className="h-9 w-32 animate-pulse rounded-lg bg-muted" />
+        </div>
+        <div className="mt-5 space-y-2 border-t border-border/60 pt-4">
+          <div className="h-4 w-24 animate-pulse rounded-md bg-muted" />
+          <div className="h-3 w-3/4 animate-pulse rounded-md bg-muted" />
         </div>
       </section>
       <aside className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent">
@@ -477,6 +483,7 @@ const SharedRecordingPage = () => {
   >(null);
   const { isSignedIn } = useClerkAuth();
   const playerRef = useRef<VideoPlayerHandle>(null);
+  const railResizer = useCommentsRailResizer();
   const { data: rec, isLoading, isError } = useSharedRecording(token);
   const { data: comments, isLoading: areCommentsLoading } =
     useSharedComments(token);
@@ -579,12 +586,14 @@ const SharedRecordingPage = () => {
         </RecordingHeader>
 
         <div
-          className={`grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:gap-0 lg:p-0 ${
+          style={railResizer.gridStyle}
+          className={`relative grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:gap-0 lg:p-0 ${
             showComments
-              ? "lg:grid-cols-[minmax(0,1fr)_380px]"
+              ? "lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)]"
               : "lg:grid-cols-1"
           }`}
         >
+          {showComments && railResizer.handle}
           <div
             className={`min-w-0 lg:min-h-0 lg:overflow-y-auto lg:p-6 ${
               showComments ? "lg:border-r lg:border-border" : ""
@@ -630,6 +639,9 @@ const SharedRecordingPage = () => {
               />
             ) : (
               <EmptyPlayer processing={isProcessing} />
+            )}
+            {!isSpaceRecording && (
+              <RecordingDescription value={rec.description} />
             )}
           </div>
 

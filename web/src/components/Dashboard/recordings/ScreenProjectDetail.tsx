@@ -17,7 +17,7 @@ import {
   useDeleteRecordingComment,
   useEditRecordingComment,
   useDeleteScreenRecording,
-  useRenameScreenRecording,
+  useUpdateScreenRecording,
   useScreenComments,
   useScreenOutputUrl,
   useScreenRecordings,
@@ -26,6 +26,8 @@ import {
   type ScreenOutputKind,
   type ScreenRecording,
 } from "@/hooks/useScreenRecordings";
+import RecordingDescription from "./RecordingDescription";
+import { useCommentsRailResizer } from "@/components/shared/CommentsRailResizer";
 import RecordingComments, {
   RecordingCommentsSkeleton,
 } from "./RecordingComments";
@@ -354,6 +356,10 @@ const ScreenProjectDetailSkeleton = () => (
           <div className="flex items-center justify-end pt-3">
             <div className="h-9 w-32 animate-pulse rounded-lg bg-muted" />
           </div>
+          <div className="mt-5 space-y-2 border-t border-border/60 pt-4">
+            <div className="h-4 w-24 animate-pulse rounded-md bg-muted" />
+            <div className="h-3 w-3/4 animate-pulse rounded-md bg-muted" />
+          </div>
         </div>
       </section>
 
@@ -368,6 +374,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   const navigate = useNavigate();
   const titleRef = useRef<InlineTitleHandle>(null);
   const playerRef = useRef<VideoPlayerHandle>(null);
+  const railResizer = useCommentsRailResizer();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Keep each dialog mounted through its exit animation.
@@ -377,7 +384,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   // The list query already carries everything the detail needs (title, status,
   // outputs) and keeps polling while the recording is still processing.
   const { data: recordings, isLoading, isError } = useScreenRecordings();
-  const renameRecording = useRenameScreenRecording();
+  const updateRecording = useUpdateScreenRecording();
   const deleteRecording = useDeleteScreenRecording();
   const { data: comments, isLoading: areCommentsLoading } =
     useScreenComments(sessionId);
@@ -485,7 +492,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
                   value={recTitle}
                   // Optimistic: the hook retitles the cached list instantly.
                   onSave={(next) =>
-                    renameRecording.mutate({ sessionId: rec.id, title: next })
+                    updateRecording.mutate({ sessionId: rec.id, title: next })
                   }
                   className="truncate"
                 />
@@ -564,7 +571,11 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           </div>
         </header>
 
-        <div className="grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-0 lg:p-0">
+        <div
+          style={railResizer.gridStyle}
+          className="relative grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)] lg:gap-0 lg:p-0"
+        >
+          {railResizer.handle}
           <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-border lg:p-6">
             {isProcessing && !screenVideoKind ? (
               <section className="flex flex-col gap-4">
@@ -599,6 +610,12 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
                 )}
               </section>
             )}
+            <RecordingDescription
+              value={rec.description}
+              onSave={(next) =>
+                updateRecording.mutate({ sessionId: rec.id, description: next })
+              }
+            />
           </div>
           <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border/50 bg-primary [&>section]:bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:[&>section]:bg-transparent">
             <RecordingComments

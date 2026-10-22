@@ -74,24 +74,31 @@ export const useScreenRecordings = () => {
   });
 };
 
-export const useRenameScreenRecording = () => {
+/** Change a recording's title and/or description (a blank one clears it). */
+export const useUpdateScreenRecording = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
       sessionId,
-      title,
+      ...changes
     }: {
       sessionId: string;
-      title: string;
+      title?: string;
+      description?: string;
     }) => {
-      const { data } = await api.patch(`/recording/screen/${sessionId}`, {
-        title,
-      });
-      return data.data as { id: string; title: string };
+      const { data } = await api.patch(
+        `/recording/screen/${sessionId}`,
+        changes,
+      );
+      return data.data as {
+        id: string;
+        title: string;
+        description: string | null;
+      };
     },
-    // Optimistic: retitle in the cached list instantly, roll back on failure.
-    onMutate: async ({ sessionId, title }) => {
+    // Optimistic: update the cached list instantly, roll back on failure.
+    onMutate: async ({ sessionId, ...changes }) => {
       await queryClient.cancelQueries({ queryKey: ["screen-recordings"] });
       const previous = queryClient.getQueryData<ScreenRecording[]>([
         "screen-recordings",
@@ -99,12 +106,23 @@ export const useRenameScreenRecording = () => {
       queryClient.setQueryData<ScreenRecording[]>(
         ["screen-recordings"],
         (recs) =>
-          recs?.map((rec) => (rec.id === sessionId ? { ...rec, title } : rec)),
+          recs?.map((rec) =>
+            rec.id === sessionId
+              ? {
+                  ...rec,
+                  ...(changes.title !== undefined && { title: changes.title }),
+                  ...(changes.description !== undefined && {
+                    description: changes.description || null,
+                  }),
+                }
+              : rec,
+          ),
       );
       return { previous };
     },
     onError: (_error, _variables, context) => {
       queryClient.setQueryData(["screen-recordings"], context?.previous);
+      toast.error("Couldn't save your changes.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["screen-recordings"] });
