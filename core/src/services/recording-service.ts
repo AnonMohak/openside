@@ -29,6 +29,7 @@ import {
 import {
 	maybeFinalizeScreenSession,
 	recoverScreenFinalize,
+	reopenScreenSession,
 } from "./screen-finalization-service.ts";
 import {
 	type PrefixTarget,
@@ -1270,7 +1271,6 @@ async function onSegmentArrived(
 
 	// UPLOADED/PROCESSING tracks pick this chunk up in their pending/running
 	// finalize (a running one re-checks for late chunks when it ends).
-	if (rec.recordingSession.source !== "SPACE") return;
 	if (rec.status !== "READY" && rec.status !== "FAILED") return;
 
 	// Chunk objects already cleaned up: re-stitching would drop everything else.
@@ -1291,6 +1291,17 @@ async function onSegmentArrived(
 			expectedSegments: Math.max(rec.expectedSegments ?? 0, sequenceNumber + 1),
 		},
 	});
+	if (
+		reopened.count === 1 &&
+		rec.recordingSession.source === "SCREEN_RECORDER"
+	) {
+		// A screen take is finalized as a whole: rebuild it with this chunk.
+		console.log(
+			`[Recording] late chunk ${sequenceNumber} for finalized screen track ${recordingId} - re-finalizing`,
+		);
+		await reopenScreenSession(rec.recordingSessionId);
+		return;
+	}
 	if (reopened.count === 1) {
 		console.log(
 			`[Recording] late chunk ${sequenceNumber} for finalized ${recordingId} - re-finalizing`,
@@ -1592,7 +1603,7 @@ export async function reconcileStaleRecordingSessions(): Promise<void> {
 }
 
 /**
- * Delete the raw chunk objects of meeting tracks that finalized and then saw
+ * Delete the raw chunk objects of tracks (meeting and screen) that finalized and then saw
  * no activity for a day. Deferred (not done at finalize) so a straggler chunk
  * can still rebuild a fuller master in the meantime. Cleaned segments are
  * marked PROCESSED, which also tells a later straggler not to re-stitch.
@@ -1604,7 +1615,6 @@ async function cleanupFinalizedChunks(): Promise<void> {
 			status: "READY",
 			updatedAt: { lte: cutoff },
 			OR: [{ lastChunkAt: null }, { lastChunkAt: { lte: cutoff } }],
-			recordingSession: { source: "SPACE" },
 			segments: { some: { status: "UPLOADED" } },
 		},
 		select: {

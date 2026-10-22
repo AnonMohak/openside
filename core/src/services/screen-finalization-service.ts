@@ -45,11 +45,8 @@ import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
 import {
 	deleteObjects,
-	deletePrefixTargets,
 	getObjectBuffer,
 	putFileObject,
-	resolvePrefixTarget,
-	trackChunkPrefix,
 } from "./storage-service.ts";
 import { reconcileRecordedSeconds } from "./usage-service.ts";
 
@@ -82,17 +79,20 @@ const FFMPEG_TIMEOUT_MS =
  * ffmpeg in-process - that would overload the API fleet. The session is left for
  * finalization recovery to retry.
  */
-async function triggerScreenFinalize(sessionId: string): Promise<void> {
+async function triggerScreenFinalize(
+	sessionId: string,
+	delayMs = 0,
+): Promise<void> {
 	if (!isQueueConfigured()) {
 		console.warn(
 			`[ScreenFinalize] Redis not configured; finalizing ${sessionId} in API process`,
 		);
-		void finalizeScreenSession(sessionId);
+		setTimeout(() => void finalizeScreenSession(sessionId), delayMs);
 		return;
 	}
 
 	try {
-		await enqueueFinalize(sessionId);
+		await enqueueFinalize(sessionId, { delayMs });
 		console.log(
 			`[ScreenFinalize] queued session ${sessionId} for worker finalization`,
 		);
@@ -504,30 +504,6 @@ async function composeBoth(
 	return { key, durationMs: durationMs ?? screen.durationMs };
 }
 
-/**
- * After a track's registered chunks are deleted, clear its chunk folder too:
- * a chunk uploaded but never registered is otherwise never deleted. The
- * folder holds only that track's chunks.
- */
-async function sweepChunkFolders(
-	recs: ({ id: string; segments: { assetKey: string }[] } | undefined)[],
-	sessionId: string,
-): Promise<void> {
-	for (const rec of recs) {
-		const firstKey = rec?.segments[0]?.assetKey;
-		const prefix = rec && firstKey ? trackChunkPrefix(firstKey, rec.id) : null;
-		if (!prefix) continue;
-		await resolvePrefixTarget(prefix)
-			.then((target) => deletePrefixTargets([target]))
-			.catch((error) =>
-				console.error(
-					`[ScreenFinalize] orphan chunk sweep failed for ${sessionId}:`,
-					error,
-				),
-			);
-	}
-}
-
 export async function finalizeScreenSession(
 	sessionId: string,
 	{
@@ -717,25 +693,20 @@ export async function finalizeScreenSession(
 		if (both && masters.screen && masters.camera) {
 			outputs.both = both;
 
-			// The combined video is the only output we keep - the separate screen
-			// and camera masters (and their raw chunks) served only as inputs to
-			// the composite, so drop them immediately instead of storing three
-			// copies of the same recording.
+			// The combined video is the only output we keep: the separate screen
+			// and camera masters served only as inputs to the composite. Their raw
+			// chunks stay for a day (the recovery sweep's cleanup removes them) so
+			// a straggler chunk can still rebuild a fuller video.
 			const screenRec = recByRole.screen;
 			const cameraRec = recByRole.camera;
-			const staleKeys = [
-				masters.screen.key,
-				masters.camera.key,
-				...(screenRec?.segments.map((s) => s.assetKey) ?? []),
-				...(cameraRec?.segments.map((s) => s.assetKey) ?? []),
-			];
-			await deleteObjects(staleKeys).catch((error) => {
-				console.error(
-					`[ScreenFinalize] failed to delete split screen/camera assets for ${sessionId} (combined output is safe):`,
-					error,
-				);
-			});
-			await sweepChunkFolders([screenRec, cameraRec], sessionId);
+			await deleteObjects([masters.screen.key, masters.camera.key]).catch(
+				(error) => {
+					console.error(
+						`[ScreenFinalize] failed to delete split screen/camera masters for ${sessionId} (combined output is safe):`,
+						error,
+					);
+				},
+			);
 			const staleRecIds = [screenRec?.id, cameraRec?.id].filter(
 				(id): id is string => Boolean(id),
 			);
@@ -800,26 +771,24 @@ export async function finalizeScreenSession(
 			Object.keys(outputs),
 		);
 
-		// Without a composite, the screen/camera masters ARE the outputs, so their
-		// raw chunks are now dead weight. A READY session is never re-stitched;
-		// only fully uploaded tracks are dropped, mirroring the Space finalizer.
-		// (The "both" path above already deleted its chunks.)
-		if (!outputs.both) {
-			const doneRecs = [recByRole.screen, recByRole.camera].filter(
-				(rec) => rec?.isComplete,
+		// Chunks that landed while this pass ran aren't in it: go again.
+		const usedSegments = new Map(
+			session.participantRecordings.map((rec) => [rec.id, rec.segments.length]),
+		);
+		const arrived = await prisma.recordingSegment.groupBy({
+			by: ["participantRecordingId"],
+			where: { participantRecordingId: { in: [...usedSegments.keys()] } },
+			_count: { _all: true },
+		});
+		const missedLate = arrived.some(
+			(row) =>
+				row._count._all > (usedSegments.get(row.participantRecordingId) ?? 0),
+		);
+		if (missedLate) {
+			console.log(
+				`[ScreenFinalize] ${sessionId}: chunks arrived during finalize - re-running`,
 			);
-			const chunkKeys = doneRecs.flatMap(
-				(rec) => rec?.segments.map((s) => s.assetKey) ?? [],
-			);
-			if (chunkKeys.length > 0) {
-				await deleteObjects(chunkKeys).catch((error) => {
-					console.error(
-						`[ScreenFinalize] failed to delete chunk objects for ${sessionId} (outputs are safe, leaving chunks):`,
-						error,
-					);
-				});
-				await sweepChunkFolders(doneRecs, sessionId);
-			}
+			await reopenScreenSession(sessionId);
 		}
 	} catch (error) {
 		const message = errorMessage(error);
@@ -933,4 +902,25 @@ export async function recoverScreenFinalize(sessionId: string): Promise<void> {
 		`[ScreenFinalize] ${sessionId} had no live finalize job - re-queuing`,
 	);
 	await triggerScreenFinalize(sessionId);
+}
+
+/** Late chunks re-finalize after this pause, so a burst lands in one pass. */
+const STRAGGLER_FINALIZE_DELAY_MS = 30 * 1000;
+
+/**
+ * A chunk landed after the take was finalized (a crashed tab's buffer
+ * uploaded later, a slow uplink): re-open it and rebuild the video with it,
+ * instead of silently ignoring it.
+ */
+export async function reopenScreenSession(sessionId: string): Promise<void> {
+	const reopened = await prisma.recordingSession.updateMany({
+		where: {
+			id: sessionId,
+			source: "SCREEN_RECORDER",
+			status: { in: ["READY", "FAILED", "PROCESSING"] },
+		},
+		data: { status: "STOPPED" },
+	});
+	if (reopened.count !== 1) return;
+	await triggerScreenFinalize(sessionId, STRAGGLER_FINALIZE_DELAY_MS);
 }

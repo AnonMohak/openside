@@ -212,6 +212,7 @@ async function clearFinishedJob<T>(
  */
 export async function enqueueFinalize(
 	recordingSessionId: string,
+	{ delayMs = 0 }: { delayMs?: number } = {},
 ): Promise<boolean> {
 	if (!isQueueConfigured()) return false;
 	beginProducerOperation();
@@ -235,6 +236,7 @@ export async function enqueueFinalize(
 				// A screen take settles as FAILED only after its last attempt, so give
 				// a storage blip room to pass (~2.5 minutes of exponential backoff).
 				attempts: 5,
+				...(delayMs > 0 ? { delay: delayMs } : {}),
 			},
 		);
 		await wakeWorker(QUEUE_ROLES[FINALIZE_QUEUE]);
