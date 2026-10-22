@@ -71,14 +71,63 @@ interface UseScreenLocalRecordingReturn {
   getMaxTrackSize: (trackType: ScreenTrackType) => TrackSize | null;
 }
 
-function videoBitrateFor(width?: number, height?: number): number {
-  if (!width || !height) return 4000000;
-  const pixels = width * height;
-  if (pixels >= 3840 * 2160) return 20000000;
-  if (pixels >= 2560 * 1440) return 12000000;
-  if (pixels >= 1920 * 1080) return 8000000;
-  if (pixels >= 1280 * 720) return 5000000;
+/** What a track's video is for - it decides how many bits it's worth. */
+type VideoRole = "screen" | "pip" | "camera";
+
+/**
+ * Upload size is what decides how long Stop waits, so each role gets only the
+ * bits it needs. Screen content (text, flat UI) compresses far better than a
+ * camera; a camera that ends up as a small PiP needs very little.
+ */
+function videoBitrateFor(
+  role: VideoRole,
+  width?: number,
+  height?: number,
+): number {
+  if (role === "pip") return 2000000;
+  const pixels = width && height ? width * height : 1280 * 720;
+  if (role === "screen") {
+    if (pixels >= 3840 * 2160) return 10000000;
+    if (pixels >= 2560 * 1440) return 6000000;
+    if (pixels >= 1920 * 1080) return 4000000;
+    return 2500000;
+  }
+  if (pixels >= 3840 * 2160) return 16000000;
+  if (pixels >= 2560 * 1440) return 10000000;
+  if (pixels >= 1920 * 1080) return 6000000;
   return 4000000;
+}
+
+/** Short side a PiP camera is captured at: it never shows bigger than this. */
+const PIP_CAMERA_SHORT_SIDE = 720;
+
+/**
+ * Capture the camera at PiP size for the take; returns a restore for after it.
+ * The camera is also the live preview, so it's put back when the take ends.
+ */
+async function capPipCamera(track: MediaStreamTrack): Promise<() => void> {
+  const { width, height } = track.getSettings();
+  if (!width || !height || Math.min(width, height) <= PIP_CAMERA_SHORT_SIDE) {
+    return () => undefined;
+  }
+  const original = track.getConstraints();
+  const scale = PIP_CAMERA_SHORT_SIDE / Math.min(width, height);
+  try {
+    await track.applyConstraints({
+      ...original,
+      width: { ideal: Math.round(width * scale) },
+      height: { ideal: Math.round(height * scale) },
+      aspectRatio: { ideal: width / height },
+    });
+  } catch (error) {
+    // The server sizes the PiP down anyway; this only saves upload.
+    console.warn("[ScreenRecording] couldn't cap the PiP camera:", error);
+    return () => undefined;
+  }
+  return () => {
+    if (track.readyState !== "live") return;
+    void track.applyConstraints(original).catch(() => undefined);
+  };
 }
 
 const AUDIO_BITRATE = 128000;
@@ -162,6 +211,7 @@ interface RecorderPart {
 
 interface TrackState {
   type: ScreenTrackType;
+  videoRole: VideoRole;
   /** The track's source stream (before any audio mixing). */
   source: MediaStream;
   part: RecorderPart | null;
@@ -188,6 +238,8 @@ export default function useScreenLocalRecording(
     useState<Record<ScreenTrackType, number>>(emptyCounts);
 
   const activeRef = useRef(false);
+  // Undoes the PiP camera cap (see capPipCamera).
+  const restoreCameraRef = useRef<() => void>(() => undefined);
   const tracksRef = useRef<Partial<Record<ScreenTrackType, TrackState>>>({});
   const metadataRef = useRef<
     Partial<Record<ScreenTrackType, RecordingMetadata>>
@@ -312,7 +364,11 @@ export default function useScreenLocalRecording(
       const hasVideo = stream.getVideoTracks().length > 0;
       const video = stream.getVideoTracks()[0]?.getSettings() ?? {};
       const audio = stream.getAudioTracks()[0]?.getSettings() ?? {};
-      const videoBitrate = videoBitrateFor(video.width, video.height);
+      const videoBitrate = videoBitrateFor(
+        track.videoRole,
+        video.width,
+        video.height,
+      );
 
       const ladder = hasVideo
         ? getSupportedVideoMimeTypes()
@@ -488,6 +544,13 @@ export default function useScreenLocalRecording(
         if (!source || source.getTracks().length === 0) continue;
         tracks[type] = {
           type,
+          // Under a screen take the camera is only the PiP.
+          videoRole:
+            type === "combined"
+              ? "screen"
+              : streams.combined
+                ? "pip"
+                : "camera",
           source,
           part: null,
           sequence: 0,
@@ -499,6 +562,12 @@ export default function useScreenLocalRecording(
       if (Object.keys(tracks).length === 0) {
         throw new Error("No tracks to record");
       }
+
+      const pipTrack = tracks.camera?.source.getVideoTracks()[0];
+      restoreCameraRef.current =
+        tracks.camera?.videoRole === "pip" && pipTrack
+          ? await capPipCamera(pipTrack)
+          : () => undefined;
 
       activeRef.current = true;
       tracksRef.current = tracks;
@@ -522,6 +591,8 @@ export default function useScreenLocalRecording(
         activeRef.current = false;
         for (const track of Object.values(tracks)) await stopPart(track.part);
         tracksRef.current = {};
+        restoreCameraRef.current();
+        restoreCameraRef.current = () => undefined;
         throw new Error("No recorder could start");
       }
 
@@ -559,6 +630,9 @@ export default function useScreenLocalRecording(
         }),
       ),
     );
+
+    restoreCameraRef.current();
+    restoreCameraRef.current = () => undefined;
 
     // Close an open pause so the clock is final.
     if (pausedAtRef.current !== null) {
