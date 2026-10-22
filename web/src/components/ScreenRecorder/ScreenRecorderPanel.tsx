@@ -2,6 +2,7 @@ import { backdropMotion, usePresence } from "@/hooks/usePresence";
 import RecorderCameraOverlay from "./RecorderCameraOverlay";
 import RecorderControlsBar from "./RecorderControlsBar";
 import RecorderSettingsOverlay from "./RecorderSettingsOverlay";
+import RecorderUploadCard from "./RecorderUploadCard";
 import { useScreenRecordingContext } from "./ScreenRecordingProvider";
 
 /**
@@ -18,11 +19,17 @@ interface ScreenRecorderPanelProps {
 }
 
 const ScreenRecorderPanel = ({ isClosing }: ScreenRecorderPanelProps) => {
-  const { isActive, closeRecorder } = useScreenRecordingContext();
+  const { isActive, recordingState, closeRecorder } =
+    useScreenRecordingContext();
   const backdrop = usePresence(!isActive && !isClosing);
   // Settings only shape the next take - hidden while one is live, so the card
   // isn't sitting over (and captured in) the recorded screen.
   const settings = usePresence(!isActive && !isClosing);
+  // After Stop: the upload, and that the recording opens when it ends.
+  const upload = usePresence(
+    (recordingState === "stopping" || recordingState === "uploading") &&
+      !isClosing,
+  );
 
   return (
     <>
@@ -37,6 +44,7 @@ const ScreenRecorderPanel = ({ isClosing }: ScreenRecorderPanelProps) => {
       {settings.rendered && (
         <RecorderSettingsOverlay isClosing={settings.isClosing} />
       )}
+      {upload.rendered && <RecorderUploadCard isClosing={upload.isClosing} />}
       <RecorderControlsBar isClosing={isClosing} />
       <RecorderCameraOverlay isClosing={isClosing} />
     </>

@@ -32,7 +32,6 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
   const {
     recordingState,
     recordingDurationMs,
-    uploadProgress,
     stopRecording,
     pauseRecording,
     resumeRecording,
@@ -64,11 +63,10 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
   // Before Start (and after a take is saved) the bar is just a grey preview.
   const isLive = isCapturing || isStarting || isSaving;
 
-  const timer = isSaving
-    ? `${recordingState === "uploading" ? uploadProgress : 0}%`
-    : isCapturing
-      ? formatDuration(recordingDurationMs)
-      : "0:00";
+  // Upload progress has its own card (RecorderUploadCard); the timer just
+  // holds the take's length.
+  const timer =
+    isCapturing || isSaving ? formatDuration(recordingDurationMs) : "0:00";
 
   return (
     // The outer box only positions; the inner one only animates, so the
