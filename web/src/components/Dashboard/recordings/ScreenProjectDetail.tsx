@@ -277,7 +277,11 @@ const ScreenVideoCard = ({
                   minute: "2-digit",
                 }),
               formatClock(rec.outputs?.[kind]?.durationMs),
-              kind === "both" ? "Screen + camera" : "Screen",
+              kind === "both"
+                ? "Screen + camera"
+                : kind === "camera"
+                  ? "Camera"
+                  : "Screen",
             ]
               .filter(Boolean)
               .map((part, index) => (
@@ -482,11 +486,14 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   }
 
   const outputs = rec.outputs ?? {};
+  // Camera-only takes have just the camera video.
   const screenVideoKind: ScreenOutputKind | null = outputs.both?.key
     ? "both"
     : outputs.screen?.key
       ? "screen"
-      : null;
+      : outputs.camera?.key
+        ? "camera"
+        : null;
   const recTitle = rec.title || "Untitled recording";
   const isProcessing =
     rec.status === "ACTIVE" ||

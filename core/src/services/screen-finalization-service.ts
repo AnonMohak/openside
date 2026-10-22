@@ -583,6 +583,16 @@ export async function finalizeScreenSession(
 			Record<Role, (typeof session.participantRecordings)[number]>
 		> = {};
 		for (const rec of session.participantRecordings) {
+			// Older takes also recorded a mic-only track. No output uses it (the
+			// sound comes from the screen or camera track), so skip the work; its
+			// chunks go with the shared day-later cleanup.
+			if (roleOf(rec) === "audio") {
+				await prisma.participantRecording.update({
+					where: { id: rec.id },
+					data: { status: "READY", processingError: null },
+				});
+				continue;
+			}
 			try {
 				const master = await stitchMaster(
 					rec,

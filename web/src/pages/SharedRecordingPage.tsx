@@ -20,8 +20,8 @@ import {
 } from "@/components/shared/ui/dropdown-menu";
 import type { ScreenOutputKind } from "@/hooks/useScreenRecordings";
 import {
-	fetchSharedOutputUrl,
-	fetchSharedFinalOutputDownload,
+  fetchSharedOutputUrl,
+  fetchSharedFinalOutputDownload,
   useCreateSharedComment,
   useSharedComments,
   useSharedFinalOutputUrl,
@@ -195,7 +195,11 @@ const SharedSpaceTrackRow = ({
     if (downloading) return;
     setDownloading(true);
     try {
-      let result = await fetchSharedFinalOutputDownload(token, outputId, format);
+      let result = await fetchSharedFinalOutputDownload(
+        token,
+        outputId,
+        format,
+      );
       let attempts = 0;
       while (!result.ready && !result.error && attempts < 60) {
         await new Promise((resolve) => window.setTimeout(resolve, 2500));
@@ -245,10 +249,18 @@ const SharedSpaceTrackRow = ({
   // The server pairs each track with its own egress (camera egress on camera
   // rows, screenShare egress on screen rows), so offer it whenever present.
   if (track.cloudOutputId && track.cloudHasVideo) {
-    videoItems.push({ label: "Cloud", format: "mp4", outputId: track.cloudOutputId });
+    videoItems.push({
+      label: "Cloud",
+      format: "mp4",
+      outputId: track.cloudOutputId,
+    });
   }
   if (track.cloudOutputId && track.cloudHasAudio) {
-    audioItems.push({ label: "Cloud", format: "mp3", outputId: track.cloudOutputId });
+    audioItems.push({
+      label: "Cloud",
+      format: "mp3",
+      outputId: track.cloudOutputId,
+    });
   }
   const canDownload = videoItems.length > 0 || audioItems.length > 0;
   const specs = [
@@ -261,7 +273,8 @@ const SharedSpaceTrackRow = ({
       : null,
     track.hasVideo && track.fps ? `${track.fps} fps` : null,
     formatBitrate(track.bitrate),
-    track.mimeType?.replace("video/", "").replace("audio/", "").toUpperCase() ?? null,
+    track.mimeType?.replace("video/", "").replace("audio/", "").toUpperCase() ??
+      null,
   ].filter(Boolean);
 
   return (
@@ -312,12 +325,24 @@ const SharedSpaceTrackRow = ({
             onClick={(event) => event.stopPropagation()}
             className="flex shrink-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {downloading ? <FiLoader className="size-4 animate-spin" /> : <LuDownload className="size-4 text-foreground/60" />}
+            {downloading ? (
+              <FiLoader className="size-4 animate-spin" />
+            ) : (
+              <LuDownload className="size-4 text-foreground/60" />
+            )}
             {downloading ? "Preparing" : "Download"}
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52 rounded-xl border-border bg-background p-1.5">
-          {([ ["Video", videoItems], ["Audio", audioItems] ] as const).map(
+        <DropdownMenuContent
+          align="end"
+          className="w-52 rounded-xl border-border bg-background p-1.5"
+        >
+          {(
+            [
+              ["Video", videoItems],
+              ["Audio", audioItems],
+            ] as const
+          ).map(
             ([section, items]) =>
               items.length > 0 && (
                 <div key={section}>
@@ -329,7 +354,9 @@ const SharedSpaceTrackRow = ({
                       key={`${item.outputId}-${item.label}`}
                       type="button"
                       disabled={downloading}
-                      onClick={(event) => void handleDownload(event, item.outputId, item.format)}
+                      onClick={(event) =>
+                        void handleDownload(event, item.outputId, item.format)
+                      }
                       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <LuDownload className="size-3.5 text-foreground/60" />
@@ -350,9 +377,9 @@ const SharedSpaceTrackRow = ({
 
 const SharedRecordingPage = () => {
   const { token = "" } = useParams<{ token: string }>();
-  const [selectedSpaceTrackId, setSelectedSpaceTrackId] = useState<string | null>(
-    null,
-  );
+  const [selectedSpaceTrackId, setSelectedSpaceTrackId] = useState<
+    string | null
+  >(null);
   const { isSignedIn } = useClerkAuth();
   const { data: rec, isLoading, isError } = useSharedRecording(token);
   const { data: comments, isLoading: areCommentsLoading } =
@@ -397,17 +424,21 @@ const SharedRecordingPage = () => {
   }
 
   const spaceTracks = rec.tracks ?? [];
+  // Camera-only takes have just the camera video.
   const screenVideoKind: ScreenOutputKind | null = rec.kinds.includes("both")
     ? "both"
     : rec.kinds.includes("screen")
       ? "screen"
-      : null;
+      : rec.kinds.includes("camera")
+        ? "camera"
+        : null;
   const recTitle = rec.title || "Untitled recording";
   const isProcessing = rec.status === "STOPPED" || rec.status === "PROCESSING";
   const isSpaceRecording = rec.source === "SPACE";
   const showComments = !isSpaceRecording;
   const activeSpaceTrackId =
-    selectedSpaceTrackId && spaceTracks.some((track) => track.id === selectedSpaceTrackId)
+    selectedSpaceTrackId &&
+    spaceTracks.some((track) => track.id === selectedSpaceTrackId)
       ? selectedSpaceTrackId
       : (spaceTracks[0]?.id ?? null);
 
@@ -479,7 +510,9 @@ const SharedRecordingPage = () => {
 
           <div
             className={`grid gap-6 lg:min-h-0 lg:flex-1 lg:gap-0 ${
-              showComments ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "lg:grid-cols-1"
+              showComments
+                ? "lg:grid-cols-[minmax(0,1fr)_360px]"
+                : "lg:grid-cols-1"
             }`}
           >
             <div
@@ -493,21 +526,30 @@ const SharedRecordingPage = () => {
                     {isProcessing ? (
                       <>
                         <FiLoader className="size-6 animate-spin" />
-                        <span className="text-sm">This recording is still processing…</span>
+                        <span className="text-sm">
+                          This recording is still processing…
+                        </span>
                       </>
                     ) : (
                       <>
                         <FiVideo className="size-6" />
-                        <span className="text-sm">Nothing to play here yet</span>
+                        <span className="text-sm">
+                          Nothing to play here yet
+                        </span>
                       </>
                     )}
                   </div>
                 ) : (
                   <section className="flex flex-col gap-4">
-                    <SharedSpacePlayer token={token} outputId={activeSpaceTrackId} />
+                    <SharedSpacePlayer
+                      token={token}
+                      outputId={activeSpaceTrackId}
+                    />
                     {spaceTracks.length > 0 && (
                       <>
-                        <h2 className="text-sm font-semibold text-foreground/80">Tracks</h2>
+                        <h2 className="text-sm font-semibold text-foreground/80">
+                          Tracks
+                        </h2>
                         <div className="flex flex-col gap-2">
                           {spaceTracks.map((track) => (
                             <SharedSpaceTrackRow

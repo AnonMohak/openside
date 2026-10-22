@@ -7,9 +7,8 @@
  * the right, and it stays up across navigation until the user closes it.
  *
  * Recorded tracks:
- *   - combined: screen-share video + mic audio (the master)
- *   - camera:   webcam video only
- *   - audio:    mic only
+ *   - combined: screen-share video + mic/system audio (the master)
+ *   - camera:   webcam video (+ mic, when there's no screen)
  */
 
 import {
@@ -189,8 +188,10 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     const cameraTrack = camera?.getVideoTracks()[0];
     const micTrack = mic?.getAudioTracks()[0];
 
-    // combined = screen video + mic + system audio (mic & system are mixed into
-    // one track by the recorder). camera = webcam video + mic audio.
+    // The mic is recorded ONCE, in the track the final video's sound comes
+    // from: mixed with system audio into the screen ("combined") track when
+    // there's a screen, otherwise into the camera track (camera only). The
+    // camera's video under a screen take is just the PiP - it needs no sound.
     const combinedTracks: MediaStreamTrack[] = [];
     if (screenTrack) combinedTracks.push(screenTrack);
     if (micTrack) combinedTracks.push(micTrack);
@@ -198,12 +199,12 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
 
     const cameraTracks: MediaStreamTrack[] = [];
     if (cameraTrack) cameraTracks.push(cameraTrack);
-    if (micTrack) cameraTracks.push(micTrack);
+    if (micTrack && !screenTrack) cameraTracks.push(micTrack);
 
     return {
       combined: screenTrack ? new MediaStream(combinedTracks) : null,
       camera: cameraTrack ? new MediaStream(cameraTracks) : null,
-      audio: micTrack ? new MediaStream([micTrack]) : null,
+      audio: null,
     };
   }, [getStreams]);
 
