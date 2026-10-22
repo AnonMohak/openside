@@ -1793,10 +1793,11 @@ export async function deleteSpaceRecordingSession(
 	return { deleted: true };
 }
 
-export async function renameSpaceRecordingSession(
+/** Change a Space recording's title and/or description (host only). */
+export async function updateSpaceRecordingSession(
 	sessionId: string,
 	userId: string,
-	title: string,
+	changes: { title?: string; description?: string | null },
 ) {
 	const session = await prisma.recordingSession.findUnique({
 		where: { id: sessionId },
@@ -1817,8 +1818,8 @@ export async function renameSpaceRecordingSession(
 
 	return await prisma.recordingSession.update({
 		where: { id: sessionId },
-		data: { title },
-		select: { id: true, spaceId: true, title: true },
+		data: changes,
+		select: { id: true, spaceId: true, title: true, description: true },
 	});
 }
 

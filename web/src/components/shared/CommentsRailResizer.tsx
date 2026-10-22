@@ -1,45 +1,55 @@
 import { useRef, useState, type CSSProperties } from "react";
 import { GripVertical } from "lucide-react";
 
-const STORAGE_KEY = "openside:comments-rail-width";
-const DEFAULT_WIDTH = 380;
-const MIN_WIDTH = 300;
-const MAX_WIDTH = 640;
 /** The video side always keeps at least this much room. */
 const MIN_VIDEO_WIDTH = 420;
 
-const clamp = (width: number, containerWidth?: number) => {
-  const max = containerWidth
-    ? Math.min(MAX_WIDTH, containerWidth - MIN_VIDEO_WIDTH)
-    : MAX_WIDTH;
-  return Math.round(Math.max(MIN_WIDTH, Math.min(width, max)));
-};
-
-const readStoredWidth = () => {
-  try {
-    const stored = Number(localStorage.getItem(STORAGE_KEY));
-    return stored ? clamp(stored) : DEFAULT_WIDTH;
-  } catch {
-    return DEFAULT_WIDTH;
-  }
-};
+interface RailOptions {
+  /** localStorage key, so each kind of rail remembers its own width. */
+  storageKey?: string;
+  label?: string;
+  defaultWidth?: number;
+  minWidth?: number;
+  maxWidth?: number;
+}
 
 /**
- * Drag-to-resize for the comments rail beside a recording's video (desktop
- * only). The width is a per-viewer preference kept in localStorage.
+ * Drag-to-resize for the side rail (comments, tracks) beside a recording's
+ * video (desktop only). The width is a per-viewer preference kept in
+ * localStorage under `storageKey`, so each kind of rail remembers its own.
  *
  * Spread `gridStyle` on the two-column grid and give it
  * `lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)]` plus `relative`;
  * render `handle` inside that grid.
  */
-export const useCommentsRailResizer = () => {
-  const [width, setWidth] = useState(readStoredWidth);
+export const useCommentsRailResizer = ({
+  storageKey = "openside:comments-rail-width",
+  label = "Resize comments",
+  defaultWidth = 380,
+  minWidth = 300,
+  maxWidth = 640,
+}: RailOptions = {}) => {
+  const clamp = (next: number, containerWidth?: number) => {
+    const max = containerWidth
+      ? Math.min(maxWidth, containerWidth - MIN_VIDEO_WIDTH)
+      : maxWidth;
+    return Math.round(Math.max(minWidth, Math.min(next, max)));
+  };
+
+  const [width, setWidth] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem(storageKey));
+      return stored ? clamp(stored) : defaultWidth;
+    } catch {
+      return defaultWidth;
+    }
+  });
   const [dragging, setDragging] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
 
   const save = (next: number) => {
     try {
-      localStorage.setItem(STORAGE_KEY, String(next));
+      localStorage.setItem(storageKey, String(next));
     } catch {
       // Storage blocked - the width just won't be remembered.
     }
@@ -54,10 +64,10 @@ export const useCommentsRailResizer = () => {
       ref={handleRef}
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize comments"
+      aria-label={label}
       aria-valuenow={width}
-      aria-valuemin={MIN_WIDTH}
-      aria-valuemax={MAX_WIDTH}
+      aria-valuemin={minWidth}
+      aria-valuemax={maxWidth}
       tabIndex={0}
       title="Drag to resize · double-click to reset"
       style={{ right: width }}
@@ -83,8 +93,8 @@ export const useCommentsRailResizer = () => {
         save(width);
       }}
       onDoubleClick={() => {
-        setWidth(DEFAULT_WIDTH);
-        save(DEFAULT_WIDTH);
+        setWidth(defaultWidth);
+        save(defaultWidth);
       }}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 48 : 16;

@@ -19,6 +19,7 @@ export interface RecordingSession {
   id: string;
   spaceId: string;
   title?: string | null;
+  description?: string | null;
   spaceRecordingSessionId: string;
   startedAt: string;
   stoppedAt?: string;

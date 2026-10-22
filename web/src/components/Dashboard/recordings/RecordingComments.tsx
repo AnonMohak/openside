@@ -586,7 +586,7 @@ const RecordingComments = ({
     // Plain background, no card chrome: this is a full-height rail flush to the
     // header and the bottom, so the surrounding layout owns any divider.
     <section className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3.5">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
         <h3 className="text-sm font-semibold text-foreground">Comments</h3>
       </div>
 
@@ -739,7 +739,7 @@ const RecordingComments = ({
 /** Loading stand-in for the comments rail: header, chat bubbles, composer. */
 export const RecordingCommentsSkeleton = () => (
   <>
-    <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3.5">
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
       <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
     </div>
     {/* Chat bubbles, the last one a reply quoting an earlier message */}

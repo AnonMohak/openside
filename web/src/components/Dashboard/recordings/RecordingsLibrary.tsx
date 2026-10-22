@@ -1,5 +1,5 @@
 import { Clapperboard } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import {
@@ -7,12 +7,11 @@ import {
   FiChevronDown,
   FiChevronLeft,
   FiCheck,
-  FiClock,
+  FiEdit2,
   FiFilter,
   FiFolder,
   FiLoader,
   FiMonitor,
-  FiMoreHorizontal,
   FiShare2,
   FiTrash2,
   FiVideo,
@@ -20,7 +19,6 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -38,7 +36,7 @@ import {
 import {
   useDeleteRecordingSession,
   useGetRecordingSessionsBySpace,
-  useRenameRecordingSession,
+  useUpdateRecordingSession,
   useShareSpaceRecording,
   useUnshareSpaceRecording,
 } from "@/hooks/useRecording";
@@ -50,12 +48,16 @@ import type {
   RecordingSession,
 } from "@/types/recordingTypes";
 import OutputCard from "./OutputCard";
+import RecordingDescription from "./RecordingDescription";
 import ProjectCard from "./ProjectCard";
 import ScreenRecordingsSection from "./ScreenRecordingsSection";
 import VideoPlayer from "@/components/shared/VideoPlayer";
-import InlineTitle from "@/components/shared/InlineTitle";
+import InlineTitle, {
+  type InlineTitleHandle,
+} from "@/components/shared/InlineTitle";
 import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
 import { toast } from "@/lib/toast";
+import { useCommentsRailResizer } from "@/components/shared/CommentsRailResizer";
 import { useScreenRecordingContext } from "@/components/ScreenRecorder/ScreenRecordingProvider";
 
 const PROJECTS_PER_PAGE = 8;
@@ -74,15 +76,11 @@ const formatDay = (value?: string) =>
 const recordingLabel = (count: number) =>
   `${count} recording${count === 1 ? "" : "s"}`;
 
-// "Oct 18, 9:30 PM", "12:34", ["4K", "30 fps"]. Length and quality come only
-// from the finished track files - never the session's requested settings or its
-// start→stop wall time, which can both differ from what was really recorded.
-const sessionMeta = (
-  session: RecordingSession,
-  outputs: FinalOutput[] = [],
-) => {
+// "Oct 18, 9:30 PM". Length and quality vary per track, so they're shown on
+// each track row, not for the recording as a whole.
+const sessionDate = (session: RecordingSession) => {
   const started = new Date(session.startedAt);
-  const date = Number.isNaN(started.getTime())
+  return Number.isNaN(started.getTime())
     ? null
     : started.toLocaleString("en-US", {
         month: "short",
@@ -90,40 +88,6 @@ const sessionMeta = (
         hour: "numeric",
         minute: "2-digit",
       });
-  const ready = outputs.filter((output) => output.status === "READY");
-  const video = ready.filter((output) => output.hasVideo);
-  const maxOf = (values: (number | null | undefined)[]) =>
-    Math.max(0, ...values.map((value) => value ?? 0));
-
-  const seconds = Math.round(
-    maxOf(ready.map((output) => output.durationMs)) / 1000,
-  );
-  let duration: string | null = null;
-  if (seconds > 0) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const sec = String(seconds % 60).padStart(2, "0");
-    duration = h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
-  }
-
-  // "1080p" names the short side, so a portrait 1080x1920 track is 1080p.
-  const shortSide = maxOf(
-    video.map((output) =>
-      output.width && output.height ? Math.min(output.width, output.height) : 0,
-    ),
-  );
-  const fps = maxOf(video.map((output) => output.fps));
-  const specs: string[] = [];
-  if (
-    session.recordingMode === "AUDIO_ONLY" ||
-    (ready.length > 0 && video.length === 0)
-  ) {
-    specs.push("Audio only");
-  } else {
-    if (shortSide) specs.push(shortSide >= 2160 ? "4K" : `${shortSide}p`);
-    if (fps) specs.push(`${Math.round(fps)} fps`);
-  }
-  return { date, duration, specs };
 };
 
 const groupOutputVariants = (outputs: FinalOutput[]) => {
@@ -187,93 +151,94 @@ const TrackPlayer = ({ output }: { output: FinalOutput | null }) => {
   );
 };
 
-// Top-right of a recording card: a "Shared" badge when public, and a "more"
-// menu for share / delete.
+// Beside a recording's title: Share (green "Shared" once public), Rename and
+// Delete, each its own button. Only the host gets them.
 const RecordingSessionActions = ({
   shareToken,
+  onRename,
   onShare,
   onDelete,
 }: {
   shareToken?: string | null;
+  /** Starts editing the title in place. */
+  onRename?: () => void;
   onShare?: () => void;
   onDelete?: () => void;
 }) => {
-  if (!onShare && !onDelete && !shareToken) return null;
+  if (!onRename && !onShare && !onDelete) return null;
   return (
-    <div className="flex shrink-0 items-center gap-1.5">
-      {shareToken && (
-        <span className="flex h-8 items-center gap-1.5 rounded-lg bg-success/10 px-3 text-xs font-medium text-success">
+    <div
+      role="group"
+      aria-label="Recording actions"
+      className="flex shrink-0 items-center gap-1.5"
+    >
+      {onShare && (
+        <button
+          type="button"
+          onClick={onShare}
+          className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-opacity hover:opacity-80 cursor-pointer ${
+            shareToken
+              ? "bg-success/10 text-success"
+              : "bg-muted text-foreground"
+          }`}
+        >
           <FiShare2 className="size-3.5" />
-          Shared
-        </span>
+          {shareToken ? "Shared" : "Share"}
+        </button>
       )}
-      {(onShare || onDelete) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Recording options"
-              className="flex size-8 items-center justify-center rounded-lg bg-muted text-foreground transition-colors hover:bg-muted/70 data-[state=open]:bg-muted/70 cursor-pointer"
-            >
-              <FiMoreHorizontal className="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            sideOffset={6}
-            className="w-44 rounded-xl border-border/50 bg-primary p-1"
-          >
-            {onShare && (
-              <DropdownMenuItem
-                onSelect={onShare}
-                className="cursor-pointer rounded-lg py-2"
-              >
-                <FiShare2 />
-                {shareToken ? "Sharing settings" : "Share"}
-              </DropdownMenuItem>
-            )}
-            {onDelete && (
-              <DropdownMenuItem
-                onSelect={onDelete}
-                className="cursor-pointer rounded-lg py-2 text-danger focus:bg-danger/10 focus:text-danger [&_svg]:!text-danger"
-              >
-                <FiTrash2 />
-                Delete
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {onRename && (
+        <button
+          type="button"
+          onClick={onRename}
+          className="flex h-8 items-center gap-1.5 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
+        >
+          <FiEdit2 className="size-3.5" />
+          Rename
+        </button>
+      )}
+      {onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="flex h-8 items-center gap-1.5 rounded-lg bg-danger/10 px-3 text-xs font-medium text-danger transition-colors hover:bg-danger/15 cursor-pointer"
+        >
+          <FiTrash2 className="size-3.5" />
+          Delete
+        </button>
       )}
     </div>
   );
 };
 
-// Top of a recording card: title (click to rename), then when / how long /
-// what quality, with the share + options actions on the right.
+// Above the player: the recording's title (click to rename) and when it was
+// recorded, with the share + options actions on the right.
 const RecordingHeader = ({
   title,
   session,
-  outputs,
   processing = false,
   onRename,
   ...actions
 }: {
   title: string;
   session?: RecordingSession;
-  /** The recording's track outputs - the source of its real length/quality. */
-  outputs?: FinalOutput[];
   processing?: boolean;
   shareToken?: string | null;
   onShare?: () => void;
   onRename?: (title: string) => void;
   onDelete?: () => void;
 }) => {
-  const meta = session ? sessionMeta(session, outputs) : null;
+  const date = session ? sessionDate(session) : null;
+  const titleRef = useRef<InlineTitleHandle>(null);
   return (
-    <div className="flex w-full items-center justify-between gap-3 px-3.5 pb-3 pt-3.5">
+    <div className="flex w-full items-center justify-between gap-3">
       <div className="min-w-0 flex-1 space-y-1.5">
         <h3 className="text-[0.95rem] font-semibold leading-tight tracking-[-0.01em] text-foreground">
-          <InlineTitle value={title} onSave={onRename} className="truncate" />
+          <InlineTitle
+            ref={titleRef}
+            value={title}
+            onSave={onRename}
+            className="truncate"
+          />
         </h3>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-subtle">
           {processing ? (
@@ -282,38 +247,19 @@ const RecordingHeader = ({
               Processing…
             </span>
           ) : (
-            meta && (
-              <>
-                {meta.date && (
-                  <span className="flex items-center gap-1.5">
-                    <FiCalendar className="size-3" />
-                    {meta.date}
-                  </span>
-                )}
-                {meta.duration && (
-                  <span className="flex items-center gap-1.5 tabular-nums">
-                    <FiClock className="size-3" />
-                    {meta.duration}
-                  </span>
-                )}
-                {meta.specs.length > 0 && (
-                  <span className="flex items-center gap-1">
-                    {meta.specs.map((spec) => (
-                      <span
-                        key={spec}
-                        className="rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium leading-none text-fg-muted"
-                      >
-                        {spec}
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </>
+            date && (
+              <span className="flex items-center gap-1.5">
+                <FiCalendar className="size-3" />
+                {date}
+              </span>
             )
           )}
         </div>
       </div>
-      <RecordingSessionActions {...actions} />
+      <RecordingSessionActions
+        {...actions}
+        onRename={onRename ? () => titleRef.current?.edit() : undefined}
+      />
     </div>
   );
 };
@@ -354,121 +300,119 @@ const SpaceRecordingShareDialog = ({
   );
 };
 
-// One recording (a single start→stop run within the meeting). Has its own
-// player and its own track list, with its own selected track.
-const TracksHeading = () => (
-  <h3 className="px-3.5 pb-2.5 pt-1 text-xs font-medium text-fg-muted">
-    Tracks
-  </h3>
-);
-
-const RecordingBlock = ({
-  id,
-  rows,
-  cooking = [],
-  title,
-  showDivider,
-  onRename,
-  onDelete,
-  shareToken,
-  onShare,
-  session,
-}: {
+// One recording (a single start→stop run within the meeting): its finished
+// track rows, plus tracks still being produced. A take with no rows yet is
+// still processing as a whole.
+type Take = {
   id: string;
-  rows: TrackRow[];
-  /** Session tracks whose masters are still being stitched - shown as
-   *  processing cards below the ready rows so they never leave the screen. */
-  cooking?: ParticipantRecording[];
   title: string;
-  showDivider: boolean;
-  onRename?: (title: string) => void;
-  onDelete?: () => void;
-  shareToken?: string | null;
-  onShare?: () => void;
-  /** Source of the date / length / quality line under the title. */
   session?: RecordingSession;
-}) => {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  startedAt: string | null;
+  rows: TrackRow[];
+  cooking: ParticipantRecording[];
+  processing: boolean;
+};
 
-  // Group a participant's segments together (Part 1 / Part 2 after a refresh).
-  const participantGroups = new Map<string, TrackRow[]>();
+// Group a participant's segments together (Part 1 / Part 2 after a refresh),
+// each group oldest part first.
+const groupRowsByParticipant = (rows: TrackRow[]) => {
+  const groups = new Map<string, TrackRow[]>();
   rows.forEach((row, index) => {
     const key =
       row.primary.sourceRecording?.participant?.id ??
       row.primary.targetParticipantId ??
       `solo-${row.primary.sourceRecordingId ?? row.primary.id ?? index}`;
-    const existing = participantGroups.get(key);
+    const existing = groups.get(key);
     if (existing) existing.push(row);
-    else participantGroups.set(key, [row]);
+    else groups.set(key, [row]);
   });
-  for (const group of participantGroups.values()) {
+  for (const group of groups.values()) {
     group.sort(
       (a, b) =>
         new Date(a.primary.createdAt).getTime() -
         new Date(b.primary.createdAt).getTime(),
     );
   }
-  const groupedRows = [...participantGroups.values()];
+  return [...groups.values()];
+};
 
-  // Playable tracks are the ready video ones. Default the player to the first.
-  const playableIds = groupedRows
-    .flat()
-    .filter((row) => row.primary.status === "READY" && row.primary.hasVideo)
-    .map((row) => row.primary.id);
-  const activeId =
-    selectedId && playableIds.includes(selectedId)
-      ? selectedId
-      : (playableIds[0] ?? null);
-  const activeOutput =
-    groupedRows.flat().find((row) => row.primary.id === activeId)?.primary ??
-    null;
+// Track rows carry a name, stats and a Download button, so their rail is
+// never narrower than this (and starts here).
+const TRACKS_RAIL_WIDTH = 560;
+const TRACKS_RAIL_OPTIONS = {
+  storageKey: "openside:tracks-rail-width",
+  label: "Resize tracks",
+  defaultWidth: TRACKS_RAIL_WIDTH,
+  minWidth: TRACKS_RAIL_WIDTH,
+  maxWidth: 760,
+};
+
+const TAB_TITLE_MAX = 22;
+
+// Cut at a fixed length and drop trailing spaces, so the "…" sits right
+// against the last word ("Weekly sync…", never "Weekly sync …").
+const shortTabTitle = (title: string) =>
+  title.length > TAB_TITLE_MAX
+    ? `${title.slice(0, TAB_TITLE_MAX).trimEnd()}…`
+    : title;
+
+// Header tabs above the player for switching between a project's recordings,
+// underlined like page tabs. Scrolls sideways when there are many.
+const TakeTabs = ({
+  takes,
+  activeId,
+  onSelect,
+}: {
+  takes: Take[];
+  activeId: string;
+  onSelect: (id: string) => void;
+}) => {
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Keep the selected tab in view as the selection moves.
+  useEffect(() => {
+    stripRef.current
+      ?.querySelector<HTMLElement>(`[data-take="${activeId}"]`)
+      ?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+  }, [activeId]);
 
   return (
-    <section
-      id={`recording-session-${id}`}
-      className={`flex flex-col gap-4 ${showDivider ? "pt-4" : ""}`}
+    <div
+      ref={stripRef}
+      role="tablist"
+      aria-label="Recordings"
+      className="flex h-12 shrink-0 items-end gap-6 overflow-x-auto border-b border-border scrollbar-hide lg:px-6"
     >
-      <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
-        <RecordingHeader
-          title={title}
-          session={session}
-          outputs={rows.map((row) => row.primary)}
-          shareToken={shareToken}
-          onShare={onShare}
-          onRename={onRename}
-          onDelete={onDelete}
-        />
-        <div className="p-2">
-          <TrackPlayer output={activeOutput} />
-        </div>
-        <TracksHeading />
-        <div className="flex min-w-0 flex-col divide-y divide-border/50 border-t border-border/50">
-          {groupedRows.flatMap((group, groupIndex) =>
-            group.map(({ primary, aligned, cloud }, partIndex) => (
-              <OutputCard
-                key={primary.sourceRecordingId ?? primary.id}
-                output={primary}
-                alignedOutput={aligned}
-                cloudOutput={cloud}
-                partLabel={
-                  group.length > 1 ? `Part ${partIndex + 1}` : undefined
-                }
-                fallbackTitle={`Participant ${groupIndex + 1}`}
-                selected={primary.id === activeId}
-                onSelect={() => setSelectedId(primary.id)}
-              />
-            )),
-          )}
-          {cooking.map((track, index) => (
-            <ProcessingTrackCard
-              key={track.id}
-              track={track}
-              index={groupedRows.length + index}
-            />
-          ))}
-        </div>
-      </div>
-    </section>
+      {takes.map((take) => {
+        const active = take.id === activeId;
+        const date = take.session ? sessionDate(take.session) : null;
+        return (
+          <button
+            key={take.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            data-take={take.id}
+            onClick={() => onSelect(take.id)}
+            title={date ? `${take.title} · ${date}` : take.title}
+            className={`relative flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap text-sm font-medium transition-colors cursor-pointer ${
+              active ? "text-blue-500" : "text-fg-muted hover:text-foreground"
+            }`}
+          >
+            {take.processing && <FiLoader className="size-3.5 animate-spin" />}
+            {/* Long names end in "…" so the tabs stay tidy; full name on hover. */}
+            <span>{shortTabTitle(take.title)}</span>
+            {active && (
+              <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-blue-500" />
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 };
 
@@ -568,75 +512,35 @@ const ProcessingTrackCard = ({
   );
 };
 
-// A recording that has stopped and is still being stitched into downloadable
-// masters. Shows a processing player placeholder plus a card per track.
-const ProcessingRecordingBlock = ({
-  id,
-  tracks,
-  title,
-  showDivider,
-  onRename,
-  onDelete,
-  shareToken,
-  onShare,
-}: {
-  id: string;
-  tracks: ParticipantRecording[];
-  title: string;
-  showDivider: boolean;
-  onRename?: (title: string) => void;
-  onDelete?: () => void;
-  shareToken?: string | null;
-  onShare?: () => void;
-}) => (
-  <section
-    id={`recording-session-${id}`}
-    className={`flex flex-col gap-4 ${showDivider ? "pt-4" : ""}`}
-  >
-    <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
-      <RecordingHeader
-        title={title}
-        processing
-        shareToken={shareToken}
-        onShare={onShare}
-        onRename={onRename}
-        onDelete={onDelete}
-      />
-      <div className="p-2">
-        <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black text-white/60 ring-1 ring-border/50">
-          <FiLoader className="size-6 animate-spin" />
-          <span className="text-sm">Processing your recording…</span>
-          <span className="px-6 text-center text-xs text-white/40">
-            Tracks become playable as they finish. You can leave this page and
-            it keeps going.
-          </span>
-        </div>
-      </div>
-      <TracksHeading />
-      <div className="flex min-w-0 flex-col divide-y divide-border/50 border-t border-border/50">
-        {tracks.map((track, index) => (
-          <ProcessingTrackCard key={track.id} track={track} index={index} />
-        ))}
-      </div>
-    </div>
-  </section>
-);
-
 const SpaceOutputs = ({
   outputs,
   sessions,
   canManage,
+  initialTakeId,
   onRenameSession,
+  onDescribeSession,
   onDeleteSession,
   onShareSession,
 }: {
   outputs: FinalOutput[];
   sessions: RecordingSession[];
   canManage: boolean;
+  /** Recording to open on first, e.g. from a deep link. */
+  initialTakeId?: string | null;
   onRenameSession: (sessionId: string, title: string) => void;
+  onDescribeSession: (sessionId: string, description: string) => void;
   onDeleteSession: (sessionId: string, title: string) => void;
   onShareSession: (session: RecordingSession) => void;
 }) => {
+  const [selectedTakeId, setSelectedTakeId] = useState<string | null>(
+    initialTakeId ?? null,
+  );
+  // The chosen track per recording, so switching recordings and back keeps it.
+  const [selectedTrackByTake, setSelectedTrackByTake] = useState<
+    Record<string, string>
+  >({});
+  const railResizer = useCommentsRailResizer(TRACKS_RAIL_OPTIONS);
+
   const participantOutputs = outputs.filter(
     (output) => output.type === "PER_PARTICIPANT",
   );
@@ -774,10 +678,8 @@ const SpaceOutputs = ({
 
   if (rows.length === 0 && processingBlocks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-primary/60 py-20 text-center">
-        <span className="flex size-12 items-center justify-center rounded-full bg-background text-fg-subtle">
-          <FiVideo className="size-6" />
-        </span>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-20 text-center">
+        <FiVideo className="size-7 text-fg-subtle" />
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">
             No finished recordings yet
@@ -790,84 +692,166 @@ const SpaceOutputs = ({
     );
   }
 
-  // Group tracks into recordings - one meeting can be recorded more than once
-  // (start → stop → start again). Each recording is its own block with its own
-  // player + tracks, ordered oldest-first so the first recording is on top.
-  const recordingsMap = new Map<string, TrackRow[]>();
+  // One meeting can be recorded more than once (start → stop → start again).
+  // Each run is a take, oldest first, picked from the slider.
+  const rowsByTake = new Map<string, TrackRow[]>();
   for (const row of rows) {
     const key = row.primary.recordingSessionId;
-    const existing = recordingsMap.get(key);
+    const existing = rowsByTake.get(key);
     if (existing) existing.push(row);
-    else recordingsMap.set(key, [row]);
+    else rowsByTake.set(key, [row]);
   }
-  const recordings = [...recordingsMap.entries()]
-    .map(([id, recRows], index) => ({
-      id,
-      rows: recRows,
-      cooking: cookingBySession.get(id) ?? [],
-      session: sessions.find((session) => session.id === id),
-      title:
-        sessions.find((session) => session.id === id)?.title ||
-        recRows[0]?.primary.recordingSession?.title ||
-        `Recording ${index + 1}`,
-      startedAt:
-        recRows[0]?.primary.recordingSession?.startedAt ??
-        recRows[0]?.primary.createdAt ??
-        null,
-    }))
+  const takes: Take[] = [
+    ...processingBlocks.map((block) => ({
+      id: block.id,
+      title: block.title,
+      session: block.session,
+      startedAt: block.startedAt,
+      rows: [],
+      cooking: block.tracks,
+      processing: true,
+    })),
+    ...[...rowsByTake.entries()].map(([id, takeRows]) => {
+      const session = sessions.find((candidate) => candidate.id === id);
+      return {
+        id,
+        title:
+          session?.title || takeRows[0]?.primary.recordingSession?.title || "",
+        session,
+        startedAt:
+          session?.startedAt ??
+          takeRows[0]?.primary.recordingSession?.startedAt ??
+          takeRows[0]?.primary.createdAt ??
+          null,
+        rows: takeRows,
+        cooking: cookingBySession.get(id) ?? [],
+        processing: false,
+      };
+    }),
+  ]
     .sort(
       (a, b) =>
         new Date(a.startedAt ?? 0).getTime() -
         new Date(b.startedAt ?? 0).getTime(),
-    );
+    )
+    .map((take, index) => ({
+      ...take,
+      title: take.title || `Recording ${index + 1}`,
+    }));
+
+  // Default to the newest take; fall back if the chosen one was deleted.
+  const activeTake =
+    takes.find((take) => take.id === selectedTakeId) ?? takes[takes.length - 1];
+  const groupedRows = groupRowsByParticipant(activeTake.rows);
+  const playableIds = groupedRows
+    .flat()
+    .filter((row) => row.primary.status === "READY" && row.primary.hasVideo)
+    .map((row) => row.primary.id);
+  const chosenTrack = selectedTrackByTake[activeTake.id];
+  const activeTrackId =
+    chosenTrack && playableIds.includes(chosenTrack)
+      ? chosenTrack
+      : (playableIds[0] ?? null);
+  const activeOutput =
+    groupedRows.flat().find((row) => row.primary.id === activeTrackId)
+      ?.primary ?? null;
 
   return (
-    <section className="flex flex-col gap-4">
-      {processingBlocks.map((block, index) => (
-        <ProcessingRecordingBlock
-          key={block.id}
-          id={block.id}
-          tracks={block.tracks}
-          title={block.title}
-          showDivider={index > 0}
-          onRename={
-            canManage
-              ? (next: string) => onRenameSession(block.id, next)
-              : undefined
-          }
-          onDelete={
-            canManage ? () => onDeleteSession(block.id, block.title) : undefined
-          }
-          shareToken={block.session.shareToken}
-          onShare={canManage ? () => onShareSession(block.session) : undefined}
+    <div
+      style={railResizer.gridStyle}
+      className="relative grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)] lg:gap-0 lg:p-0"
+    >
+      {railResizer.handle}
+      <div className="flex min-w-0 flex-col lg:min-h-0 lg:border-r lg:border-border">
+        <TakeTabs
+          takes={takes}
+          activeId={activeTake.id}
+          onSelect={setSelectedTakeId}
         />
-      ))}
-      {recordings.map((rec, index) => (
-        <RecordingBlock
-          key={rec.id}
-          id={rec.id}
-          rows={rec.rows}
-          cooking={rec.cooking}
-          title={rec.title}
-          showDivider={processingBlocks.length + index > 0}
-          onRename={
-            canManage
-              ? (next: string) => onRenameSession(rec.id, next)
-              : undefined
-          }
-          onDelete={
-            canManage ? () => onDeleteSession(rec.id, rec.title) : undefined
-          }
-          shareToken={rec.session?.shareToken}
-          session={rec.session ?? undefined}
-          onShare={
-            canManage && rec.session
-              ? () => onShareSession(rec.session as RecordingSession)
-              : undefined
-          }
-        />
-      ))}
-    </section>
+        <div className="flex flex-col gap-4 pt-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:p-6">
+          <RecordingHeader
+            title={activeTake.title}
+            session={activeTake.session}
+            processing={activeTake.processing}
+            shareToken={activeTake.session?.shareToken}
+            onRename={
+              canManage
+                ? (next: string) => onRenameSession(activeTake.id, next)
+                : undefined
+            }
+            onDelete={
+              canManage
+                ? () => onDeleteSession(activeTake.id, activeTake.title)
+                : undefined
+            }
+            onShare={
+              canManage && activeTake.session
+                ? () => onShareSession(activeTake.session as RecordingSession)
+                : undefined
+            }
+          />
+          {activeTake.processing ? (
+            <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black text-white/60 ring-1 ring-border/50">
+              <FiLoader className="size-6 animate-spin" />
+              <span className="text-sm">Processing your recording…</span>
+              <span className="px-6 text-center text-xs text-white/40">
+                Tracks become playable as they finish. You can leave this page
+                and it keeps going.
+              </span>
+            </div>
+          ) : (
+            <TrackPlayer output={activeOutput} />
+          )}
+          {/* Keyed per recording so an unsaved edit never carries across. */}
+          <RecordingDescription
+            key={activeTake.id}
+            value={activeTake.session?.description ?? null}
+            onSave={
+              canManage && activeTake.session
+                ? (next) => onDescribeSession(activeTake.id, next)
+                : undefined
+            }
+          />
+        </div>
+      </div>
+
+      {/* Tracks of the selected recording, full height beside the player. */}
+      <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:rounded-none lg:border-0 lg:bg-transparent">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+          <h3 className="text-sm font-semibold text-foreground">Tracks</h3>
+        </div>
+        <div className="flex min-w-0 flex-col divide-y divide-border/50 lg:[&>*:last-child]:border-b lg:[&>*:last-child]:border-border/50 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+          {groupedRows.flatMap((group, groupIndex) =>
+            group.map(({ primary, aligned, cloud }, partIndex) => (
+              <OutputCard
+                key={primary.sourceRecordingId ?? primary.id}
+                output={primary}
+                alignedOutput={aligned}
+                cloudOutput={cloud}
+                partLabel={
+                  group.length > 1 ? `Part ${partIndex + 1}` : undefined
+                }
+                fallbackTitle={`Participant ${groupIndex + 1}`}
+                selected={primary.id === activeTrackId}
+                onSelect={() =>
+                  setSelectedTrackByTake((current) => ({
+                    ...current,
+                    [activeTake.id]: primary.id,
+                  }))
+                }
+              />
+            )),
+          )}
+          {activeTake.cooking.map((track, index) => (
+            <ProcessingTrackCard
+              key={track.id}
+              track={track}
+              index={groupedRows.length + index}
+            />
+          ))}
+        </div>
+      </aside>
+    </div>
   );
 };
 
@@ -922,53 +906,92 @@ const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
   </div>
 );
 
-const ProjectDetailSkeleton = () => (
-  <div className="-m-4 flex flex-col">
-    <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="size-9 shrink-0 animate-pulse rounded-md bg-muted" />
-        <div className="min-w-0 space-y-1.5">
-          <div className="h-4 w-44 animate-pulse rounded-md bg-muted" />
-          <div className="h-3 w-32 animate-pulse rounded-md bg-muted" />
-        </div>
-      </div>
-      <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
-    </div>
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 pb-12 pt-8">
-      <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
-        <div className="p-2 pb-0">
-          <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
-        </div>
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div className="space-y-2">
-            <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
-            <div className="h-3 w-56 animate-pulse rounded-md bg-muted" />
+// Mirrors the loaded page: header, recording tabs, the recording's title +
+// actions, player and description, and the tracks rail at its saved width.
+const ProjectDetailSkeleton = () => {
+  const { gridStyle } = useCommentsRailResizer(TRACKS_RAIL_OPTIONS);
+  return (
+    <div className="-m-4 flex flex-col lg:h-[calc(100%+2rem)] lg:min-h-0">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="size-9 shrink-0 animate-pulse rounded-md bg-muted" />
+          <div className="min-w-0 space-y-1.5">
+            <div className="h-4 w-44 animate-pulse rounded-md bg-muted" />
+            <div className="h-3 w-32 animate-pulse rounded-md bg-muted" />
           </div>
-          {/* Options button */}
-          <div className="h-8 w-24 shrink-0 animate-pulse rounded-lg bg-muted" />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="h-9 w-24 animate-pulse rounded-lg bg-muted" />
+          <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
         </div>
       </div>
-      {/* "Tracks" + count */}
-      <div className="flex items-center gap-2 px-1">
-        <div className="h-4 w-14 animate-pulse rounded-md bg-muted" />
-        <div className="h-5 w-7 animate-pulse rounded-full bg-muted" />
-      </div>
-      <div className="flex flex-col divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50 bg-primary">
-        {Array.from({ length: 3 }).map((_, index) => (
-          <div key={index} className="flex items-center gap-3 px-3 py-2.5">
-            <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-3.5 w-32 animate-pulse rounded-md bg-muted" />
-              <div className="h-3 w-48 animate-pulse rounded-md bg-muted" />
+      <div
+        style={gridStyle}
+        className="grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_var(--comments-rail-width)] lg:gap-0 lg:p-0"
+      >
+        {/* Recording tabs, then its title + actions and the player */}
+        <section className="flex min-w-0 flex-col lg:border-r lg:border-border">
+          <div className="flex h-12 shrink-0 items-stretch gap-6 border-b border-border lg:px-6">
+            {["w-28", "w-24", "w-24"].map((width, index) => (
+              <div key={index} className="relative flex items-center">
+                <div
+                  className={`h-4 animate-pulse rounded-md bg-muted ${width}`}
+                />
+                {/* The selected tab's underline */}
+                {index === 0 && (
+                  <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-muted" />
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col gap-4 pt-4 lg:p-6">
+            <div className="flex items-center justify-between gap-3">
+              {/* Title, then the calendar + date line */}
+              <div className="space-y-2">
+                <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
+                <div className="h-3 w-32 animate-pulse rounded-md bg-muted" />
+              </div>
+              {/* Share, Rename, Delete */}
+              <div className="flex shrink-0 items-center gap-1.5">
+                <div className="h-8 w-[74px] animate-pulse rounded-lg bg-muted" />
+                <div className="h-8 w-[86px] animate-pulse rounded-lg bg-muted" />
+                <div className="h-8 w-[78px] animate-pulse rounded-lg bg-muted" />
+              </div>
             </div>
-            {/* Download button */}
-            <div className="h-8 w-24 shrink-0 animate-pulse rounded-lg bg-muted" />
+            <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
+            {/* Description */}
+            <div className="mt-1 border-t border-border/60 pt-4">
+              <div className="mb-3 h-5 w-28 animate-pulse rounded-md bg-muted" />
+              <div className="h-3.5 w-3/4 animate-pulse rounded-md bg-muted" />
+            </div>
           </div>
-        ))}
+        </section>
+        {/* Tracks rail */}
+        <aside className="flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:rounded-none lg:border-0 lg:bg-transparent">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+            <div className="h-4 w-14 animate-pulse rounded-md bg-muted" />
+          </div>
+          <div className="flex flex-col divide-y divide-border/50 lg:[&>*:last-child]:border-b lg:[&>*:last-child]:border-border/50">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-3 px-3.5 py-2.5"
+              >
+                <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-3.5 w-28 animate-pulse rounded-md bg-muted" />
+                  <div className="h-3 w-40 animate-pulse rounded-md bg-muted" />
+                </div>
+                {/* Download menu */}
+                <div className="h-8 w-28 shrink-0 animate-pulse rounded-lg bg-muted" />
+              </div>
+            ))}
+          </div>
+        </aside>
       </div>
-    </section>
-  </div>
-);
+    </div>
+  );
+};
 
 export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const navigate = useNavigate();
@@ -988,8 +1011,9 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const focusedRecordingSessionId = searchParams.get("recordingSessionId");
   const { data: user } = useGetMe();
   const renameSpace = useRenameSpace();
+  const projectTitleRef = useRef<InlineTitleHandle>(null);
   const deleteSpace = useDeleteSpace();
-  const renameRecordingSession = useRenameRecordingSession(spaceId);
+  const updateRecordingSession = useUpdateRecordingSession(spaceId);
   const deleteRecordingSession = useDeleteRecordingSession(spaceId);
   const {
     data: space,
@@ -1044,16 +1068,6 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   const isInitialLoading =
     isSpaceLoading || areSessionsLoading || areOutputsLoading;
 
-  useEffect(() => {
-    if (!focusedRecordingSessionId || isInitialLoading || !space) return;
-    const frame = requestAnimationFrame(() => {
-      document
-        .getElementById(`recording-session-${focusedRecordingSessionId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [focusedRecordingSessionId, isInitialLoading, space]);
-
   if (isInitialLoading) return <ProjectDetailSkeleton />;
 
   if (!space) {
@@ -1099,7 +1113,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
 
   // Optimistic: the hook updates the cache instantly and rolls back on failure.
   const renameRecording = (sessionId: string, nextTitle: string) => {
-    renameRecordingSession.mutate({ sessionId, title: nextTitle });
+    updateRecordingSession.mutate({ sessionId, title: nextTitle });
   };
 
   const openRecordingDelete = (sessionId: string, sessionTitle: string) => {
@@ -1117,8 +1131,10 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
   return (
     <>
       {/* Cancel the wrapper's p-4 so the header spans edge to edge like the
-          dashboard header above it. */}
-      <div className="-m-4 flex flex-col">
+          dashboard header above it. On desktop the page is exactly the
+          container's height: the player pane and tracks rail scroll on their
+          own. */}
+      <div className="-m-4 flex flex-col lg:h-[calc(100%+2rem)] lg:min-h-0">
         <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
           <div className="flex min-w-0 items-center gap-2">
             <button
@@ -1133,6 +1149,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
             <div className="min-w-0">
               <h1 className="text-[15px] font-semibold leading-tight text-foreground">
                 <InlineTitle
+                  ref={projectTitleRef}
                   value={space.title || "Untitled space"}
                   maxLength={100}
                   onSave={
@@ -1159,6 +1176,14 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
             <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
+                onClick={() => projectTitleRef.current?.edit()}
+                className="flex h-9 items-center gap-1.5 rounded-lg bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
+              >
+                <FiEdit2 className="size-3.5" />
+                Rename
+              </button>
+              <button
+                type="button"
                 onClick={openDeleteConfirmation}
                 disabled={deleteSpace.isPending}
                 className="flex h-9 items-center gap-1.5 rounded-lg bg-danger/10 px-3 text-sm font-medium text-danger transition-colors hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
@@ -1173,16 +1198,18 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
             </div>
           )}
         </header>
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 pb-12 pt-8">
-          <SpaceOutputs
-            outputs={outputs ?? []}
-            sessions={sessions}
-            canManage={canManage}
-            onRenameSession={renameRecording}
-            onDeleteSession={openRecordingDelete}
-            onShareSession={setSharingSession}
-          />
-        </div>
+        <SpaceOutputs
+          outputs={outputs ?? []}
+          sessions={sessions}
+          canManage={canManage}
+          initialTakeId={focusedRecordingSessionId}
+          onRenameSession={renameRecording}
+          onDescribeSession={(sessionId, description) =>
+            updateRecordingSession.mutate({ sessionId, description })
+          }
+          onDeleteSession={openRecordingDelete}
+          onShareSession={setSharingSession}
+        />
       </div>
       {shareDialog.rendered && (
         <SpaceRecordingShareDialog

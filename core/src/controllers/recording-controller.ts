@@ -19,7 +19,7 @@ import {
 	isActiveParticipant,
 	isHostOrCoHost,
 	markRecordingComplete,
-	renameSpaceRecordingSession,
+	updateSpaceRecordingSession,
 	startRecordingSession,
 	stopRecordingSession,
 } from "../services/recording-service";
@@ -427,6 +427,8 @@ export async function deleteSessionController(
 	}
 }
 
+const SESSION_DESCRIPTION_MAX_LENGTH = 2000;
+
 export async function renameSessionController(
 	req: AuthenticatedRequest,
 	res: Response,
@@ -442,8 +444,6 @@ export async function renameSessionController(
 		}
 
 		const sessionId = req.params.sessionId as string | undefined;
-		const title =
-			typeof req.body.title === "string" ? req.body.title.trim() : "";
 		if (!sessionId) {
 			res.status(400).json({
 				success: false,
@@ -452,26 +452,57 @@ export async function renameSessionController(
 			});
 			return;
 		}
-		if (!title || title.length > 120) {
+
+		// Either field may be sent alone. A blank description clears it.
+		const changes: { title?: string; description?: string | null } = {};
+		if (req.body.title !== undefined) {
+			const title =
+				typeof req.body.title === "string" ? req.body.title.trim() : "";
+			if (!title || title.length > 120) {
+				res.status(400).json({
+					success: false,
+					data: null,
+					message: "Recording title must be between 1 and 120 characters!",
+				});
+				return;
+			}
+			changes.title = title;
+		}
+		if (req.body.description !== undefined) {
+			const description =
+				typeof req.body.description === "string"
+					? req.body.description.trim()
+					: "";
+			if (description.length > SESSION_DESCRIPTION_MAX_LENGTH) {
+				res.status(400).json({
+					success: false,
+					data: null,
+					message: `Description must be at most ${SESSION_DESCRIPTION_MAX_LENGTH} characters!`,
+				});
+				return;
+			}
+			changes.description = description || null;
+		}
+		if (Object.keys(changes).length === 0) {
 			res.status(400).json({
 				success: false,
 				data: null,
-				message: "Recording title must be between 1 and 120 characters!",
+				message: "Nothing to update!",
 			});
 			return;
 		}
 
 		const user = await findOrCreateUser(req.user);
-		const session = await renameSpaceRecordingSession(
+		const session = await updateSpaceRecordingSession(
 			sessionId,
 			user.id,
-			title,
+			changes,
 		);
 
 		res.status(200).json({
 			success: true,
 			data: session,
-			message: "Recording renamed successfully!",
+			message: "Recording updated successfully!",
 		});
 	} catch (error: unknown) {
 		if (error instanceof Error) {
@@ -487,7 +518,7 @@ export async function renameSessionController(
 				res.status(403).json({
 					success: false,
 					data: null,
-					message: "Only the host can rename this recording!",
+					message: "Only the host can edit this recording!",
 				});
 				return;
 			}

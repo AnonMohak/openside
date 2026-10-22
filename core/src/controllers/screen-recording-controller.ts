@@ -89,7 +89,8 @@ export async function startScreenSessionController(
 		}
 
 		const user = await findOrCreateUser(req.user);
-		// Every recording gets a default title/description derived from the author.
+		// Every recording gets a default title derived from the author. The
+		// description stays empty until the owner writes one.
 		const authorName = user.name?.trim() || "User";
 		const resolvedTitle =
 			typeof title === "string" && title.trim()
@@ -98,7 +99,7 @@ export async function startScreenSessionController(
 		const resolvedDescription =
 			typeof description === "string" && description.trim()
 				? description.trim()
-				: `${authorName}'s screen recording`;
+				: undefined;
 
 		const session = await startScreenRecordingSession({
 			userId: user.id,

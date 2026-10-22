@@ -166,14 +166,15 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     setCameraShapeState(s);
   }, []);
 
-  // Default title/description from the author's name, until the user edits them.
+  // Default title from the author's name, until the user edits it. The
+  // description starts empty; the owner adds one later if they want.
   useEffect(() => {
     if (touchedRef.current) return;
     const name = user?.name?.trim();
     if (!name) return;
     const next: RecordingInfo = {
       title: `${name}'s recording`,
-      description: `${name}'s screen recording`,
+      description: "",
     };
     infoRef.current = next;
     setInfoState(next);

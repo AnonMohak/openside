@@ -5,6 +5,7 @@ import {
   type Query,
 } from "@tanstack/react-query";
 import api from "@/lib/axiosInstance";
+import { toast } from "@/lib/toast";
 import type { FinalOutput } from "@/types/outputTypes";
 import type {
   StartSessionPayload,
@@ -156,7 +157,9 @@ export const useShareSpaceRecording = (spaceId: string) => {
             ? {
                 ...data,
                 sessions: data.sessions.map((session) =>
-                  session.id === sessionId ? { ...session, shareToken } : session,
+                  session.id === sessionId
+                    ? { ...session, shareToken }
+                    : session,
                 ),
               }
             : data,
@@ -193,23 +196,31 @@ export const useUnshareSpaceRecording = (spaceId: string) => {
   });
 };
 
-export const useRenameRecordingSession = (spaceId: string) => {
+/** Change a Space recording's title and/or description (blank clears it). */
+export const useUpdateRecordingSession = (spaceId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
       sessionId,
-      title,
+      ...changes
     }: {
       sessionId: string;
-      title: string;
+      title?: string;
+      description?: string;
     }) => {
-      const { data } = await api.patch(`/recording/session/${sessionId}`, {
-        title,
-      });
-      return data.data as { id: string; spaceId: string; title: string };
+      const { data } = await api.patch(
+        `/recording/session/${sessionId}`,
+        changes,
+      );
+      return data.data as {
+        id: string;
+        spaceId: string;
+        title: string;
+        description: string | null;
+      };
     },
-    onMutate: async ({ sessionId, title }) => {
+    onMutate: async ({ sessionId, ...changes }) => {
       await queryClient.cancelQueries({
         queryKey: ["recording-sessions", spaceId],
       });
@@ -223,7 +234,17 @@ export const useRenameRecordingSession = (spaceId: string) => {
             ? {
                 ...data,
                 sessions: data.sessions.map((session) =>
-                  session.id === sessionId ? { ...session, title } : session,
+                  session.id === sessionId
+                    ? {
+                        ...session,
+                        ...(changes.title !== undefined && {
+                          title: changes.title,
+                        }),
+                        ...(changes.description !== undefined && {
+                          description: changes.description || null,
+                        }),
+                      }
+                    : session,
                 ),
               }
             : data,
@@ -235,6 +256,7 @@ export const useRenameRecordingSession = (spaceId: string) => {
         ["recording-sessions", spaceId],
         context?.previous,
       );
+      toast.error("Couldn't save your changes.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({
