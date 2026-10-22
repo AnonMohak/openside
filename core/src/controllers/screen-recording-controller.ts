@@ -784,13 +784,7 @@ export async function createScreenSegmentController(
 	}
 }
 
-const OUTPUT_KINDS = [
-	"screen",
-	"screenAligned",
-	"camera",
-	"both",
-	"preview",
-] as const;
+const OUTPUT_KINDS = ["screen", "screenAligned", "camera", "both"] as const;
 
 export async function listScreenRecordingsController(
 	req: AuthenticatedRequest,

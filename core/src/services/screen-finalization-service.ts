@@ -19,14 +19,7 @@
  */
 
 import { spawn } from "node:child_process";
-import {
-	appendFile,
-	copyFile,
-	mkdtemp,
-	rm,
-	stat,
-	writeFile,
-} from "node:fs/promises";
+import { appendFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { prisma } from "../db/index.ts";
@@ -50,11 +43,7 @@ import {
 import { evenDim, probeMedia } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
-import {
-	deleteObjects,
-	getObjectBuffer,
-	putFileObject,
-} from "./storage-service.ts";
+import { getObjectBuffer, putFileObject } from "./storage-service.ts";
 import { reconcileRecordedSeconds } from "./usage-service.ts";
 
 /** Bottom-right "openside.pro" badge burned into DEMO masters only. Points
@@ -577,29 +566,21 @@ function roundedAlphaExpr(r: number): string {
 	return `if(gt(${tl}+${tr}+${bl}+${br},0),0,255)`;
 }
 
-/** The session already has a real (non-preview) video. */
-function hasFinalOutput(outputs: unknown): boolean {
-	if (!outputs || typeof outputs !== "object") return false;
-	return Object.keys(outputs).some((kind) => kind !== "preview");
-}
-
 /**
- * A watchable copy of the capture, up within seconds of the last chunk:
- * the recorder's own H.264/AAC (or VP8/Opus) stream copied into a seekable
- * file - no encoding, no camera PiP. It plays while the real video renders,
- * then is replaced. Best effort: any failure just means no preview.
+ * Last resort when every encode failed: the recorder's own stream copied into
+ * a playable file (no encoding, no camera PiP) beats losing the take. Returns
+ * the local file, or null if even that fails.
  */
-async function publishPreview(
+async function salvageCopy(
 	fetched: FetchedTrack,
-	userId: string,
 	sessionId: string,
 	tmpDir: string,
-): Promise<string | null> {
+): Promise<{ path: string; ext: MasterExt } | null> {
 	try {
 		if (fetched.parts.length === 0) return null;
 		// Parts are joined as-is; a part that's encoded differently (a codec
-		// fallback) makes the copy fail, and the take just has no preview.
-		const listPath = path.join(tmpDir, "preview-list.txt");
+		// fallback) makes the copy fail, and there is nothing to salvage.
+		const listPath = path.join(tmpDir, "salvage-list.txt");
 		await writeFile(
 			listPath,
 			`${fetched.parts
@@ -626,7 +607,7 @@ async function publishPreview(
 					...(candidate === "mp4" ? ["-movflags", "+faststart"] : []),
 					"-f",
 					candidate,
-					path.join(tmpDir, `preview.${candidate}`),
+					path.join(tmpDir, `salvage.${candidate}`),
 				]);
 				ext = candidate;
 				break;
@@ -635,20 +616,9 @@ async function publishPreview(
 			}
 		}
 		if (!ext) return null;
-		const outPath = path.join(tmpDir, `preview.${ext}`);
-		// Kept under a fixed name too, for the all-encodes-failed fallback.
-		await copyFile(outPath, path.join(tmpDir, "preview.bin"));
-		const durationMs = (await probeMedia(outPath)).durationMs ?? 0;
-		const key = screenKey(userId, sessionId, "preview", ext);
-		await putFileObject(key, outPath, masterContentType(ext));
-		await prisma.recordingSession.updateMany({
-			where: { id: sessionId, status: "PROCESSING" },
-			data: { outputs: { preview: { key, durationMs } } as never },
-		});
-		console.log(`[ScreenFinalize] ${sessionId}: preview up (${key})`);
-		return key;
+		return { path: path.join(tmpDir, `salvage.${ext}`), ext };
 	} catch (error) {
-		console.warn(`[ScreenFinalize] ${sessionId}: no quick preview:`, error);
+		console.warn(`[ScreenFinalize] ${sessionId}: salvage copy failed:`, error);
 		return null;
 	}
 }
@@ -699,8 +669,6 @@ export async function finalizeScreenSession(
 	if (inFlight.has(sessionId)) return;
 	inFlight.add(sessionId);
 	let tmp: string | null = null;
-	// The quick preview this pass published, replaced by the real output.
-	let previewKey: string | null = null;
 
 	try {
 		const session = await prisma.recordingSession.findUnique({
@@ -815,19 +783,9 @@ export async function finalizeScreenSession(
 		const fetch = (rec: TrackRec | undefined) =>
 			rec ? guarded(rec, () => fetchTrack(rec, tmp as string)) : null;
 
-		// The track the video's sound and picture come from is fetched first,
-		// so a watchable preview is up within seconds - before any encoding.
 		const screenFetched = await fetch(screenRec);
 		const cameraFirst = screenRec ? null : await fetch(cameraRec);
 		const primary = screenFetched ?? cameraFirst;
-		if (primary && !hasFinalOutput(session.outputs)) {
-			previewKey = await publishPreview(
-				primary,
-				session.userId,
-				sessionId,
-				tmp,
-			);
-		}
 		const cameraFetched = screenRec ? await fetch(cameraRec) : cameraFirst;
 
 		// For a screen + camera take the (small, fast) camera goes first, then
@@ -915,14 +873,18 @@ export async function finalizeScreenSession(
 			}
 		}
 
-		// Every encode failed but the preview made it: a stream copy of the
-		// capture beats losing the take.
-		if (Object.keys(outputs).length === 0 && previewKey) {
-			const durationMs = (await probeMedia(path.join(tmp, "preview.bin")))
-				.durationMs;
-			outputs.screen = { key: previewKey, durationMs: durationMs ?? 0 };
+		// Every encode failed: keep a stream copy of the capture rather than
+		// lose the take.
+		const salvaged =
+			Object.keys(outputs).length === 0 && primary
+				? await salvageCopy(primary, sessionId, tmp)
+				: null;
+		if (salvaged) {
+			const key = screenKey(session.userId, sessionId, "screen", salvaged.ext);
+			await putFileObject(key, salvaged.path, masterContentType(salvaged.ext));
+			const durationMs = (await probeMedia(salvaged.path)).durationMs ?? 0;
+			outputs.screen = { key, durationMs };
 			outputs.screenAligned = outputs.screen;
-			previewKey = null;
 		}
 
 		if (Object.keys(outputs).length === 0) {
@@ -940,10 +902,6 @@ export async function finalizeScreenSession(
 			where: { id: sessionId },
 			data: { status: "READY", outputs: outputs as never },
 		});
-
-		if (previewKey) {
-			await deleteObjects([previewKey]).catch(() => undefined);
-		}
 
 		// Bill what was actually recorded if the meter came up short (pause is
 		// the client's word; the video's length is the proof).

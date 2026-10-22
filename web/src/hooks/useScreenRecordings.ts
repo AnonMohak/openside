@@ -3,13 +3,7 @@ import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
 
-/** "preview" is a quick stream copy shown while the real video renders. */
-export type ScreenOutputKind =
-  | "screen"
-  | "screenAligned"
-  | "camera"
-  | "both"
-  | "preview";
+export type ScreenOutputKind = "screen" | "screenAligned" | "camera" | "both";
 
 export interface ScreenRecording {
   id: string;
