@@ -6,7 +6,7 @@
  * /recording/shared/:token endpoints, which never expose storage keys.
  */
 
-import { useState } from "react";
+import { useRef, useState, type Ref } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { FiClock, FiLoader, FiMonitor, FiVideo } from "react-icons/fi";
@@ -23,13 +23,16 @@ import {
   fetchSharedOutputUrl,
   fetchSharedFinalOutputDownload,
   useCreateSharedComment,
+  useRecordSharedView,
   useSharedComments,
   useSharedFinalOutputUrl,
   useSharedOutputUrl,
   useSharedRecording,
 } from "@/hooks/useSharedRecording";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
-import VideoPlayer from "@/components/shared/VideoPlayer";
+import VideoPlayer, {
+  type VideoPlayerHandle,
+} from "@/components/shared/VideoPlayer";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "";
@@ -70,9 +73,11 @@ const formatBitrate = (bitrate?: number | null) =>
 const SharedPlayer = ({
   token,
   kind,
+  playerRef,
 }: {
   token: string;
   kind: ScreenOutputKind | null;
+  playerRef: Ref<VideoPlayerHandle>;
 }) => {
   const [downloading, setDownloading] = useState(false);
   const { data: url } = useSharedOutputUrl(token, kind ?? undefined);
@@ -99,7 +104,7 @@ const SharedPlayer = ({
             <span className="text-sm">Nothing to play yet</span>
           </div>
         ) : url ? (
-          <VideoPlayer key={url} src={url} />
+          <VideoPlayer key={url} ref={playerRef} src={url} />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
             <FiLoader className="size-4 animate-spin" /> Loading…
@@ -148,9 +153,11 @@ type SharedSpaceTrack = {
 const SharedSpacePlayer = ({
   token,
   outputId,
+  playerRef,
 }: {
   token: string;
   outputId: string | null;
+  playerRef: Ref<VideoPlayerHandle>;
 }) => {
   const { data: url } = useSharedFinalOutputUrl(token, outputId ?? undefined);
   return (
@@ -161,7 +168,7 @@ const SharedSpacePlayer = ({
           <span className="text-sm">Nothing to play yet</span>
         </div>
       ) : url ? (
-        <VideoPlayer key={url} src={url} />
+        <VideoPlayer key={url} ref={playerRef} src={url} />
       ) : (
         <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
           <FiLoader className="size-4 animate-spin" /> Loading…
@@ -381,11 +388,13 @@ const SharedRecordingPage = () => {
     string | null
   >(null);
   const { isSignedIn } = useClerkAuth();
+  const playerRef = useRef<VideoPlayerHandle>(null);
   const { data: rec, isLoading, isError } = useSharedRecording(token);
   const { data: comments, isLoading: areCommentsLoading } =
     useSharedComments(token);
   const createComment = useCreateSharedComment(token);
   useRealtimeRecordingComments(token, "shared");
+  useRecordSharedView(token, !!rec);
 
   if (isLoading) {
     return (
@@ -544,6 +553,7 @@ const SharedRecordingPage = () => {
                     <SharedSpacePlayer
                       token={token}
                       outputId={activeSpaceTrackId}
+                      playerRef={playerRef}
                     />
                     {spaceTracks.length > 0 && (
                       <>
@@ -582,7 +592,11 @@ const SharedRecordingPage = () => {
                   )}
                 </div>
               ) : (
-                <SharedPlayer token={token} kind={screenVideoKind} />
+                <SharedPlayer
+                  token={token}
+                  kind={screenVideoKind}
+                  playerRef={playerRef}
+                />
               )}
             </div>
 
@@ -595,9 +609,14 @@ const SharedRecordingPage = () => {
                   // Signed-out visitors have no account to attribute to, so they
                   // name themselves; a signed-in one comments as their account.
                   askForName={!isSignedIn}
-                  onSubmit={({ body, authorName }) =>
-                    createComment.mutate({ body, authorName })
+                  onSubmit={({ body, authorName, timestampMs }) =>
+                    createComment.mutate({ body, authorName, timestampMs })
                   }
+                  getTimestampMs={() => {
+                    const seconds = playerRef.current?.getTime();
+                    return seconds == null ? null : Math.round(seconds * 1000);
+                  }}
+                  onSeek={(ms) => playerRef.current?.playFrom(ms / 1000)}
                 />
               </div>
             )}

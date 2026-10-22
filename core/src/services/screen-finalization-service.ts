@@ -180,6 +180,29 @@ interface MasterInfo {
 	composited: boolean;
 }
 
+/** One entry of the session's `outputs` JSON. */
+interface ScreenOutput {
+	key: string;
+	durationMs: number;
+	width?: number;
+	height?: number;
+	fps?: number;
+}
+
+/** A file's frame size and rate for its `outputs` entry, when known. */
+function outputMeta(meta: {
+	width: number | null;
+	height: number | null;
+	fps: number | null;
+}): Pick<ScreenOutput, "width" | "height" | "fps"> {
+	return {
+		...(meta.width && meta.height
+			? { width: meta.width, height: meta.height }
+			: {}),
+		...(meta.fps ? { fps: Math.round(meta.fps) } : {}),
+	};
+}
+
 /** Chunk downloads kept in flight ahead of the one being written. */
 const DOWNLOAD_CONCURRENCY = 6;
 /** Session CFR fallback when the capture didn't report a usable rate. */
@@ -508,7 +531,7 @@ async function publishMaster(
 	master: MasterInfo,
 	userId: string,
 	sessionId: string,
-): Promise<{ key: string; durationMs: number }> {
+): Promise<ScreenOutput> {
 	const key = screenKey(userId, sessionId, master.role, master.ext);
 	await uploadMaster(master, key);
 	const contentType = masterContentType(master.ext);
@@ -529,7 +552,7 @@ async function publishMaster(
 			processingError: master.note,
 		},
 	});
-	return { key, durationMs: master.durationMs };
+	return { key, durationMs: master.durationMs, ...outputMeta(master) };
 }
 
 async function uploadMaster(master: MasterInfo, key: string): Promise<void> {
@@ -837,7 +860,7 @@ export async function finalizeScreenSession(
 			),
 		);
 
-		const outputs: Record<string, { key: string; durationMs: number }> = {};
+		const outputs: Record<string, ScreenOutput> = {};
 
 		if (screen?.composited && camera && screenRec && cameraRec) {
 			// The composite is the only output; the camera master was just its
@@ -846,7 +869,11 @@ export async function finalizeScreenSession(
 			// fuller video.
 			const key = screenKey(session.userId, sessionId, "both", screen.ext);
 			await uploadMaster(screen, key);
-			outputs.both = { key, durationMs: screen.durationMs };
+			outputs.both = {
+				key,
+				durationMs: screen.durationMs,
+				...outputMeta(screen),
+			};
 			console.log(`[ScreenFinalize] composed both for ${sessionId}: ${key}`);
 			await settleCompositeInput(screenRec.id, screen);
 			await settleCompositeInput(cameraRec.id, camera);
@@ -882,8 +909,16 @@ export async function finalizeScreenSession(
 		if (salvaged) {
 			const key = screenKey(session.userId, sessionId, "screen", salvaged.ext);
 			await putFileObject(key, salvaged.path, masterContentType(salvaged.ext));
-			const durationMs = (await probeMedia(salvaged.path)).durationMs ?? 0;
-			outputs.screen = { key, durationMs };
+			const probe = await probeMedia(salvaged.path);
+			outputs.screen = {
+				key,
+				durationMs: probe.durationMs ?? 0,
+				...outputMeta({
+					width: probe.size?.width ?? null,
+					height: probe.size?.height ?? null,
+					fps: probe.fps,
+				}),
+			};
 			outputs.screenAligned = outputs.screen;
 		}
 

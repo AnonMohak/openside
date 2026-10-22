@@ -923,21 +923,18 @@ const ProjectsListSkeleton = ({ filter }: { filter: ProjectFilter }) => (
 );
 
 const ProjectDetailSkeleton = () => (
-  <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-2 pb-8 pt-4">
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-3.5">
-        <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
-        <div className="min-w-0 space-y-2">
-          <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
-          <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
+  <div className="-m-4 flex flex-col">
+    <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="size-9 shrink-0 animate-pulse rounded-md bg-muted" />
+        <div className="min-w-0 space-y-1.5">
+          <div className="h-4 w-44 animate-pulse rounded-md bg-muted" />
+          <div className="h-3 w-32 animate-pulse rounded-md bg-muted" />
         </div>
       </div>
-      <div className="flex gap-2">
-        <div className="h-9 w-24 animate-pulse rounded-lg bg-muted" />
-        <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
-      </div>
+      <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
     </div>
-    <section className="flex flex-col gap-4">
+    <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 pb-12 pt-8">
       <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
         <div className="p-2 pb-0">
           <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
@@ -1119,20 +1116,22 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-2 pb-8 pt-4">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3.5">
+      {/* Cancel the wrapper's p-4 so the header spans edge to edge like the
+          dashboard header above it. */}
+      <div className="-m-4 flex flex-col">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
               onClick={() => navigate("/dashboard/project")}
               aria-label="Back to all projects"
               title="All projects"
-              className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+              className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground transition-opacity hover:opacity-80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
             >
               <FiChevronLeft className="size-5" />
             </button>
-            <div className="min-w-0 space-y-0.5">
-              <h1 className="text-xl font-semibold leading-tight tracking-[-0.01em] text-foreground">
+            <div className="min-w-0">
+              <h1 className="text-[15px] font-semibold leading-tight text-foreground">
                 <InlineTitle
                   value={space.title || "Untitled space"}
                   maxLength={100}
@@ -1145,7 +1144,7 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
                   className="truncate"
                 />
               </h1>
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-fg-subtle">
+              <p className="flex items-center gap-x-2 truncate text-xs text-fg-subtle">
                 <span>{recordingLabel(sessionCount)}</span>
                 {space.createdAt && (
                   <>
@@ -1174,14 +1173,16 @@ export const ProjectDetail = ({ spaceId }: { spaceId: string }) => {
             </div>
           )}
         </header>
-        <SpaceOutputs
-          outputs={outputs ?? []}
-          sessions={sessions}
-          canManage={canManage}
-          onRenameSession={renameRecording}
-          onDeleteSession={openRecordingDelete}
-          onShareSession={setSharingSession}
-        />
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 pb-12 pt-8">
+          <SpaceOutputs
+            outputs={outputs ?? []}
+            sessions={sessions}
+            canManage={canManage}
+            onRenameSession={renameRecording}
+            onDeleteSession={openRecordingDelete}
+            onShareSession={setSharingSession}
+          />
+        </div>
       </div>
       {shareDialog.rendered && (
         <SpaceRecordingShareDialog

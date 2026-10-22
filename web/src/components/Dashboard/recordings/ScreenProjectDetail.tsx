@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FiCheck,
   FiChevronLeft,
   FiEdit2,
+  FiEye,
   FiLoader,
   FiShare2,
   FiTrash2,
@@ -25,25 +26,20 @@ import {
   type ScreenRecording,
 } from "@/hooks/useScreenRecordings";
 import RecordingComments from "./RecordingComments";
-import VideoPlayer from "@/components/shared/VideoPlayer";
-import RenameDialog from "@/components/shared/RenameDialog";
+import VideoPlayer, {
+  type VideoPlayerHandle,
+} from "@/components/shared/VideoPlayer";
 import ShareLinkDialog from "@/components/shared/ShareLinkDialog";
 import { toast } from "@/lib/toast";
 import { backdropMotion, panelMotion, usePresence } from "@/hooks/usePresence";
 import { useRealtimeRecordingComments } from "@/hooks/useRealtimeRecordingComments";
+import InlineTitle, {
+  type InlineTitleHandle,
+} from "@/components/shared/InlineTitle";
 
 /** Public URL a share token resolves to (the SharedRecordingPage route). */
 const shareUrlFor = (token: string) =>
   `${window.location.origin}/share/${token}`;
-
-const formatDay = (value?: string | null) =>
-  value
-    ? new Date(value).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-    : "";
 
 const triggerBrowserDownload = (url: string) => {
   const a = document.createElement("a");
@@ -227,11 +223,11 @@ const ProcessingStagePanel = ({ rec }: { rec: ScreenRecording }) => {
 const ScreenVideoCard = ({
   rec,
   kind,
-  onShare,
+  playerRef,
 }: {
   rec: ScreenRecording;
   kind: ScreenOutputKind;
-  onShare: () => void;
+  playerRef: Ref<VideoPlayerHandle>;
 }) => {
   const [downloading, setDownloading] = useState(false);
   const { data: url } = useScreenOutputUrl(rec.id, kind);
@@ -250,61 +246,18 @@ const ScreenVideoCard = ({
   };
 
   return (
-    <div className="flex w-full flex-col self-start overflow-hidden rounded-2xl border border-border/50 bg-primary">
-      <div className="p-2 pb-0">
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border/50">
-          {url ? (
-            <VideoPlayer key={url} src={url} />
-          ) : (
-            <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
-              <FiLoader className="size-4 animate-spin" /> Loading…
-            </div>
-          )}
-        </div>
+    <div className="flex w-full flex-col self-start">
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-border/50">
+        {url ? (
+          <VideoPlayer key={url} ref={playerRef} src={url} />
+        ) : (
+          <div className="flex h-full items-center justify-center gap-2 text-sm text-white/60">
+            <FiLoader className="size-4 animate-spin" /> Loading…
+          </div>
+        )}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <div className="min-w-0">
-          <p className="truncate text-base font-semibold text-foreground">
-            {rec.title || "Untitled recording"}
-          </p>
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-fg-subtle">
-            {[
-              rec.startedAt &&
-                new Date(rec.startedAt).toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                }),
-              formatClock(rec.outputs?.[kind]?.durationMs),
-              kind === "both"
-                ? "Screen + camera"
-                : kind === "camera"
-                  ? "Camera"
-                  : "Screen",
-            ]
-              .filter(Boolean)
-              .map((part, index) => (
-                <span key={index} className="flex items-center gap-1.5">
-                  {index > 0 && <span aria-hidden>·</span>}
-                  {part}
-                </span>
-              ))}
-          </p>
-        </div>
+      <div className="flex items-center justify-end pt-3">
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={onShare}
-            className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-opacity hover:opacity-80 cursor-pointer ${
-              rec.shareToken
-                ? "bg-success/10 text-success"
-                : "bg-muted text-foreground"
-            }`}
-          >
-            <FiShare2 className="size-3.5" />
-            {rec.shareToken ? "Shared" : "Share"}
-          </button>
           <button
             type="button"
             disabled={downloading}
@@ -366,46 +319,37 @@ const ShareDialog = ({
 const ScreenProjectDetailSkeleton = () => (
   <div
     aria-label="Loading recording project"
-    className="flex flex-col gap-6 px-2 pb-2 pt-0 lg:h-full lg:min-h-0 lg:gap-0 lg:pb-0"
+    className="-m-4 flex flex-col lg:h-[calc(100%+2rem)] lg:min-h-0"
   >
-    <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-      <div className="flex min-w-0 items-center gap-3.5">
-        <div className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
-        <div className="min-w-0 space-y-2">
-          <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
-          <div className="h-3 w-36 animate-pulse rounded-md bg-muted" />
+    <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="size-9 shrink-0 animate-pulse rounded-md bg-muted" />
+        <div className="min-w-0 space-y-1.5">
+          <div className="h-4 w-44 animate-pulse rounded-md bg-muted" />
+          <div className="h-3 w-32 animate-pulse rounded-md bg-muted" />
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
         <div className="h-9 w-24 animate-pulse rounded-lg bg-muted" />
         <div className="h-9 w-20 animate-pulse rounded-lg bg-muted" />
       </div>
     </div>
-    <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
-      {/* Video card: player + title/details + Share / Download */}
-      <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
-        <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary">
-          <div className="p-2 pb-0">
-            <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
-          </div>
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <div className="space-y-2">
-              <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
-              <div className="h-3 w-56 animate-pulse rounded-md bg-muted" />
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <div className="h-8 w-20 animate-pulse rounded-lg bg-muted" />
-              <div className="h-8 w-24 animate-pulse rounded-lg bg-muted" />
-            </div>
+    <div className="grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-0 lg:p-0">
+      {/* Video: player + Download */}
+      <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-border lg:p-6">
+        <div className="flex w-full flex-col">
+          <div className="aspect-video w-full animate-pulse rounded-xl bg-muted" />
+          <div className="flex items-center justify-end pt-3">
+            <div className="h-8 w-24 animate-pulse rounded-lg bg-muted" />
           </div>
         </div>
       </section>
 
       {/* Comments: header, bubbles, composer */}
-      <aside className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:my-5 lg:min-h-0">
+      <aside className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent">
         <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3.5">
           <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
-          <div className="h-5 w-7 animate-pulse rounded-full bg-muted" />
         </div>
         <div className="flex flex-1 flex-col gap-3 px-4 py-4">
           {Array.from({ length: 3 }).map((_, index) => (
@@ -415,7 +359,7 @@ const ScreenProjectDetailSkeleton = () => (
             </div>
           ))}
         </div>
-        <div className="border-t border-border/50 p-3">
+        <div className="p-3">
           <div className="h-24 animate-pulse rounded-xl bg-muted" />
         </div>
       </aside>
@@ -425,14 +369,13 @@ const ScreenProjectDetailSkeleton = () => (
 
 const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
   const navigate = useNavigate();
-  const [renaming, setRenaming] = useState(false);
+  const titleRef = useRef<InlineTitleHandle>(null);
+  const playerRef = useRef<VideoPlayerHandle>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Keep each dialog mounted through its exit animation.
-  const renameDialog = usePresence(renaming);
   const deleteDialog = usePresence(deleteConfirmOpen);
   const shareDialog = usePresence(shareOpen);
-  const [title, setTitle] = useState("");
 
   // The list query already carries everything the detail needs (title, status,
   // outputs) and keeps polling while the recording is still processing.
@@ -494,25 +437,15 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
       : outputs.camera?.key
         ? "camera"
         : null;
+  const screenVideoOutput = screenVideoKind
+    ? rec.outputs?.[screenVideoKind]
+    : undefined;
   const recTitle = rec.title || "Untitled recording";
   const isProcessing =
     rec.status === "ACTIVE" ||
     rec.status === "STOPPED" ||
     rec.status === "PROCESSING";
   const isFailed = rec.status === "FAILED" && !screenVideoKind;
-
-  const openRename = () => {
-    setTitle(recTitle);
-    setRenaming(true);
-  };
-
-  const submitRename = () => {
-    const next = title.trim();
-    setRenaming(false);
-    if (!next || next === recTitle) return;
-    // Optimistic: the hook retitles the cached list instantly.
-    renameRecording.mutate({ sessionId: rec.id, title: next });
-  };
 
   const handleDelete = () => {
     // Optimistic: the hook drops it from the cached list right away, so leave
@@ -527,33 +460,63 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
     <>
       {/* Two-pane on desktop: the page itself never scrolls (it's exactly the
           height of its container), the left pane scrolls on its own, and the
-          comments rail runs flush from the header to the bottom edge - hence
-          lg:gap-0 + lg:pb-0, with each pane owning its own spacing. Below lg
-          the panes stack and the page scrolls normally. */}
-      <div className="flex flex-col gap-6 px-2 pb-2 pt-0 lg:h-full lg:min-h-0 lg:gap-0 lg:pb-0">
-        <header className="flex shrink-0 flex-wrap items-center justify-between gap-4 pt-2">
-          <div className="flex min-w-0 items-center gap-3.5">
+          comments rail runs flush from the header to the bottom edge - hence lg:p-0 on the grid, with each pane owning its own spacing. Below lg
+          the panes stack and the page scrolls normally. -m-4 cancels the
+          wrapper's p-4 so the header spans edge to edge like the dashboard
+          header above it. */}
+      <div className="-m-4 flex flex-col lg:h-[calc(100%+2rem)] lg:min-h-0">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border pl-2 pr-4">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
               onClick={() => navigate("/dashboard/project")}
               aria-label="Back to all projects"
               title="All projects"
-              className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+              className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground transition-opacity hover:opacity-80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
             >
               <FiChevronLeft className="size-5" />
             </button>
-            <div className="min-w-0 space-y-0.5">
-              <h1 className="truncate text-xl font-semibold leading-tight tracking-[-0.01em] text-foreground">
-                {recTitle}
+            <div className="min-w-0">
+              <h1 className="text-[15px] font-semibold leading-tight text-foreground">
+                <InlineTitle
+                  ref={titleRef}
+                  value={recTitle}
+                  // Optimistic: the hook retitles the cached list instantly.
+                  onSave={(next) =>
+                    renameRecording.mutate({ sessionId: rec.id, title: next })
+                  }
+                  className="truncate"
+                />
               </h1>
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-fg-subtle">
-                <span>Screen recording</span>
-                {rec.startedAt && (
-                  <>
-                    <span>·</span>
-                    <span>Recorded {formatDay(rec.startedAt)}</span>
-                  </>
-                )}
+              <p className="flex items-center gap-x-2 truncate text-xs text-fg-subtle">
+                {[
+                  screenVideoKind === "both"
+                    ? "Screen + camera"
+                    : screenVideoKind === "camera"
+                      ? "Camera"
+                      : "Screen recording",
+                  rec.startedAt &&
+                    new Date(rec.startedAt).toLocaleString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    }),
+                  screenVideoKind &&
+                    formatClock(rec.outputs?.[screenVideoKind]?.durationMs),
+                  screenVideoOutput?.width &&
+                    screenVideoOutput.height &&
+                    `${screenVideoOutput.width}×${screenVideoOutput.height}`,
+                  screenVideoOutput?.fps && `${screenVideoOutput.fps} fps`,
+                ]
+                  .filter(Boolean)
+                  .map((part, index) => (
+                    <span key={index} className="flex items-center gap-2">
+                      {index > 0 && <span aria-hidden>·</span>}
+                      {part}
+                    </span>
+                  ))}
               </p>
             </div>
           </div>
@@ -562,9 +525,29 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
             aria-label="Recording actions"
             className="flex shrink-0 items-center gap-2"
           >
+            {rec.shareToken && (
+              <span className="flex h-9 items-center gap-1.5 px-1 text-sm text-fg-muted">
+                <FiEye className="size-3.5" />
+                {rec.viewCount ?? 0} {rec.viewCount === 1 ? "view" : "views"}
+              </span>
+            )}
+            {screenVideoKind && (
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className={`flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-opacity hover:opacity-80 cursor-pointer ${
+                  rec.shareToken
+                    ? "bg-success/10 text-success"
+                    : "bg-muted text-foreground"
+                }`}
+              >
+                <FiShare2 className="size-3.5" />
+                {rec.shareToken ? "Shared" : "Share"}
+              </button>
+            )}
             <button
               type="button"
-              onClick={openRename}
+              onClick={() => titleRef.current?.edit()}
               className="flex h-9 items-center gap-1.5 rounded-lg bg-muted px-3 text-sm font-medium text-foreground transition-opacity hover:opacity-80 cursor-pointer"
             >
               <FiEdit2 className="size-3.5" />
@@ -581,8 +564,8 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           </div>
         </header>
 
-        <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pt-5">
+        <div className="grid gap-6 px-6 py-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-0 lg:p-0">
+          <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-border lg:p-6">
             {isProcessing && !screenVideoKind ? (
               <section className="flex flex-col gap-4">
                 <ProcessingStagePanel rec={rec} />
@@ -607,7 +590,7 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
                   <ScreenVideoCard
                     rec={rec}
                     kind={screenVideoKind}
-                    onShare={() => setShareOpen(true)}
+                    playerRef={playerRef}
                   />
                 ) : (
                   <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-dashed border-border/50 bg-primary/60 text-sm text-fg-muted">
@@ -617,12 +600,19 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
               </section>
             )}
           </div>
-          <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border/50 bg-primary [&>section]:bg-primary lg:my-5 lg:min-h-0">
+          <div className="min-h-[320px] overflow-hidden rounded-2xl border border-border/50 bg-primary [&>section]:bg-primary lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:[&>section]:bg-transparent">
             <RecordingComments
               comments={comments ?? []}
               isLoading={areCommentsLoading}
               isPosting={createComment.isPending}
-              onSubmit={({ body }) => createComment.mutate(body)}
+              onSubmit={({ body, timestampMs }) =>
+                createComment.mutate({ body, timestampMs })
+              }
+              getTimestampMs={() => {
+                const seconds = playerRef.current?.getTime();
+                return seconds == null ? null : Math.round(seconds * 1000);
+              }}
+              onSeek={(ms) => playerRef.current?.playFrom(ms / 1000)}
               onDelete={(commentId) => deleteComment.mutate(commentId)}
               // The recording's owner is viewing, so every comment is theirs to
               // moderate.
@@ -636,17 +626,6 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
           rec={rec}
           onClose={() => setShareOpen(false)}
           isClosing={shareDialog.isClosing}
-        />
-      )}
-      {renameDialog.rendered && (
-        <RenameDialog
-          heading="Rename recording"
-          value={title}
-          placeholder="Recording name"
-          onChange={setTitle}
-          onCancel={() => setRenaming(false)}
-          onSave={submitRename}
-          isClosing={renameDialog.isClosing}
         />
       )}
       {deleteDialog.rendered && (

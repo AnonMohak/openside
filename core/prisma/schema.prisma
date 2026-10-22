@@ -209,6 +209,8 @@ model RecordingSession {
   // recording and comment - the token IS the authorization.
   shareToken              String?                @unique
   sharedAt                DateTime?
+  // Share-page opens by anyone other than the owner.
+  viewCount               Int                    @default(0)
   startedAt               DateTime               @default(now())
   stoppedAt               DateTime?
   status                  RecordingSessionStatus @default(ACTIVE)
@@ -265,6 +267,8 @@ model RecordingComment {
   user               User?            @relation(fields: [userId], references: [id])
   authorName         String
   body               String
+  // Playback position (ms) the commenter was at; null when they hadn't played.
+  timestampMs        Int?
   createdAt          DateTime         @default(now())
 
   @@index([recordingSessionId, createdAt])

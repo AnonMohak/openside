@@ -13,10 +13,22 @@ export interface ScreenRecording {
   startedAt: string;
   stoppedAt: string | null;
   outputs: Partial<
-    Record<ScreenOutputKind, { key: string; durationMs?: number }>
+    Record<
+      ScreenOutputKind,
+      {
+        key: string;
+        durationMs?: number;
+        // Absent on takes finalized before these were recorded.
+        width?: number;
+        height?: number;
+        fps?: number;
+      }
+    >
   > | null;
   /** Non-null once the owner turned on public sharing; the public link id. */
   shareToken: string | null;
+  /** Share-page opens by anyone other than the owner. */
+  viewCount: number;
   createdAt: string;
   _count?: { comments: number };
 }
@@ -25,6 +37,8 @@ export interface RecordingComment {
   id: string;
   authorName: string;
   body: string;
+  /** Playback position the comment was left at; null if not tied to one. */
+  timestampMs: number | null;
   createdAt: string;
   /** Null for anonymous share-link commenters. */
   user: { id: string; avatar: string | null } | null;
@@ -189,10 +203,10 @@ export const useCreateScreenComment = (sessionId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (body: string) => {
+    mutationFn: async (input: { body: string; timestampMs: number | null }) => {
       const { data } = await api.post(
         `/recording/screen/${sessionId}/comments`,
-        { body },
+        input,
       );
       return data.data.comment as RecordingComment;
     },

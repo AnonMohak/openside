@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "RecordingSession" ADD COLUMN IF NOT EXISTS "viewCount" INTEGER NOT NULL DEFAULT 0;

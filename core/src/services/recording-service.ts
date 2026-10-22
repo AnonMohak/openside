@@ -2221,6 +2221,7 @@ export async function listRecordingComments(sessionId: string) {
 			id: true,
 			authorName: true,
 			body: true,
+			timestampMs: true,
 			createdAt: true,
 			user: { select: { id: true, avatar: true } },
 		},
@@ -2230,6 +2231,13 @@ export async function listRecordingComments(sessionId: string) {
 }
 
 export const COMMENT_MAX_LENGTH = 2000;
+
+/** A client-sent playback position, or null when absent or nonsense. */
+export function parseCommentTimestamp(value: unknown): number | null {
+	if (typeof value !== "number" || !Number.isFinite(value)) return null;
+	if (value < 0 || value > 24 * 60 * 60 * 1000) return null;
+	return Math.round(value);
+}
 export const COMMENT_AUTHOR_MAX_LENGTH = 80;
 
 export async function createRecordingComment(data: {
@@ -2237,6 +2245,7 @@ export async function createRecordingComment(data: {
 	userId: string | null;
 	authorName: string;
 	body: string;
+	timestampMs: number | null;
 }) {
 	const session = await prisma.recordingSession.findUnique({
 		where: { id: data.sessionId },
@@ -2250,11 +2259,13 @@ export async function createRecordingComment(data: {
 			userId: data.userId,
 			authorName: data.authorName.slice(0, COMMENT_AUTHOR_MAX_LENGTH),
 			body: data.body.slice(0, COMMENT_MAX_LENGTH),
+			timestampMs: data.timestampMs,
 		},
 		select: {
 			id: true,
 			authorName: true,
 			body: true,
+			timestampMs: true,
 			createdAt: true,
 			user: { select: { id: true, avatar: true } },
 		},
@@ -2512,6 +2523,25 @@ export async function markScreenRecordingComplete(
 	return markRecordingComplete(recordingId, expectedSegments, observedSize);
 }
 
+/**
+ * Count one open of a shared recording's page. The owner watching their own
+ * link doesn't count. Returns false when the link is dead or not ready.
+ */
+export async function recordSharedView(
+	token: string,
+	viewerUserId: string | null,
+): Promise<boolean> {
+	const { count } = await prisma.recordingSession.updateMany({
+		where: {
+			shareToken: token,
+			status: "READY",
+			...(viewerUserId ? { NOT: { userId: viewerUserId } } : {}),
+		},
+		data: { viewCount: { increment: 1 } },
+	});
+	return count > 0;
+}
+
 /** List a user's screen recordings, newest first. */
 export async function listScreenRecordings(userId: string) {
 	return await prisma.recordingSession.findMany({
@@ -2525,6 +2555,7 @@ export async function listScreenRecordings(userId: string) {
 			stoppedAt: true,
 			outputs: true,
 			shareToken: true,
+			viewCount: true,
 			createdAt: true,
 			_count: { select: { comments: true } },
 		},

@@ -26,6 +26,8 @@ import {
 	listRecordingComments,
 	listScreenRecordings,
 	markScreenRecordingComplete,
+	parseCommentTimestamp,
+	recordSharedView,
 	renameScreenRecordingSession,
 	setScreenSessionPaused,
 	startScreenRecordingSession,
@@ -1068,6 +1070,41 @@ export async function getSharedRecordingController(
 	}
 }
 
+/** PUBLIC: count one view of a shared recording's page. */
+export async function recordSharedViewController(
+	req: AuthenticatedRequest,
+	res: Response,
+): Promise<void> {
+	try {
+		const token = req.params.token as string | undefined;
+		if (!token) {
+			res.status(400).json({
+				success: false,
+				data: null,
+				message: "Share token is required!",
+			});
+			return;
+		}
+
+		const viewer = req.user ? await findOrCreateUser(req.user) : null;
+		await recordSharedView(token, viewer?.id ?? null);
+
+		res.status(200).json({
+			success: true,
+			data: null,
+			message: "View recorded!",
+		});
+	} catch (error: unknown) {
+		const errorMessage =
+			error instanceof Error ? error.message : "Unknown error";
+		res.status(500).json({
+			success: false,
+			data: null,
+			message: `Failed to record view: ${errorMessage}!`,
+		});
+	}
+}
+
 /** PUBLIC: presigned URL for one output of a shared recording. */
 export async function getSharedOutputUrlController(
 	req: AuthenticatedRequest,
@@ -1353,6 +1390,7 @@ export async function createSharedCommentController(
 			userId,
 			authorName,
 			body,
+			timestampMs: parseCommentTimestamp(req.body.timestampMs),
 		});
 		emitRecordingCommentCreated(sessionId, comment);
 
@@ -1472,6 +1510,7 @@ export async function createScreenCommentController(
 			userId: user.id,
 			authorName: user.name?.trim() || "User",
 			body,
+			timestampMs: parseCommentTimestamp(req.body.timestampMs),
 		});
 		emitRecordingCommentCreated(sessionId, comment);
 

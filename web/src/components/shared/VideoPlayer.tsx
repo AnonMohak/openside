@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type PointerEvent,
+  type Ref,
+} from "react";
 import {
   Loader2,
   Maximize,
@@ -29,7 +36,20 @@ const formatTime = (seconds: number) => {
  * (play, scrubber, volume, time, speed, fullscreen) that hides while playing.
  * Keyboard: space/k play, ←/→ seek 5s, m mute, f fullscreen.
  */
-const VideoPlayer = ({ src }: { src: string }) => {
+export interface VideoPlayerHandle {
+  /** Current position in seconds, or null if playback never started. */
+  getTime: () => number | null;
+  /** Jump to `seconds`, bring the player into view, and play. */
+  playFrom: (seconds: number) => void;
+}
+
+const VideoPlayer = ({
+  src,
+  ref,
+}: {
+  src: string;
+  ref?: Ref<VideoPlayerHandle>;
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -75,6 +95,29 @@ const VideoPlayer = ({ src }: { src: string }) => {
       }
     }, HIDE_CONTROLS_MS);
   };
+
+  useImperativeHandle(ref, () => ({
+    getTime: () => {
+      const video = videoRef.current;
+      return video && video.currentTime > 0 ? video.currentTime : null;
+    },
+    playFrom: (seconds) => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.currentTime = Math.min(
+        Math.max(0, seconds),
+        video.duration || seconds,
+      );
+      setCurrentTime(video.currentTime);
+      void video.play().catch(() => undefined);
+      containerRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+      containerRef.current?.focus({ preventScroll: true });
+      showControls();
+    },
+  }));
 
   const togglePlay = () => {
     const video = videoRef.current;

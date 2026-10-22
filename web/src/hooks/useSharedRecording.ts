@@ -7,7 +7,9 @@
  * attribute their comment to their account instead of a typed-in name.
  */
 
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import api from "@/lib/axiosInstance";
 import type {
   RecordingComment,
@@ -56,6 +58,30 @@ export const useSharedRecording = (token: string) =>
     staleTime: 30000,
     retry: false,
   });
+
+const viewedKey = (token: string) => `openside:shared-view:${token}`;
+
+/**
+ * Count this visit once the recording has loaded - once per tab, so reloads
+ * and refetches don't inflate it. Waits for Clerk so a signed-in owner's
+ * token is attached and the server can skip their own views.
+ */
+export const useRecordSharedView = (token: string, ready: boolean) => {
+  const { isLoaded } = useClerkAuth();
+
+  useEffect(() => {
+    if (!token || !ready || !isLoaded) return;
+    try {
+      if (sessionStorage.getItem(viewedKey(token))) return;
+      sessionStorage.setItem(viewedKey(token), "1");
+    } catch {
+      // Storage blocked - still count the view.
+    }
+    api.post(`/recording/shared/${token}/view`).catch(() => {
+      // A missed view isn't worth surfacing.
+    });
+  }, [token, ready, isLoaded]);
+};
 
 /** Presigned URL for a shared output - inline for playback, attachment for download. */
 export async function fetchSharedOutputUrl(
@@ -123,8 +149,7 @@ export const useSharedFinalOutputUrl = (
 ) =>
   useQuery({
     queryKey: ["shared-final-output-url", token, outputId],
-    queryFn: async () =>
-      fetchSharedFinalOutputUrl(token, outputId as string),
+    queryFn: async () => fetchSharedFinalOutputUrl(token, outputId as string),
     enabled: !!token && !!outputId,
     staleTime: 1000 * 60 * 10,
     gcTime: 1000 * 60 * 30,
@@ -147,10 +172,15 @@ export const useCreateSharedComment = (token: string) => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { body: string; authorName?: string }) => {
+    mutationFn: async (input: {
+      body: string;
+      authorName?: string;
+      timestampMs: number | null;
+    }) => {
       const { data } = await api.post(`/recording/shared/${token}/comments`, {
         body: input.body,
         authorName: input.authorName,
+        timestampMs: input.timestampMs,
       });
       return data.data.comment as RecordingComment;
     },

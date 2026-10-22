@@ -32,6 +32,7 @@ import {
 	markScreenRecordingCompleteController,
 	pauseScreenSessionController,
 	presignScreenSegmentController,
+	recordSharedViewController,
 	renameScreenSessionController,
 	resumeScreenSessionController,
 	shareScreenSessionController,
@@ -139,6 +140,12 @@ router.get(
 	"/shared/:token",
 	optionalAuthMiddleware,
 	getSharedRecordingController,
+);
+router.post(
+	"/shared/:token/view",
+	sensitiveLimiter,
+	optionalAuthMiddleware,
+	recordSharedViewController,
 );
 router.get(
 	"/shared/:token/output/:kind/url",
