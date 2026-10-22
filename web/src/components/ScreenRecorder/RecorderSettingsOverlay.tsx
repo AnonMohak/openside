@@ -1,17 +1,32 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   AppWindow,
-  Check,
   ChevronsUpDown,
   CircleUserRound,
-  Mic,
-  MicOff,
   Monitor,
   RectangleHorizontal,
-  Video,
-  VideoOff,
 } from "lucide-react";
 import { BsFillRecordCircleFill } from "react-icons/bs";
+import {
+  FiCheckSquare,
+  FiChevronDown,
+  FiChevronUp,
+  FiSquare,
+  FiVideo,
+  FiVideoOff,
+} from "react-icons/fi";
+import { RiMicLine, RiMicOffLine } from "react-icons/ri";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/shared/ui/dropdown-menu";
 import { cleanDeviceLabel, sortMediaDevices } from "@/lib/mediaDevices";
 import { cn } from "@/lib/utils";
 import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
@@ -36,9 +51,6 @@ const SOURCE_OPTIONS: SelectOption<RecordSource>[] = [
     icon: <CircleUserRound size={16} />,
   },
 ];
-
-const CAMERA_OFF = "__off__";
-const MIC_OFF = "__off__";
 
 /** Device pickers resolve "" (not chosen yet) to the OS default / first. */
 const resolveDeviceId = (devices: MediaDeviceInfo[], activeId: string) => {
@@ -90,34 +102,6 @@ const RecorderSettingsOverlay = ({
   const microphoneDevices = sortMediaDevices(rawMicrophoneDevices);
   const cameraDevices = sortMediaDevices(rawCameraDevices);
   const source: RecordSource = layout === "camera" ? "camera" : screenSurface;
-  const selectedSource =
-    SOURCE_OPTIONS.find((option) => option.value === source) ??
-    SOURCE_OPTIONS[0];
-  const cameraOptions: SelectOption<string>[] = [
-    // Camera only can't drop the camera.
-    ...(layout !== "camera"
-      ? [
-          {
-            value: CAMERA_OFF,
-            label: "No camera",
-            icon: <VideoOff size={15} />,
-          },
-        ]
-      : []),
-    ...cameraDevices.map((device, index) => ({
-      value: device.deviceId,
-      label: cleanDeviceLabel(device.label) || `Camera ${index + 1}`,
-      icon: <Video size={15} />,
-    })),
-  ];
-  const microphoneOptions: SelectOption<string>[] = [
-    { value: MIC_OFF, label: "No microphone", icon: <MicOff size={15} /> },
-    ...microphoneDevices.map((device, index) => ({
-      value: device.deviceId,
-      label: cleanDeviceLabel(device.label) || `Microphone ${index + 1}`,
-      icon: <Mic size={15} />,
-    })),
-  ];
   const cameraId = resolveDeviceId(cameraDevices, activeCameraId);
   const microphoneId = resolveDeviceId(microphoneDevices, activeMicrophoneId);
 
@@ -145,20 +129,17 @@ const RecorderSettingsOverlay = ({
     if (layout === "camera") handleLayoutChange("screen-camera");
   };
 
-  const handleCameraChange = (deviceId: string) => {
-    if (deviceId === CAMERA_OFF) {
-      handleLayoutChange("screen");
-      return;
-    }
+  const handleCameraSelect = (deviceId: string) => {
     void selectCamera(deviceId).catch(() => undefined);
     if (layout === "screen") handleLayoutChange("screen-camera");
   };
 
-  const handleMicrophoneChange = (deviceId: string) => {
-    if (deviceId === MIC_OFF) {
-      if (isMicrophoneEnabled) void toggleMicrophone();
-      return;
-    }
+  // The camera button adds/drops the bubble on a screen take; camera only
+  // can't drop its one source.
+  const handleCameraToggle = () =>
+    handleLayoutChange(layout === "screen" ? "screen-camera" : "screen");
+
+  const handleMicrophoneSelect = (deviceId: string) => {
     void selectMicrophone(deviceId)
       .then(() => {
         if (!isMicrophoneEnabled) return toggleMicrophone();
@@ -167,7 +148,7 @@ const RecorderSettingsOverlay = ({
   };
 
   // A toolbar docked bottom-center, like a dock: Record first, then what to
-  // record, the camera and mic. Menus open upward from it.
+  // record, then mic and camera as in a space's control bar. Menus open upward from it.
   return (
     <div
       className={cn(
@@ -196,82 +177,179 @@ const RecorderSettingsOverlay = ({
 
         <span className="mx-1 h-8 w-px bg-call-border/60 max-sm:hidden" />
 
-        <ToolbarSelect
-          caption="Record"
-          icon={selectedSource.icon}
-          text={selectedSource.label}
-          value={source}
-          options={SOURCE_OPTIONS}
-          onChange={handleSourceChange}
-          className="w-40"
+        <SourceMenu value={source} onChange={handleSourceChange} />
+        <SplitMediaControl
+          icon={isMicrophoneEnabled ? <RiMicLine /> : <RiMicOffLine />}
+          label={
+            isMicrophoneEnabled ? "Turn off microphone" : "Turn on microphone"
+          }
+          active={isMicrophoneEnabled}
+          onToggle={() => void toggleMicrophone().catch(() => undefined)}
+          menuLabel="Microphone options"
+          deviceHeading="Input Device"
+          devices={microphoneDevices}
+          selectedId={microphoneId}
+          fallbackName="Default microphone"
+          onSelect={handleMicrophoneSelect}
         />
-        <ToolbarSelect
-          caption="Camera"
-          icon={
-            layout === "screen" ? (
-              <VideoOff size={15} className="text-red-500" />
-            ) : (
-              <Video size={15} />
-            )
-          }
-          text={
-            layout === "screen"
-              ? "No camera"
-              : cameraDevices.length === 0
-                ? "No camera found"
-                : deviceName(cameraDevices, cameraId, "Camera")
-          }
-          value={layout === "screen" ? CAMERA_OFF : cameraId}
-          options={cameraOptions}
-          onChange={handleCameraChange}
-          disabled={cameraOptions.length === 0}
-          className="w-52"
-        />
-        <ToolbarSelect
-          caption="Microphone"
-          icon={
-            isMicrophoneEnabled ? (
-              <Mic size={15} />
-            ) : (
-              <MicOff size={15} className="text-red-500" />
-            )
-          }
-          text={
-            isMicrophoneEnabled
-              ? deviceName(microphoneDevices, microphoneId, "Microphone")
-              : "No microphone"
-          }
-          value={isMicrophoneEnabled ? microphoneId : MIC_OFF}
-          options={microphoneOptions}
-          onChange={handleMicrophoneChange}
-          className="w-52"
+        <SplitMediaControl
+          icon={layout === "screen" ? <FiVideoOff /> : <FiVideo />}
+          label={layout === "screen" ? "Turn on camera" : "Turn off camera"}
+          active={layout !== "screen"}
+          onToggle={handleCameraToggle}
+          toggleDisabled={layout === "camera"}
+          menuLabel="Camera options"
+          deviceHeading="Camera"
+          devices={cameraDevices}
+          selectedId={cameraId}
+          fallbackName="Default camera"
+          onSelect={handleCameraSelect}
         />
       </div>
     </div>
   );
 };
 
-/** A toolbar control: a small caption over the current value. */
-const ChipBody = ({
-  icon,
-  caption,
-  text,
-}: {
+// Same look as the space's disabled controls.
+const DISABLED_CONTROL_CLASS =
+  "cursor-not-allowed border-dashed border-foreground/20 bg-transparent text-foreground/30 hover:bg-transparent";
+
+interface SplitMediaControlProps {
   icon: ReactNode;
-  caption: string;
-  text: string;
-}) => (
-  <>
-    <span className="shrink-0 text-foreground/50">{icon}</span>
-    <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
-      <span className="text-[11px] text-foreground/50">{caption}</span>
-      <span className="truncate text-[13px] font-medium text-foreground">
-        {text}
-      </span>
-    </span>
-    <ChevronsUpDown size={14} className="shrink-0 text-foreground/40" />
-  </>
-);
+  label: string;
+  active: boolean;
+  onToggle: () => void;
+  toggleDisabled?: boolean;
+  menuLabel: string;
+  deviceHeading: string;
+  devices: MediaDeviceInfo[];
+  selectedId: string;
+  fallbackName: string;
+  onSelect: (deviceId: string) => void;
+}
+
+/**
+ * The space control bar's mic / camera control: an on-off button with a
+ * chevron that opens the device menu (a submenu listing the devices).
+ */
+const SplitMediaControl = ({
+  icon,
+  label,
+  active,
+  onToggle,
+  toggleDisabled = false,
+  menuLabel,
+  deviceHeading,
+  devices,
+  selectedId,
+  fallbackName,
+  onSelect,
+}: SplitMediaControlProps) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const activeName = deviceName(devices, selectedId, fallbackName);
+
+  return (
+    <div className="flex items-stretch gap-0.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={toggleDisabled}
+        aria-label={label}
+        title={label}
+        className={cn(
+          "flex min-h-11 w-11 items-center justify-center rounded-l-xl border text-lg font-medium transition-all duration-200",
+          toggleDisabled
+            ? DISABLED_CONTROL_CLASS
+            : active
+              ? "cursor-pointer border-call-border bg-primary hover:bg-muted"
+              : "cursor-pointer border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
+        )}
+      >
+        {icon}
+      </button>
+      <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={menuLabel}
+            className={cn(
+              "flex min-h-11 w-6 cursor-pointer items-center justify-center rounded-r-xl border text-base font-medium transition-all duration-200",
+              active
+                ? isOpen
+                  ? "border-call-border bg-muted"
+                  : "border-call-border bg-primary hover:bg-muted"
+                : isOpen
+                  ? "border-red-400/10 bg-red-400/40 text-red-400"
+                  : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
+            )}
+          >
+            {isOpen ? <FiChevronUp /> : <FiChevronDown />}
+          </button>
+        </DropdownMenuTrigger>
+        {/* z-[100]: above the recorder overlays (z-[90]). */}
+        <DropdownMenuContent
+          align="start"
+          alignOffset={-46}
+          collisionPadding={8}
+          side="top"
+          sideOffset={8}
+          className="z-[100] w-[250px] overflow-visible rounded-xl border-call-border bg-call-background p-1.5"
+        >
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="rounded-lg px-2 py-1.5 focus:bg-primary-hover data-[state=open]:bg-primary-hover">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-normal text-foreground">
+                  {deviceHeading}
+                </p>
+                <p className="mt-0.5 truncate text-[0.7rem] text-foreground/55">
+                  {activeName}
+                </p>
+              </div>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent
+              sideOffset={12}
+              collisionPadding={8}
+              className="z-[100] w-[250px] rounded-xl border-call-border bg-call-background p-1"
+            >
+              {devices.length === 0 ? (
+                <DropdownMenuItem
+                  disabled
+                  className="cursor-default rounded-lg px-3 py-2 text-foreground/50"
+                >
+                  No devices found
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuRadioGroup value={selectedId}>
+                  {devices.map((device, index) => (
+                    <DropdownMenuRadioItem
+                      key={device.deviceId || index}
+                      value={device.deviceId}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        onSelect(device.deviceId);
+                      }}
+                      className="max-w-[250px] cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover [&>span:first-child]:hidden"
+                    >
+                      {device.deviceId === selectedId ? (
+                        <FiCheckSquare className="size-4" />
+                      ) : (
+                        <FiSquare className="size-4" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">
+                        {cleanDeviceLabel(device.label) ||
+                          `Device ${index + 1}`}
+                      </span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+};
 
 interface SelectOption<T extends string> {
   value: T;
@@ -279,116 +357,67 @@ interface SelectOption<T extends string> {
   icon: ReactNode;
 }
 
-interface ToolbarSelectProps<T extends string> {
-  caption: string;
-  /** The chip's icon and text: the current choice. */
-  icon: ReactNode;
-  text: string;
-  value: T;
-  options: SelectOption<T>[];
-  onChange: (value: T) => void;
-  disabled?: boolean;
-  className?: string;
-}
-
-/** A toolbar chip that opens a menu of options upward. */
-const ToolbarSelect = <T extends string>({
-  caption,
-  icon,
-  text,
+/** What to record - styled like the space control bar's menus. */
+const SourceMenu = ({
   value,
-  options,
   onChange,
-  disabled = false,
-  className,
-}: ToolbarSelectProps<T>) => {
+}: {
+  value: RecordSource;
+  onChange: (value: RecordSource) => void;
+}) => {
   const [isOpen, setIsOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [isOpen]);
+  const selected =
+    SOURCE_OPTIONS.find((option) => option.value === value) ??
+    SOURCE_OPTIONS[0];
 
   return (
-    <div ref={rootRef} className={cn("relative", className)}>
-      <button
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        aria-label={caption}
-        className={cn(
-          "flex h-11 w-full items-center gap-2.5 rounded-xl px-3 transition-colors",
-          disabled
-            ? "cursor-not-allowed bg-primary opacity-50"
-            : isOpen
-              ? "cursor-pointer bg-muted"
-              : "cursor-pointer bg-primary hover:bg-muted",
-        )}
-      >
-        <ChipBody icon={icon} caption={caption} text={text} />
-      </button>
-
-      {isOpen && (
-        <div
-          role="listbox"
-          aria-label={caption}
-          className="absolute bottom-full left-0 z-10 mb-2 flex w-64 min-w-full flex-col gap-0.5 rounded-xl border border-call-border/50 bg-call-background p-1 shadow-xl animate-in fade-in-0 zoom-in-95 duration-100"
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="What to record"
+          className={cn(
+            "flex min-h-11 w-40 cursor-pointer items-center gap-2.5 rounded-xl border border-call-border px-3 text-sm font-medium text-foreground outline-none transition-all duration-200",
+            isOpen ? "bg-muted" : "bg-primary hover:bg-muted",
+          )}
         >
-          {options.map((option) => {
-            const isSelected = option.value === value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => {
-                  setIsOpen(false);
-                  if (!isSelected) onChange(option.value);
-                }}
-                className={cn(
-                  "flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors",
-                  isSelected
-                    ? "bg-primary font-medium text-foreground"
-                    : "text-foreground/80 hover:bg-primary hover:text-foreground",
-                )}
-              >
-                <span
-                  className={cn(
-                    "shrink-0",
-                    isSelected ? "text-foreground" : "text-foreground/50",
-                  )}
-                >
-                  {option.icon}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-left">
-                  {option.label}
-                </span>
-                {isSelected && (
-                  <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-                    <Check size={11} strokeWidth={3} />
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+          <span className="shrink-0 text-foreground/70">{selected.icon}</span>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {selected.label}
+          </span>
+          <ChevronsUpDown size={14} className="shrink-0 text-foreground/40" />
+        </button>
+      </DropdownMenuTrigger>
+      {/* z-[100]: above the recorder overlays (z-[90]). */}
+      <DropdownMenuContent
+        align="start"
+        collisionPadding={8}
+        side="top"
+        sideOffset={8}
+        className="z-[100] w-[220px] rounded-xl border-call-border bg-call-background p-1"
+      >
+        <DropdownMenuRadioGroup value={value}>
+          {SOURCE_OPTIONS.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              onSelect={() => {
+                if (option.value !== value) onChange(option.value);
+              }}
+              className="cursor-pointer rounded-lg px-2.5 py-1.5 pl-2.5 text-sm font-normal focus:bg-primary-hover [&>span:first-child]:hidden"
+            >
+              {option.value === value ? (
+                <FiCheckSquare className="size-4" />
+              ) : (
+                <FiSquare className="size-4" />
+              )}
+              <span className="text-foreground/60">{option.icon}</span>
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 
