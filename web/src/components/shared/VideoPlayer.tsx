@@ -252,9 +252,9 @@ const VideoPlayer = ({
             type="button"
             onClick={togglePlay}
             aria-label="Play"
-            className="absolute left-1/2 top-1/2 flex size-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white ring-1 ring-white/15 backdrop-blur-md transition-transform hover:scale-105 cursor-pointer"
+            className="absolute left-1/2 top-1/2 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white ring-1 ring-white/15 backdrop-blur-md transition-transform hover:scale-105 cursor-pointer"
           >
-            <Play size={22} className="ml-0.5 fill-current" />
+            <Play size={26} className="ml-1 fill-current" />
           </button>
         )
       )}
