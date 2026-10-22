@@ -25,6 +25,11 @@ import path from "node:path";
 import { prisma } from "../db/index.ts";
 import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
 import {
+	type TimelinePart,
+	composeTimeline,
+	startsContainer,
+} from "../lib/media-compose.ts";
+import {
 	enqueueFinalize,
 	getFinalizeJobState,
 	isQueueConfigured,
@@ -34,20 +39,10 @@ import {
 	findSegmentGaps,
 	waitForLateSegments,
 } from "../lib/segment-gaps.ts";
-import {
-	capShortSide,
-	evenDim,
-	probeMedia,
-	resolveTargetSize,
-	sizeFilter,
-} from "../lib/video-geometry.ts";
+import { evenDim, probeMedia, sizeFilter } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
-import {
-	deleteObjects,
-	getObjectBuffer,
-	putFileObject,
-} from "./storage-service.ts";
+import { getObjectBuffer, putFileObject } from "./storage-service.ts";
 import { reconcileRecordedSeconds } from "./usage-service.ts";
 
 /** Bottom-right "openside.pro" badge burned into DEMO masters only. Points
@@ -167,23 +162,117 @@ function roleOf(rec: { hasVideo: boolean; isScreenShare: boolean }): Role {
 
 interface MasterInfo {
 	role: Role;
+	/** The master on local disk. */
 	path: string;
-	key: string;
+	ext: MasterExt;
 	width: number | null;
 	height: number | null;
 	fps: number | null;
 	durationMs: number;
 	/** True when the file on disk is guaranteed to be one fixed frame size. */
 	pinned: boolean;
+	/** Salvage notes (gaps, undecodable parts) for the track's row. */
+	note: string | null;
 }
 
-/** Stitch one track's chunks → normalized master on disk, uploaded to R2. */
-async function stitchMaster(
+/** Chunk downloads kept in flight ahead of the one being written. */
+const DOWNLOAD_CONCURRENCY = 6;
+/** Session CFR fallback when the capture didn't report a usable rate. */
+const DEFAULT_FPS = 30;
+const MASTER_CRF = 18;
+const WATERMARKED_MASTER_CRF = 20;
+/** The camera under a screen take is only ever a PiP (at most ~30% of the
+ *  screen's height), so its intermediate master never needs more than this. */
+const PIP_CAMERA_MAX_SHORT_SIDE = 720;
+
+function isMissingObject(error: unknown): boolean {
+	const e = error as {
+		name?: string;
+		$metadata?: { httpStatusCode?: number };
+	} | null;
+	return (
+		e?.name === "NoSuchKey" ||
+		e?.name === "NotFound" ||
+		e?.$metadata?.httpStatusCode === 404
+	);
+}
+
+/** A chunk's bytes, or null if the object is gone (it becomes a gap). A
+ *  storage error that outlasts the retries throws, so the job is retried. */
+async function downloadChunk(key: string): Promise<Buffer | null> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await getObjectBuffer(key);
+		} catch (error) {
+			if (isMissingObject(error)) return null;
+			if (attempt >= 2) {
+				throw new Error(`Chunk download failed: ${errorMessage(error)}`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+		}
+	}
+}
+
+/**
+ * Download a track's chunks - several at a time, written in order - and split
+ * them into recorder parts: every chunk that opens a fresh container is a
+ * recorder restart (codec fallback, lost device, pause, periodic rotation).
+ * Never holds more than a few chunks in memory.
+ */
+async function downloadParts(
+	recId: string,
+	ordered: { assetKey: string; startMs: number }[],
+	tmpDir: string,
+): Promise<{ parts: TimelinePart[]; missing: number }> {
+	const parts: TimelinePart[] = [];
+	let current: TimelinePart | null = null;
+	let missing = 0;
+
+	const pending: Promise<Buffer | null>[] = [];
+	let next = 0;
+	const fill = () => {
+		while (next < ordered.length && pending.length < DOWNLOAD_CONCURRENCY) {
+			const download = downloadChunk(ordered[next]?.assetKey ?? "");
+			// Awaited below in order; this only keeps a failure that's still
+			// queued behind an earlier one from going unhandled.
+			download.catch(() => undefined);
+			pending.push(download);
+			next++;
+		}
+	};
+	fill();
+
+	for (const seg of ordered) {
+		const buf = await pending.shift();
+		fill();
+		if (!buf) {
+			missing++;
+			continue;
+		}
+		if (!current || startsContainer(buf)) {
+			current = {
+				rawPath: path.join(tmpDir, `${recId}-raw-${parts.length}.bin`),
+				startMs: seg.startMs,
+			};
+			parts.push(current);
+			await writeFile(current.rawPath, Buffer.alloc(0));
+		}
+		await appendFile(current.rawPath, buf);
+	}
+	return { parts, missing };
+}
+
+/**
+ * Build one track's master on local disk: its chunks → recorder parts → one
+ * CFR H.264/AAC timeline (the meeting pipeline's composer: gaps filled, audio
+ * drift-corrected, every frame pinned to one size). Not uploaded - the caller
+ * decides whether it's an output or just a composite input.
+ */
+async function buildMaster(
 	rec: {
 		id: string;
 		hasVideo: boolean;
 		isScreenShare: boolean;
-		container: string | null;
 		width: number | null;
 		height: number | null;
 		fps: number | null;
@@ -191,33 +280,39 @@ async function stitchMaster(
 		segments: {
 			sequenceNumber: number;
 			assetKey: string;
+			startMs: number;
 			durationMs: number;
 		}[];
 	},
-	userId: string,
-	sessionId: string,
 	tmpDir: string,
-	watermark: boolean,
-	/** The plan ceilings stamped on the session at start. */
-	limits: { maxShortSide: number; maxFps: number; sampleRate: number },
+	opts: {
+		watermark: boolean;
+		/** Flip horizontally (the camera's mirror view). */
+		mirror: boolean;
+		maxShortSide: number;
+		maxFps: number;
+	},
 ): Promise<MasterInfo | null> {
-	if (rec.segments.length === 0) {
+	let segments = rec.segments;
+	if (segments.length === 0) {
 		// The client can mark a recording "complete" with 0 segments if its very
 		// last chunk (often its only chunk, for a take under 5s) was still being
-		// persisted when it checked whether its upload queue had drained. Give
-		// that straggler a few seconds to actually land before condemning the
-		// track - re-checking straight from the DB rather than trusting the
-		// (possibly stale) `rec.segments` this finalize pass was claimed with.
-		const lateSegments = await waitForLateSegments(rec.id, () =>
+		// persisted when it reported. Give that straggler a few seconds to land
+		// before condemning the track - re-checking straight from the DB rather
+		// than trusting the (possibly stale) segments this pass was claimed with.
+		segments = await waitForLateSegments(rec.id, () =>
 			prisma.recordingSegment.findMany({
 				where: { participantRecordingId: rec.id },
-				select: { sequenceNumber: true, assetKey: true, durationMs: true },
+				select: {
+					sequenceNumber: true,
+					assetKey: true,
+					startMs: true,
+					durationMs: true,
+				},
 				orderBy: { sequenceNumber: "asc" },
 			}),
 		);
-		if (lateSegments.length > 0) {
-			rec = { ...rec, segments: lateSegments };
-		} else {
+		if (segments.length === 0) {
 			await prisma.participantRecording.update({
 				where: { id: rec.id },
 				data: { status: "FAILED", processingError: "No segments uploaded" },
@@ -232,14 +327,12 @@ async function stitchMaster(
 	});
 
 	const role = roleOf(rec);
-	const rawPath = path.join(tmpDir, `${rec.id}-raw.bin`);
-
-	// Salvage rather than fail: concat whatever arrived, in order. A missing
-	// chunk no longer loses the whole track - worst case a brief glitch at the
-	// seam (interior gap) or a shortened tail (trailing gap).
-	const ordered = [...rec.segments].sort(
+	const ordered = [...segments].sort(
 		(a, b) => a.sequenceNumber - b.sequenceNumber,
 	);
+	// Salvage rather than fail: build from whatever arrived. A missing chunk
+	// costs a glitch in its part, never the whole track.
+	const notes: string[] = [];
 	const gapNote = describeSegmentGaps(
 		findSegmentGaps(ordered, rec.expectedSegments),
 	);
@@ -247,148 +340,154 @@ async function stitchMaster(
 		console.warn(
 			`[ScreenFinalize] ${rec.id}: ${gapNote} - salvaging available footage`,
 		);
-	}
-	await writeFile(rawPath, Buffer.alloc(0));
-	for (const seg of ordered) {
-		await appendFile(rawPath, await getObjectBuffer(seg.assetKey));
+		notes.push(gapNote);
 	}
 
-	// Normalize video masters to CFR H.264/MP4, mirroring the Space finalizer:
-	// the capture is VFR and the client's codec ladder is H.264-first, whose
-	// mp4/mkv output ffmpeg cannot remux into WebM (that legacy `-c copy` path
-	// failed for every H.264 recording). DEMO watermarks burn into the SAME
-	// pass. Audio is re-encoded to AAC because Opus sources can't be copied
-	// into MP4. Audio-only masters keep the cheap WebM remux.
+	const { parts, missing } = await downloadParts(rec.id, ordered, tmpDir);
+	if (parts.length === 0) throw new Error("No chunk objects could be read");
+	if (missing > 0) {
+		notes.push(`${missing} chunk object(s) were missing from storage`);
+	}
+
 	const fps = Math.min(
-		rec.fps && rec.fps >= 10 ? Math.round(rec.fps) : 30,
-		limits.maxFps,
+		rec.fps && rec.fps >= 10 ? Math.round(rec.fps) : DEFAULT_FPS,
+		opts.maxFps,
 	);
-	const target = rec.hasVideo
-		? capShortSide(await resolveTargetSize(rec, rawPath), limits.maxShortSide)
-		: null;
-	let outExt: MasterExt = rec.hasVideo ? "mp4" : "webm";
-	let outPath = path.join(tmpDir, `${rec.id}-master.${outExt}`);
-	let masterPath = outPath;
-	let encoded = false;
+	const sizeHint =
+		rec.width && rec.height && rec.width > 1 && rec.height > 1
+			? { width: rec.width, height: rec.height }
+			: null;
+	// Mirror first so the DEMO badge isn't flipped with the picture.
+	const extraFilters = [
+		...(opts.mirror ? ["hflip"] : []),
+		...(opts.watermark ? [WATERMARK_FILTER] : []),
+	];
+	console.log(
+		`[ScreenFinalize] building ${rec.id} role=${role} segments=${ordered.length} parts=${parts.length} fps=${fps}${opts.watermark ? " (watermark)" : ""}`,
+	);
 
-	if (rec.hasVideo && target) {
-		// Size filter FIRST (pins geometry against mid-capture resolution
-		// changes), watermark after so the badge lands on the final canvas.
-		const filters = [
-			sizeFilter(target),
-			...(watermark ? [WATERMARK_FILTER] : []),
-		];
-		try {
-			console.log(
-				`[ScreenFinalize] stitching ${rec.id} role=${role} segments=${rec.segments.length} fps=${fps} size=${target.width}x${target.height}${watermark ? " (watermark)" : ""}`,
-			);
-			await runFfmpeg([
-				"-y",
-				"-fflags",
-				"+genpts",
-				"-i",
-				rawPath,
-				"-vf",
-				filters.join(","),
-				"-r",
-				String(fps),
-				"-fps_mode",
-				"cfr",
-				"-c:v",
-				"libx264",
-				"-preset",
-				"medium",
-				"-crf",
-				watermark ? "20" : "16",
-				"-pix_fmt",
-				"yuv420p",
-				"-movflags",
-				"+faststart",
-				"-c:a",
-				"aac",
-				"-b:a",
-				"192k",
-				"-ar",
-				String(limits.sampleRate),
-				outPath,
-			]);
-			encoded = true;
-		} catch (error) {
-			console.error(
-				`[ScreenFinalize] CFR re-encode failed for ${rec.id}, falling back to WebM remux:`,
-				error,
+	try {
+		const master = await composeTimeline({
+			parts,
+			tmpDir,
+			id: rec.id,
+			fps,
+			crf: opts.watermark ? WATERMARKED_MASTER_CRF : MASTER_CRF,
+			extraFilters,
+			sizeHint,
+			maxShortSide: opts.maxShortSide,
+			timeoutMs: FFMPEG_TIMEOUT_MS,
+		});
+		if (master.skippedParts > 0) {
+			notes.push(
+				`${master.skippedParts} recorder part(s) could not be decoded and were filled with black/silence`,
 			);
 		}
+		return {
+			role,
+			path: master.path,
+			ext: master.ext,
+			width: master.target?.width ?? null,
+			height: master.target?.height ?? null,
+			fps,
+			durationMs: master.durationMs,
+			pinned: master.target !== null,
+			note: notes.length > 0 ? notes.join("; ") : null,
+		};
+	} catch (error) {
+		console.error(
+			`[ScreenFinalize] ${rec.id}: master encode failed, salvaging the first part:`,
+			error,
+		);
 	}
 
-	if (!encoded) {
-		// Audio-only, or the video re-encode failed: remux (no re-encode) to WebM.
-		outExt = "webm";
-		outPath = path.join(tmpDir, `${rec.id}-master.webm`);
-		masterPath = outPath;
-		try {
-			await runFfmpeg([
-				"-y",
-				"-fflags",
-				"+genpts",
-				"-i",
-				rawPath,
-				"-c",
-				"copy",
-				outPath,
-			]);
-		} catch (error) {
-			// Last resort: upload the raw concat, labeled by its real container so
-			// the key/content-type aren't lying about mp4/mkv bytes.
-			console.error(
-				`[ScreenFinalize] remux failed for ${rec.id}, using raw concat:`,
-				error,
-			);
-			masterPath = rawPath;
-			outExt = rec.container === "mp4" ? "mp4" : "webm";
-		}
+	// Encoding failed outright: never lose the recording - remux the first
+	// part to WebM, or keep its raw bytes.
+	const firstPart = parts[0];
+	if (!firstPart) throw new Error("No recorder part to salvage");
+	if (parts.length > 1) {
+		notes.push(`only the first of ${parts.length} recorder parts was kept`);
 	}
+	const fallbackPath = path.join(tmpDir, `${rec.id}-fallback.webm`);
+	let salvagedPath = fallbackPath;
+	try {
+		await runFfmpeg([
+			"-y",
+			"-fflags",
+			"+genpts",
+			"-i",
+			firstPart.rawPath,
+			"-c",
+			"copy",
+			fallbackPath,
+		]);
+	} catch (error) {
+		console.error(
+			`[ScreenFinalize] remux failed for ${rec.id}, using raw bytes:`,
+			error,
+		);
+		salvagedPath = firstPart.rawPath;
+	}
+	const probe = await probeMedia(salvagedPath);
+	return {
+		role,
+		path: salvagedPath,
+		ext: "webm",
+		width: probe.size?.width ?? rec.width,
+		height: probe.size?.height ?? rec.height,
+		fps: rec.fps,
+		durationMs:
+			probe.durationMs ??
+			ordered.reduce((sum, seg) => sum + (seg.durationMs || 0), 0),
+		pinned: false,
+		note: notes.join("; "),
+	};
+}
 
-	const key = screenKey(userId, sessionId, role, outExt);
-	const contentType = masterContentType(outExt);
-	await putFileObject(key, masterPath, contentType);
-
-	const fileStat = await stat(masterPath);
-	// The file's own duration - chunk timings are only the browser's estimate.
-	const durationMs =
-		(await probeMedia(masterPath)).durationMs ??
-		ordered.reduce((sum, s) => sum + (s.durationMs || 0), 0);
-
+/** Upload a master as one of the take's outputs and settle its track row. */
+async function publishMaster(
+	recId: string,
+	master: MasterInfo,
+	userId: string,
+	sessionId: string,
+): Promise<{ key: string; durationMs: number }> {
+	const key = screenKey(userId, sessionId, master.role, master.ext);
+	const contentType = masterContentType(master.ext);
+	await putFileObject(key, master.path, contentType);
+	const fileStat = await stat(master.path);
 	await prisma.participantRecording.update({
-		where: { id: rec.id },
+		where: { id: recId },
 		data: {
 			status: "READY",
 			mergedFileKey: key,
 			fileSize: BigInt(fileStat.size),
-			durationMs,
+			durationMs: master.durationMs,
 			mimeType: contentType,
 			// The master's REAL geometry and rate (the client's start-of-capture
 			// snapshot is stale once the shared surface resizes).
-			...(encoded && target
-				? { width: target.width, height: target.height, fps }
+			...(master.pinned
+				? { width: master.width, height: master.height, fps: master.fps }
 				: {}),
-			processingError: gapNote,
+			processingError: master.note,
 		},
 	});
+	return { key, durationMs: master.durationMs };
+}
 
-	return {
-		role,
-		path: masterPath,
-		key,
-		width: encoded && target ? target.width : rec.width,
-		height: encoded && target ? target.height : rec.height,
-		fps: encoded ? fps : rec.fps,
-		durationMs,
-		// Only a re-encoded master is guaranteed single-geometry; the remux /
-		// raw-concat fallbacks can still carry a resolution switch, so the
-		// composite has to re-pin them itself.
-		pinned: encoded && target !== null,
-	};
+/** A track that only fed the composite: done, but with no file of its own. */
+async function settleCompositeInput(
+	recId: string,
+	master: MasterInfo,
+): Promise<void> {
+	await prisma.participantRecording.update({
+		where: { id: recId },
+		data: {
+			status: "READY",
+			mergedFileKey: null,
+			durationMs: master.durationMs,
+			processingError: master.note,
+		},
+	});
 }
 
 /**
@@ -440,11 +539,7 @@ async function composeBoth(
 	const aspectStr = aspect.toFixed(6);
 	// Rounded corners via per-pixel alpha. Runs on the small scaled camera only,
 	// so it's cheap - kept on both the quality and fast paths for consistency.
-	const camChain =
-		`[1:v]crop='min(iw,ih*${aspectStr})':'min(ih,iw/${aspectStr})',` +
-		(comp.cameraMirror ? "hflip," : "") +
-		`scale=${camW}:${camH},fps=${fps},setpts=PTS-STARTPTS,format=rgba,` +
-		`geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlphaExpr(radius)}'[cam];`;
+	const camChain = `[1:v]crop='min(iw,ih*${aspectStr})':'min(ih,iw/${aspectStr})',${comp.cameraMirror ? "hflip," : ""}scale=${camW}:${camH},fps=${fps},setpts=PTS-STARTPTS,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlphaExpr(radius)}'[cam];`;
 	// A re-encoded screen master is already one fixed size; a remuxed/raw-concat
 	// fallback master is not, so re-pin it here or the overlay pass reproduces
 	// the same mid-stream-resize corruption.
@@ -460,7 +555,7 @@ async function composeBoth(
 
 	const outPath = path.join(tmpDir, `${sessionId}-both.mp4`);
 	console.log(
-		`[ScreenFinalize] composing both for ${sessionId} (${fast ? "fast" : "quality"}): screen=${screen.key} camera=${camera.key} size=${camW}x${camH} fps=${fps} shape=${comp.cameraShape ?? "square"} sizeMode=${comp.cameraSize ?? "normal"}`,
+		`[ScreenFinalize] composing both for ${sessionId} (${fast ? "fast" : "quality"}): screen=${screen.width}x${screen.height} camera=${camW}x${camH} fps=${fps} shape=${comp.cameraShape ?? "square"} sizeMode=${comp.cameraSize ?? "normal"}`,
 	);
 	await runFfmpeg([
 		"-y",
@@ -578,38 +673,40 @@ export async function finalizeScreenSession(
 			selfHosted: session.selfHosted,
 		});
 
-		const masters: Partial<Record<Role, MasterInfo>> = {};
-		const recByRole: Partial<
-			Record<Role, (typeof session.participantRecordings)[number]>
-		> = {};
-		for (const rec of session.participantRecordings) {
-			// Older takes also recorded a mic-only track. No output uses it (the
-			// sound comes from the screen or camera track), so skip the work; its
-			// chunks go with the shared day-later cleanup.
-			if (roleOf(rec) === "audio") {
-				await prisma.participantRecording.update({
-					where: { id: rec.id },
-					data: { status: "READY", processingError: null },
-				});
-				continue;
-			}
+		// "Both" composite - produce it whenever both tracks exist unless the
+		// saved layout explicitly says this was not a screen+camera recording.
+		const recs = session.participantRecordings;
+		const screenRec = recs.find((rec) => roleOf(rec) === "screen");
+		const cameraRec = recs.find((rec) => roleOf(rec) === "camera");
+		const wantsBoth =
+			Boolean(screenRec && cameraRec) &&
+			(comp.layout === undefined || comp.layout === "screen-camera");
+
+		// Older takes also recorded a mic-only track. No output uses it (the
+		// sound comes from the screen or camera track), so skip the work; its
+		// chunks go with the shared day-later cleanup.
+		for (const rec of recs) {
+			if (roleOf(rec) !== "audio") continue;
+			await prisma.participantRecording.update({
+				where: { id: rec.id },
+				data: { status: "READY", processingError: null },
+			});
+		}
+
+		// Screen and camera build in parallel. A camera that's only a PiP
+		// is built small - it never shows bigger than ~30% of the screen.
+		const limits = {
+			watermark,
+			maxShortSide: session.videoResolution,
+			maxFps: session.targetFps,
+		};
+		const build = async (
+			rec: (typeof recs)[number] | undefined,
+			opts: Parameters<typeof buildMaster>[2],
+		): Promise<MasterInfo | null> => {
+			if (!rec) return null;
 			try {
-				const master = await stitchMaster(
-					rec,
-					session.userId,
-					sessionId,
-					tmp,
-					watermark,
-					{
-						maxShortSide: session.videoResolution,
-						maxFps: session.targetFps,
-						sampleRate: session.audioSampleRate,
-					},
-				);
-				if (master) {
-					masters[master.role] = master;
-					recByRole[master.role] = rec;
-				}
+				return await buildMaster(rec, tmp as string, opts);
 			} catch (error) {
 				const message = errorMessage(error);
 				console.error(
@@ -625,21 +722,35 @@ export async function finalizeScreenSession(
 						data: { status: "FAILED", processingError: message.slice(0, 2000) },
 					})
 					.catch(() => undefined);
+				return null;
 			}
-		}
+		};
+		const [screen, camera] = await Promise.all([
+			build(screenRec, { ...limits, mirror: false }),
+			build(cameraRec, {
+				// The composite applies the PiP's own mirror; a camera-only take
+				// is mirrored here.
+				...limits,
+				watermark: watermark && !wantsBoth,
+				mirror: !wantsBoth && Boolean(comp.cameraMirror),
+				maxShortSide: wantsBoth
+					? Math.min(session.videoResolution, PIP_CAMERA_MAX_SHORT_SIDE)
+					: session.videoResolution,
+			}),
+		]);
 
 		console.log(
-			`[ScreenFinalize] ${sessionId} masters=${Object.keys(masters).join(",") || "none"}`,
+			`[ScreenFinalize] ${sessionId} masters`,
 			Object.fromEntries(
-				Object.entries(masters).map(([role, master]) => [
+				Object.entries({ screen, camera }).map(([role, master]) => [
 					role,
 					master
 						? {
-								key: master.key,
 								width: master.width,
 								height: master.height,
 								fps: master.fps,
 								durationMs: master.durationMs,
+								parts: master.note,
 							}
 						: null,
 				]),
@@ -648,19 +759,12 @@ export async function finalizeScreenSession(
 
 		const outputs: Record<string, { key: string; durationMs: number }> = {};
 
-		// "Both" composite - produce it whenever both tracks exist unless the
-		// saved layout explicitly says this was not a screen+camera recording.
-		const shouldComposeBoth =
-			masters.screen &&
-			masters.camera &&
-			(comp.layout === undefined || comp.layout === "screen-camera");
-
 		let both: { key: string; durationMs: number } | null = null;
-		if (shouldComposeBoth && masters.screen && masters.camera) {
+		if (wantsBoth && screen && camera) {
 			try {
 				both = await composeBoth(
-					masters.screen,
-					masters.camera,
+					screen,
+					camera,
 					comp,
 					session.userId,
 					sessionId,
@@ -668,17 +772,16 @@ export async function finalizeScreenSession(
 					watermark,
 				);
 			} catch (error) {
-				// The quality path can fail or hit the timeout on long/high-res
-				// recordings. Retry once in fast mode so the user still gets a
-				// combined video instead of only the split tracks.
+				// Retry once in fast mode so the user still gets a combined video
+				// instead of only the split tracks.
 				console.error(
 					`[ScreenFinalize] composite failed for ${sessionId}, retrying fast:`,
 					error,
 				);
 				try {
 					both = await composeBoth(
-						masters.screen,
-						masters.camera,
+						screen,
+						camera,
 						comp,
 						session.userId,
 						sessionId,
@@ -696,55 +799,38 @@ export async function finalizeScreenSession(
 			}
 		} else {
 			console.log(
-				`[ScreenFinalize] ${sessionId} skipping both: layout=${comp.layout ?? "missing"} hasScreen=${Boolean(masters.screen)} hasCamera=${Boolean(masters.camera)}`,
+				`[ScreenFinalize] ${sessionId} skipping both: layout=${comp.layout ?? "missing"} hasScreen=${Boolean(screen)} hasCamera=${Boolean(camera)}`,
 			);
 		}
 
-		if (both && masters.screen && masters.camera) {
+		if (both && screen && camera && screenRec && cameraRec) {
+			// The combined video is the only output: the screen and camera
+			// masters were just its inputs and are never uploaded. Their raw
+			// chunks stay for a day (the shared cleanup removes them) so a
+			// straggler chunk can still rebuild a fuller video.
 			outputs.both = both;
-
-			// The combined video is the only output we keep: the separate screen
-			// and camera masters served only as inputs to the composite. Their raw
-			// chunks stay for a day (the recovery sweep's cleanup removes them) so
-			// a straggler chunk can still rebuild a fuller video.
-			const screenRec = recByRole.screen;
-			const cameraRec = recByRole.camera;
-			await deleteObjects([masters.screen.key, masters.camera.key]).catch(
-				(error) => {
-					console.error(
-						`[ScreenFinalize] failed to delete split screen/camera masters for ${sessionId} (combined output is safe):`,
-						error,
-					);
-				},
-			);
-			const staleRecIds = [screenRec?.id, cameraRec?.id].filter(
-				(id): id is string => Boolean(id),
-			);
-			if (staleRecIds.length > 0) {
-				await prisma.participantRecording.updateMany({
-					where: { id: { in: staleRecIds } },
-					data: { mergedFileKey: null },
-				});
-			}
+			await settleCompositeInput(screenRec.id, screen);
+			await settleCompositeInput(cameraRec.id, camera);
 		} else {
-			// No combined output (single track, or the composite failed) - fall
-			// back to keeping whatever separate masters exist so the recording is
-			// still viewable.
-			if (masters.screen) {
-				outputs.screen = {
-					key: masters.screen.key,
-					durationMs: masters.screen.durationMs,
-				};
-				outputs.screenAligned = {
-					key: masters.screen.key,
-					durationMs: masters.screen.durationMs,
-				};
+			// No combined output (single track, or the composite failed) - keep
+			// whatever separate masters exist so the recording is viewable.
+			if (screen && screenRec) {
+				const published = await publishMaster(
+					screenRec.id,
+					screen,
+					session.userId,
+					sessionId,
+				);
+				outputs.screen = published;
+				outputs.screenAligned = published;
 			}
-			if (masters.camera) {
-				outputs.camera = {
-					key: masters.camera.key,
-					durationMs: masters.camera.durationMs,
-				};
+			if (camera && cameraRec) {
+				outputs.camera = await publishMaster(
+					cameraRec.id,
+					camera,
+					session.userId,
+					sessionId,
+				);
 			}
 		}
 
