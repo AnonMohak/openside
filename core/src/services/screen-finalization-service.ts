@@ -26,6 +26,7 @@ import { prisma } from "../db/index.ts";
 import { ffmpegPath, withThreadLimit } from "../lib/ffmpeg-path.ts";
 import {
 	type TimelinePart,
+	type VideoOverlay,
 	composeTimeline,
 	startsContainer,
 } from "../lib/media-compose.ts";
@@ -39,7 +40,7 @@ import {
 	findSegmentGaps,
 	waitForLateSegments,
 } from "../lib/segment-gaps.ts";
-import { evenDim, probeMedia, sizeFilter } from "../lib/video-geometry.ts";
+import { evenDim, probeMedia } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
 import { getObjectBuffer, putFileObject } from "./storage-service.ts";
@@ -173,6 +174,10 @@ interface MasterInfo {
 	pinned: boolean;
 	/** Salvage notes (gaps, undecodable parts) for the track's row. */
 	note: string | null;
+	/** Where the master's t=0 sits on the take's recorded clock. */
+	originMs: number;
+	/** The requested overlay (camera PiP) is burned in. */
+	composited: boolean;
 }
 
 /** Chunk downloads kept in flight ahead of the one being written. */
@@ -291,6 +296,8 @@ async function buildMaster(
 		mirror: boolean;
 		maxShortSide: number;
 		maxFps: number;
+		/** Composited in the same encode - the screen take's camera PiP. */
+		overlay?: VideoOverlay;
 	},
 ): Promise<MasterInfo | null> {
 	let segments = rec.segments;
@@ -357,27 +364,53 @@ async function buildMaster(
 		rec.width && rec.height && rec.width > 1 && rec.height > 1
 			? { width: rec.width, height: rec.height }
 			: null;
-	// Mirror first so the DEMO badge isn't flipped with the picture.
+	// Mirror first so the DEMO badge isn't flipped with the picture. With the
+	// PiP parked bottom-right, the badge moves bottom-left where nothing
+	// covers it.
 	const extraFilters = [
 		...(opts.mirror ? ["hflip"] : []),
-		...(opts.watermark ? [WATERMARK_FILTER] : []),
+		...(opts.watermark
+			? [opts.overlay ? WATERMARK_FILTER_LEFT : WATERMARK_FILTER]
+			: []),
 	];
+	const originMs = parts[0]?.startMs ?? 0;
 	console.log(
 		`[ScreenFinalize] building ${rec.id} role=${role} segments=${ordered.length} parts=${parts.length} fps=${fps}${opts.watermark ? " (watermark)" : ""}`,
 	);
 
-	try {
-		const master = await composeTimeline({
+	const compose = (overlay: VideoOverlay | undefined) =>
+		composeTimeline({
 			parts,
 			tmpDir,
-			id: rec.id,
+			id: overlay ? `${rec.id}-pip` : rec.id,
 			fps,
 			crf: opts.watermark ? WATERMARKED_MASTER_CRF : MASTER_CRF,
-			extraFilters,
+			extraFilters: overlay
+				? extraFilters
+				: extraFilters.map((filter) =>
+						filter === WATERMARK_FILTER_LEFT ? WATERMARK_FILTER : filter,
+					),
 			sizeHint,
 			maxShortSide: opts.maxShortSide,
 			timeoutMs: FFMPEG_TIMEOUT_MS,
+			overlay,
 		});
+
+	try {
+		let composited = Boolean(opts.overlay);
+		let master: Awaited<ReturnType<typeof compose>>;
+		try {
+			master = await compose(opts.overlay);
+		} catch (error) {
+			if (!opts.overlay) throw error;
+			// A broken camera must not cost the screen: build it plain.
+			console.error(
+				`[ScreenFinalize] ${rec.id}: composite encode failed, building the screen alone:`,
+				error,
+			);
+			composited = false;
+			master = await compose(undefined);
+		}
 		if (master.skippedParts > 0) {
 			notes.push(
 				`${master.skippedParts} recorder part(s) could not be decoded and were filled with black/silence`,
@@ -393,6 +426,8 @@ async function buildMaster(
 			durationMs: master.durationMs,
 			pinned: master.target !== null,
 			note: notes.length > 0 ? notes.join("; ") : null,
+			originMs,
+			composited,
 		};
 	} catch (error) {
 		console.error(
@@ -441,6 +476,8 @@ async function buildMaster(
 			ordered.reduce((sum, seg) => sum + (seg.durationMs || 0), 0),
 		pinned: false,
 		note: notes.join("; "),
+		originMs,
+		composited: false,
 	};
 }
 
@@ -452,8 +489,8 @@ async function publishMaster(
 	sessionId: string,
 ): Promise<{ key: string; durationMs: number }> {
 	const key = screenKey(userId, sessionId, master.role, master.ext);
+	await uploadMaster(master, key);
 	const contentType = masterContentType(master.ext);
-	await putFileObject(key, master.path, contentType);
 	const fileStat = await stat(master.path);
 	await prisma.participantRecording.update({
 		where: { id: recId },
@@ -472,6 +509,10 @@ async function publishMaster(
 		},
 	});
 	return { key, durationMs: master.durationMs };
+}
+
+async function uploadMaster(master: MasterInfo, key: string): Promise<void> {
+	await putFileObject(key, master.path, masterContentType(master.ext));
 }
 
 /** A track that only fed the composite: done, but with no file of its own. */
@@ -505,98 +546,36 @@ function roundedAlphaExpr(r: number): string {
 }
 
 /**
- * Composite the camera master onto the screen master as a bottom-right PiP.
- *
- * `fast` is the fallback path: it keeps the rounded-corner camera (the `geq`
- * pass is cheap - it only runs on the small camera image, not the full frame)
- * but uses a quicker VP9 preset. The quality path can time out on long/high-res
- * recordings, so callers retry in fast mode to still produce a combined output.
+ * The camera master as a bottom-right PiP over the screen, matching the size
+ * and shape the user picked. Sized from the screen master's final height;
+ * rounded corners come from a per-pixel alpha that only runs on the small
+ * camera image.
  */
-async function composeBoth(
-	screen: MasterInfo,
-	camera: MasterInfo,
-	comp: Composition,
-	userId: string,
-	sessionId: string,
-	tmpDir: string,
-	watermark: boolean,
-	fast = false,
-): Promise<{ key: string; durationMs: number } | null> {
-	const baseH = screen.height && screen.height > 0 ? screen.height : 1080;
-	const aspect = comp.cameraShape === "rectangle" ? 16 / 9 : 1;
-	const camH = Math.round((comp.cameraSize === "big" ? 0.3 : 0.22) * baseH);
-	const camW = Math.round(camH * aspect);
-	const margin = Math.round(0.03 * baseH);
-	// A circle is a square whose corner radius is half its side.
-	const radius =
-		comp.cameraShape === "circle"
-			? Math.floor(camH / 2)
-			: Math.max(2, Math.round(0.12 * camH));
-	// Screen capture is variable-frame-rate; normalize both inputs to a constant
-	// fps before overlay (and force CFR output) so the merged video isn't laggy.
-	const fps = screen.fps && screen.fps >= 10 ? Math.round(screen.fps) : 30;
-
-	const aspectStr = aspect.toFixed(6);
-	// Rounded corners via per-pixel alpha. Runs on the small scaled camera only,
-	// so it's cheap - kept on both the quality and fast paths for consistency.
-	const camChain = `[1:v]crop='min(iw,ih*${aspectStr})':'min(ih,iw/${aspectStr})',${comp.cameraMirror ? "hflip," : ""}scale=${camW}:${camH},fps=${fps},setpts=PTS-STARTPTS,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlphaExpr(radius)}'[cam];`;
-	// A re-encoded screen master is already one fixed size; a remuxed/raw-concat
-	// fallback master is not, so re-pin it here or the overlay pass reproduces
-	// the same mid-stream-resize corruption.
-	const basePin =
-		!screen.pinned && screen.width && screen.height
-			? `${sizeFilter({ width: evenDim(screen.width), height: evenDim(screen.height) })},`
-			: "";
-	const filter =
-		// format=yuv420p: the geq/rgba path yields gbrap, which encoders reject.
-		// DEMO composites re-stamp the badge AFTER the overlay (bottom-left): the
-		// screen master's own badge sits under the PiP and would be hidden.
-		`[0:v]${basePin}fps=${fps},setpts=PTS-STARTPTS[base];${camChain}[base][cam]overlay=main_w-overlay_w-${margin}:main_h-overlay_h-${margin}:format=auto,format=yuv420p${watermark ? `,${WATERMARK_FILTER_LEFT}` : ""}[v]`;
-
-	const outPath = path.join(tmpDir, `${sessionId}-both.mp4`);
-	console.log(
-		`[ScreenFinalize] composing both for ${sessionId} (${fast ? "fast" : "quality"}): screen=${screen.width}x${screen.height} camera=${camW}x${camH} fps=${fps} shape=${comp.cameraShape ?? "square"} sizeMode=${comp.cameraSize ?? "normal"}`,
-	);
-	await runFfmpeg([
-		"-y",
-		"-i",
-		screen.path,
-		"-i",
-		camera.path,
-		"-filter_complex",
-		filter,
-		"-map",
-		"[v]",
-		"-map",
-		"0:a?",
-		"-r",
-		String(fps),
-		"-fps_mode",
-		"cfr",
-		"-af",
-		"aresample=async=1:first_pts=0",
-		"-c:v",
-		"libx264",
-		"-preset",
-		fast ? "veryfast" : "medium",
-		"-crf",
-		fast ? "23" : "18",
-		"-pix_fmt",
-		"yuv420p",
-		"-movflags",
-		"+faststart",
-		"-c:a",
-		"aac",
-		"-b:a",
-		"192k",
-		outPath,
-	]);
-
-	const key = screenKey(userId, sessionId, "both", "mp4");
-	await putFileObject(key, outPath, masterContentType("mp4"));
-	console.log(`[ScreenFinalize] composed both for ${sessionId}: ${key}`);
-	const { durationMs } = await probeMedia(outPath);
-	return { key, durationMs: durationMs ?? screen.durationMs };
+function cameraOverlay(camera: MasterInfo, comp: Composition): VideoOverlay {
+	return {
+		path: camera.path,
+		startMs: camera.originMs,
+		build: (target) => {
+			const baseH = target.height > 0 ? target.height : 1080;
+			const aspect = comp.cameraShape === "rectangle" ? 16 / 9 : 1;
+			const camH = evenDim(
+				Math.round((comp.cameraSize === "big" ? 0.3 : 0.22) * baseH),
+			);
+			const camW = evenDim(Math.round(camH * aspect));
+			const margin = Math.round(0.03 * baseH);
+			// A circle is a square whose corner radius is half its side.
+			const radius =
+				comp.cameraShape === "circle"
+					? Math.floor(camH / 2)
+					: Math.max(2, Math.round(0.12 * camH));
+			const aspectStr = aspect.toFixed(6);
+			return {
+				filter: `crop='min(iw,ih*${aspectStr})':'min(ih,iw/${aspectStr})',${comp.cameraMirror ? "hflip," : ""}scale=${camW}:${camH},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlphaExpr(radius)}'`,
+				x: `main_w-overlay_w-${margin}`,
+				y: `main_h-overlay_h-${margin}`,
+			};
+		},
+	};
 }
 
 export async function finalizeScreenSession(
@@ -725,19 +704,26 @@ export async function finalizeScreenSession(
 				return null;
 			}
 		};
-		const [screen, camera] = await Promise.all([
-			build(screenRec, { ...limits, mirror: false }),
-			build(cameraRec, {
-				// The composite applies the PiP's own mirror; a camera-only take
-				// is mirrored here.
-				...limits,
-				watermark: watermark && !wantsBoth,
-				mirror: !wantsBoth && Boolean(comp.cameraMirror),
-				maxShortSide: wantsBoth
-					? Math.min(session.videoResolution, PIP_CAMERA_MAX_SHORT_SIDE)
-					: session.videoResolution,
-			}),
-		]);
+		// For a screen + camera take the (small, fast) camera goes first, then
+		// the screen is built with it composited in the same encode - one pass
+		// over the full-size video instead of two.
+		const camera = await build(cameraRec, {
+			...limits,
+			// The PiP's mirror is applied in the overlay; a camera-only take is
+			// mirrored here.
+			watermark: watermark && !wantsBoth,
+			mirror: !wantsBoth && Boolean(comp.cameraMirror),
+			maxShortSide: wantsBoth
+				? Math.min(session.videoResolution, PIP_CAMERA_MAX_SHORT_SIDE)
+				: session.videoResolution,
+		});
+		const screen = await build(screenRec, {
+			...limits,
+			mirror: false,
+			...(wantsBoth && camera?.pinned
+				? { overlay: cameraOverlay(camera, comp) }
+				: {}),
+		});
 
 		console.log(
 			`[ScreenFinalize] ${sessionId} masters`,
@@ -759,56 +745,15 @@ export async function finalizeScreenSession(
 
 		const outputs: Record<string, { key: string; durationMs: number }> = {};
 
-		let both: { key: string; durationMs: number } | null = null;
-		if (wantsBoth && screen && camera) {
-			try {
-				both = await composeBoth(
-					screen,
-					camera,
-					comp,
-					session.userId,
-					sessionId,
-					tmp,
-					watermark,
-				);
-			} catch (error) {
-				// Retry once in fast mode so the user still gets a combined video
-				// instead of only the split tracks.
-				console.error(
-					`[ScreenFinalize] composite failed for ${sessionId}, retrying fast:`,
-					error,
-				);
-				try {
-					both = await composeBoth(
-						screen,
-						camera,
-						comp,
-						session.userId,
-						sessionId,
-						tmp,
-						watermark,
-						true,
-					);
-				} catch (retryError) {
-					console.error(
-						`[ScreenFinalize] fast composite also failed for ${sessionId}:`,
-						retryError,
-					);
-					if (!finalAttempt) throw retryError;
-				}
-			}
-		} else {
-			console.log(
-				`[ScreenFinalize] ${sessionId} skipping both: layout=${comp.layout ?? "missing"} hasScreen=${Boolean(screen)} hasCamera=${Boolean(camera)}`,
-			);
-		}
-
-		if (both && screen && camera && screenRec && cameraRec) {
-			// The combined video is the only output: the screen and camera
-			// masters were just its inputs and are never uploaded. Their raw
-			// chunks stay for a day (the shared cleanup removes them) so a
-			// straggler chunk can still rebuild a fuller video.
-			outputs.both = both;
+		if (screen?.composited && camera && screenRec && cameraRec) {
+			// The composite is the only output; the camera master was just its
+			// input and is never uploaded. Raw chunks stay for a day (the shared
+			// cleanup removes them) so a straggler chunk can still rebuild a
+			// fuller video.
+			const key = screenKey(session.userId, sessionId, "both", screen.ext);
+			await uploadMaster(screen, key);
+			outputs.both = { key, durationMs: screen.durationMs };
+			console.log(`[ScreenFinalize] composed both for ${sessionId}: ${key}`);
 			await settleCompositeInput(screenRec.id, screen);
 			await settleCompositeInput(cameraRec.id, camera);
 		} else {

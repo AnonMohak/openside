@@ -85,6 +85,19 @@ const AUDIO_ONLY_ARGS = [
 
 const SILENCE_SOURCE = "anullsrc=channel_layout=stereo:sample_rate=48000";
 
+/**
+ * A picture laid over every recorder part's video in the same encode (the
+ * screen recorder's camera PiP), so a composite costs one pass, not two.
+ */
+export interface VideoOverlay {
+	/** A CFR video, placed on the track's timeline at `startMs`. */
+	path: string;
+	/** Where the overlay's t=0 sits, on the same clock as the parts' startMs. */
+	startMs: number;
+	/** The overlay's filter chain and position for the master's final size. */
+	build: (target: VideoSize) => { filter: string; x: string; y: string };
+}
+
 export interface MasterEncodeSettings {
 	/** Pinned output geometry (every frame is scaled/letterboxed onto it). */
 	target: VideoSize;
@@ -101,7 +114,11 @@ export interface MasterEncodeSettings {
  * - the instant the part is placed at and its audio is measured from - with
  * the first frame held over the lead.
  */
-function videoArgs(settings: MasterEncodeSettings, leadMs?: number): string[] {
+function videoArgs(
+	settings: MasterEncodeSettings,
+	leadMs?: number,
+	overlay?: VideoOverlay,
+): string[] {
 	const anchor =
 		leadMs === undefined
 			? []
@@ -113,11 +130,26 @@ function videoArgs(settings: MasterEncodeSettings, leadMs?: number): string[] {
 							]
 						: []),
 				];
+	const base = [...anchor, sizeFilter(settings.target)].join(",");
+	const extra = settings.extraFilters.join(",");
+	let filterArgs: string[];
+	if (overlay) {
+		// The overlay (input 1, already seeked to this piece) goes on after the
+		// base is pinned to its final size; extra filters (the DEMO badge) land
+		// on top of both. eof_action=pass keeps the base going if the overlay
+		// ends first.
+		const { filter, x, y } = overlay.build(settings.target);
+		filterArgs = [
+			"-filter_complex",
+			`[0:v:0]${base}[base];[1:v:0]setpts=PTS-STARTPTS,${filter}[ov];[base][ov]overlay=${x}:${y}:format=auto:eof_action=pass,format=yuv420p${extra ? `,${extra}` : ""}[v]`,
+			"-map",
+			"[v]",
+		];
+	} else {
+		filterArgs = ["-vf", [base, ...settings.extraFilters].join(",")];
+	}
 	return [
-		"-vf",
-		[...anchor, sizeFilter(settings.target), ...settings.extraFilters].join(
-			",",
-		),
+		...filterArgs,
 		"-r",
 		String(settings.fps),
 		"-fps_mode",
@@ -152,7 +184,17 @@ async function encodeVideoPiece(params: {
 	 *  before the old one stops so nothing is lost at the seam). */
 	maxDurationMs?: number;
 	timeoutMs?: number;
+	/** Laid over this piece from `offsetMs` into the overlay's own timeline. */
+	overlay?: { overlay: VideoOverlay; offsetMs: number };
 }): Promise<void> {
+	const overlayInput = params.overlay
+		? [
+				"-ss",
+				(Math.max(0, params.overlay.offsetMs) / 1000).toFixed(3),
+				"-i",
+				params.overlay.overlay.path,
+			]
+		: [];
 	await runFfmpeg(
 		[
 			"-y",
@@ -160,10 +202,14 @@ async function encodeVideoPiece(params: {
 			"+genpts",
 			"-i",
 			params.input,
-			"-map",
-			"0:v:0",
+			...overlayInput,
+			...(params.overlay ? [] : ["-map", "0:v:0"]),
 			"-an",
-			...videoArgs(params.settings, Math.max(0, params.leadMs)),
+			...videoArgs(
+				params.settings,
+				Math.max(0, params.leadMs),
+				params.overlay?.overlay,
+			),
 			...(params.maxDurationMs !== undefined
 				? ["-t", durationArg(params.maxDurationMs)]
 				: []),
@@ -367,6 +413,8 @@ export async function composeTimeline(params: {
 	/** Scale down so the shorter side is at most this (e.g. 720 for 720p). */
 	maxShortSide?: number;
 	timeoutMs?: number;
+	/** Composited into every part in the same encode (see VideoOverlay). */
+	overlay?: VideoOverlay;
 }): Promise<ComposedMaster> {
 	if (params.parts.length === 0) throw new Error("No parts to compose");
 
@@ -426,8 +474,10 @@ async function composeVideoTimeline(params: {
 	tmpDir: string;
 	id: string;
 	timeoutMs?: number;
+	overlay?: VideoOverlay;
 }): Promise<ComposedMaster> {
 	const { tmpDir, id, settings } = params;
+	const originMs = params.parts[0]?.startMs ?? 0;
 	const { sampleRate } = MASTER_AUDIO_FORMAT;
 	const msAt = (frames: number) => (frames * 1000) / settings.fps;
 	const audioFrameAt = (videoFrames: number) =>
@@ -500,6 +550,15 @@ async function composeVideoTimeline(params: {
 							leadMs: decoded?.audio.videoStartMs ?? 0,
 							maxDurationMs,
 							timeoutMs: params.timeoutMs,
+							// The piece's t=0 is its part's start on the timeline.
+							...(params.overlay
+								? {
+										overlay: {
+											overlay: params.overlay,
+											offsetMs: originMs + position - params.overlay.startMs,
+										},
+									}
+								: {}),
 						});
 					} else {
 						// Camera off for this part: black for as long as its audio runs.
