@@ -1,5 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { SITE_URL, getSeoMeta, type SeoMeta } from "../src/lib/seo";
+
 // Matches join codes minted by generateJoinCode() in
 // core/src/controllers/space-controller.ts: 5 chars from a fixed,
 // confusable-character-free alphabet.
@@ -24,6 +26,69 @@ class TitleTextRewriter implements HTMLRewriterElementContentHandlers {
   }
 }
 
+class AttributeRewriter implements HTMLRewriterElementContentHandlers {
+  constructor(
+    private readonly name: string,
+    private readonly value: string
+  ) {}
+  element(element: Element) {
+    element.setAttribute(this.name, this.value);
+  }
+}
+
+class HeadAppender implements HTMLRewriterElementContentHandlers {
+  constructor(private readonly html: string) {}
+  element(element: Element) {
+    element.append(this.html, { html: true });
+  }
+}
+
+// Structured data for the home page, so search engines can show Openside as
+// an app with its pricing.
+const HOME_JSON_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Openside",
+  url: `${SITE_URL}/`,
+  applicationCategory: "MultimediaApplication",
+  operatingSystem: "Web",
+  description:
+    "Open-source, self-hostable recording studio for podcasts, interviews, and calls, with a built-in screen recorder.",
+  offers: [
+    { "@type": "Offer", name: "Demo", price: "0", priceCurrency: "USD" },
+    { "@type": "Offer", name: "Pro", price: "8.99", priceCurrency: "USD" },
+    { "@type": "Offer", name: "Self-host", price: "0", priceCurrency: "USD" },
+  ],
+});
+
+// Gives each marketing page its own title, description, and canonical URL in
+// the served HTML, so crawlers see them without running the app.
+function rewriteMarketingHead(
+  response: Response,
+  pathname: string,
+  seo: SeoMeta
+): Response {
+  const canonicalUrl = `${SITE_URL}${pathname === "/" ? "/" : pathname.replace(/\/+$/, "")}`;
+  let rewriter = new HTMLRewriter()
+    .on("title", new TitleTextRewriter(seo.title))
+    .on('meta[name="description"]', new MetaContentRewriter(seo.description))
+    .on('link[rel="canonical"]', new AttributeRewriter("href", canonicalUrl))
+    .on('meta[property="og:title"]', new MetaContentRewriter(seo.title))
+    .on('meta[property="og:description"]', new MetaContentRewriter(seo.description))
+    .on('meta[property="og:url"]', new MetaContentRewriter(canonicalUrl))
+    .on('meta[name="twitter:title"]', new MetaContentRewriter(seo.title))
+    .on('meta[name="twitter:description"]', new MetaContentRewriter(seo.description));
+
+  if (pathname === "/") {
+    rewriter = rewriter.on(
+      "head",
+      new HeadAppender(`<script type="application/ld+json">${HOME_JSON_LD}</script>`)
+    );
+  }
+
+  return rewriter.transform(response);
+}
+
 interface Env {
   ASSETS: Fetcher;
 }
@@ -33,12 +98,17 @@ export default {
     const url = new URL(request.url);
     const assetResponse = await env.ASSETS.fetch(request);
 
-    if (!ROOM_CODE_PATTERN.test(url.pathname)) {
+    const contentType = assetResponse.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) {
       return assetResponse;
     }
 
-    const contentType = assetResponse.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/html")) {
+    const seo = getSeoMeta(url.pathname);
+    if (seo) {
+      return rewriteMarketingHead(assetResponse, url.pathname, seo);
+    }
+
+    if (!ROOM_CODE_PATTERN.test(url.pathname)) {
       return assetResponse;
     }
 

@@ -9,7 +9,6 @@ import LegalLayout, {
 const TermsPage = () => (
   <LegalLayout
     title="Terms of Service"
-    description="The terms for using the hosted Openside service."
     updated="October 23, 2026"
   >
     <LegalSection title="Agreement">

@@ -1,0 +1,457 @@
+import { useState, type ElementType, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import { ArrowRight, Check } from "lucide-react";
+import { FaGithub } from "react-icons/fa";
+
+import {
+  PricingCTA,
+  StartRecordingCTA,
+} from "@/components/landing/LandingAuthCTA";
+import { useOpenAuth } from "@/components/landing/MarketingLayout";
+import { featureDemos } from "@/components/landing/FeatureDemos";
+import UseCasesShowcase from "@/components/landing/UseCasesShowcase";
+import {
+  faqs as defaultFaqs,
+  features,
+  pricingPlans,
+  recordingPoints,
+  selfHostPoints,
+  useCases,
+} from "@/components/landing/content";
+import {
+  containerVariants,
+  riseVariants,
+} from "@/components/landing/motion";
+
+const inView = {
+  initial: "hidden",
+  whileInView: "show",
+  viewport: { once: true, margin: "-100px" },
+} as const;
+
+// The two hero buttons: start recording (auth-aware) and star on GitHub.
+export const HeroCTAs = () => {
+  const openAuth = useOpenAuth();
+
+  return (
+    <motion.div
+      variants={riseVariants}
+      className="mt-3 flex flex-wrap items-center gap-3"
+    >
+      <StartRecordingCTA
+        onOpenAuth={openAuth}
+        className="flex select-none items-center gap-2 rounded-lg bg-white px-4.5 py-2.5 text-[0.9375rem] font-semibold text-[#131313] transition-colors hover:bg-white/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
+      />
+      <a
+        href="https://github.com/rinkitadhana/openside"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex select-none cursor-pointer items-center gap-2 rounded-lg bg-[#131313] px-4.5 py-2.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#131313]/90"
+      >
+        <FaGithub className="size-4" />
+        Star on GitHub
+      </a>
+    </motion.div>
+  );
+};
+
+// Hero band content for the inner marketing pages.
+export const PageHero = ({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) => (
+  <motion.section
+    variants={containerVariants}
+    initial="hidden"
+    animate="show"
+    className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-start gap-3 pt-6 pb-20 text-left sm:pt-10 sm:pb-24"
+  >
+    <motion.span
+      variants={riseVariants}
+      className="inline-flex select-none items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 sm:text-sm"
+    >
+      {eyebrow}
+    </motion.span>
+    <motion.h1
+      variants={riseVariants}
+      className="font-bricolage max-w-3xl text-3xl font-semibold leading-[1.2] text-white sm:text-[2.5rem]"
+    >
+      {title}
+    </motion.h1>
+    <motion.p
+      variants={riseVariants}
+      className="-mt-1 max-w-xl text-sm font-normal text-white/80 sm:text-base"
+    >
+      {description}
+    </motion.p>
+    <HeroCTAs />
+  </motion.section>
+);
+
+export const SectionHeading = ({
+  eyebrow,
+  title,
+  description,
+  moreLink,
+}: {
+  eyebrow: string;
+  title: string;
+  description?: string;
+  moreLink?: { to: string; label: string };
+}) => (
+  <motion.div
+    className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
+    {...inView}
+    variants={riseVariants}
+  >
+    <div className="max-w-xl">
+      <p className="text-sm font-medium text-foreground/60">{eyebrow}</p>
+      <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+        {title}
+      </h2>
+      {description && (
+        <p className="mt-3 text-base leading-7 text-foreground/70">
+          {description}
+        </p>
+      )}
+    </div>
+    {moreLink && (
+      <Link
+        to={moreLink.to}
+        className="group flex shrink-0 items-center gap-1.5 text-sm font-medium text-(--landing-brand-text)"
+      >
+        {moreLink.label}
+        <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+      </Link>
+    )}
+  </motion.div>
+);
+
+export const Section = ({
+  id,
+  children,
+}: {
+  id?: string;
+  children: ReactNode;
+}) => (
+  <section id={id} className="bg-background px-4 py-20 sm:px-6">
+    <div className="mx-auto max-w-5xl">{children}</div>
+  </section>
+);
+
+// A grid of icon + title + description cards.
+export const IconCardGrid = ({
+  items,
+  columns = "sm:grid-cols-2 lg:grid-cols-3",
+}: {
+  items: { icon: ElementType; title: string; description: string }[];
+  columns?: string;
+}) => (
+  <motion.div
+    className={`mt-10 grid grid-cols-1 gap-6 ${columns}`}
+    {...inView}
+    variants={containerVariants}
+  >
+    {items.map(({ icon: Icon, title, description }) => (
+      <motion.article
+        key={title}
+        variants={riseVariants}
+        className="rounded-2xl border border-border bg-background p-6"
+      >
+        <div className="flex size-10 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
+          <Icon className="size-5" />
+        </div>
+        <h3 className="font-bricolage mt-5 text-base font-semibold tracking-tight text-foreground">
+          {title}
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-foreground/65">
+          {description}
+        </p>
+      </motion.article>
+    ))}
+  </motion.div>
+);
+
+export const FeaturesGrid = () => (
+  <motion.div
+    className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2"
+    {...inView}
+    variants={containerVariants}
+  >
+    {features.map(({ icon: Icon, title, description }) => {
+      const Demo = featureDemos[title];
+      return (
+        <motion.article
+          key={title}
+          variants={riseVariants}
+          className="flex flex-col rounded-2xl border border-border bg-background p-6"
+        >
+          <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
+            <Icon className="size-5" />
+          </div>
+          <h3 className="font-bricolage mt-5 text-lg font-semibold tracking-tight text-foreground">
+            {title}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-foreground/65">
+            {description}
+          </p>
+          <div className="relative mt-6 flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-xl bg-[url('/img/landing/feature-bg.jpg')] bg-cover bg-center px-5 sm:aspect-[16/10]">
+            {Demo && <Demo />}
+          </div>
+        </motion.article>
+      );
+    })}
+  </motion.div>
+);
+
+export const FeaturesSection = ({ moreLink }: { moreLink?: boolean }) => (
+  <Section id="features">
+    <SectionHeading
+      eyebrow="Features"
+      title="Record, download, and share in one place."
+      description="From capture to sharing, Openside handles the whole workflow so you can focus on the recording itself."
+      moreLink={moreLink ? { to: "/features", label: "All features" } : undefined}
+    />
+    <FeaturesGrid />
+  </Section>
+);
+
+export const UseCasesSection = ({ moreLink }: { moreLink?: boolean }) => (
+  <Section id="use-cases">
+    <SectionHeading
+      eyebrow="Use cases"
+      title="Built for how you actually work."
+      description="From solo creators to compliance-sensitive teams, here is who records with Openside."
+      moreLink={moreLink ? { to: "/use-cases", label: "All use cases" } : undefined}
+    />
+    <motion.div {...inView} variants={riseVariants}>
+      <UseCasesShowcase items={useCases} />
+    </motion.div>
+  </Section>
+);
+
+const PointsCard = ({
+  title,
+  subtitle,
+  points,
+}: {
+  title: string;
+  subtitle: string;
+  points: { icon: ElementType; title: string; description: string }[];
+}) => (
+  <motion.div
+    variants={riseVariants}
+    className="rounded-2xl border border-border bg-background p-6 sm:p-8"
+  >
+    <h3 className="font-bricolage text-lg font-semibold tracking-tight text-foreground">
+      {title}
+    </h3>
+    <p className="mt-1 text-sm leading-6 text-foreground/60">{subtitle}</p>
+    <ul className="mt-6 space-y-6">
+      {points.map(({ icon: Icon, title, description }) => (
+        <li key={title} className="flex gap-4">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
+            <Icon className="size-5" />
+          </div>
+          <div>
+            <h4 className="font-bricolage text-base font-medium text-foreground">
+              {title}
+            </h4>
+            <p className="mt-1 text-sm leading-6 text-foreground/65">
+              {description}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  </motion.div>
+);
+
+export const PrivacySection = ({ moreLink }: { moreLink?: boolean }) => (
+  <Section id="privacy">
+    <SectionHeading
+      eyebrow="Privacy"
+      title="Your recordings stay yours."
+      description="Two things matter here: keeping your recordings safe, and letting you run the whole thing yourself. Here is how each works."
+      moreLink={
+        moreLink ? { to: "/open-source", label: "Open source & self-hosting" } : undefined
+      }
+    />
+    <motion.div
+      className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-2"
+      {...inView}
+      variants={containerVariants}
+    >
+      <PointsCard
+        title="Your recordings"
+        subtitle="From the moment you hit record to the moment you share."
+        points={recordingPoints}
+      />
+      <PointsCard
+        title="Self-hosting and keys"
+        subtitle="Run Openside on your own infrastructure, with your own keys."
+        points={selfHostPoints}
+      />
+    </motion.div>
+  </Section>
+);
+
+export const PricingCards = () => {
+  const openAuth = useOpenAuth();
+
+  return (
+    <motion.div
+      className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3"
+      {...inView}
+      variants={containerVariants}
+    >
+      {pricingPlans.map((plan) => (
+        <motion.div
+          key={plan.name}
+          variants={riseVariants}
+          className={`flex flex-col rounded-2xl border p-6 text-foreground ${
+            plan.featured
+              ? "border-(--landing-brand-tint) bg-(--landing-brand-soft) shadow-[0_12px_34px_rgba(0,65,170,0.14)] ring-1 ring-(--landing-brand-tint)"
+              : "border-border bg-background"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="font-bricolage text-lg font-semibold tracking-tight">
+              {plan.name}
+            </h3>
+            {plan.featured && (
+              <span className="rounded-full bg-(--landing-brand-tint) px-2.5 py-1 text-xs font-medium text-(--landing-brand-text)">
+                Popular
+              </span>
+            )}
+          </div>
+
+          <div className="mt-2 flex items-baseline gap-1">
+            <span className="text-3xl font-semibold tracking-tight">
+              {plan.price}
+            </span>
+            {plan.priceSuffix && (
+              <span className="text-sm text-foreground/55">
+                {plan.priceSuffix}
+              </span>
+            )}
+          </div>
+
+          <p className="mt-3 text-sm leading-6 text-foreground/65">
+            {plan.description}
+          </p>
+
+          <ul className="mt-6 mb-8 space-y-3">
+            {plan.features.map((feature) => (
+              <li key={feature} className="flex items-start gap-2.5 text-sm">
+                <Check
+                  className={`mt-0.5 size-4 shrink-0 ${
+                    plan.featured ? "text-(--landing-brand-text)" : "text-foreground"
+                  }`}
+                />
+                <span className="text-foreground/75">{feature}</span>
+              </li>
+            ))}
+          </ul>
+
+          <PricingCTA
+            label={plan.cta}
+            isPro={plan.name === "Pro"}
+            onOpenAuth={openAuth}
+            className={`mt-auto w-full cursor-pointer rounded-lg px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+              plan.featured
+                ? "bg-[#0041aa] text-white hover:bg-[#0041aa]/90"
+                : "bg-foreground text-background hover:bg-foreground/90"
+            }`}
+          />
+        </motion.div>
+      ))}
+    </motion.div>
+  );
+};
+
+export const PricingSection = ({ moreLink }: { moreLink?: boolean }) => (
+  <Section id="pricing">
+    <SectionHeading
+      eyebrow="Pricing"
+      title="Simple pricing that scales with you."
+      description="Self-host it for free, or let us handle the infrastructure. No hidden fees, cancel anytime."
+      moreLink={moreLink ? { to: "/pricing", label: "Compare plans" } : undefined}
+    />
+    <PricingCards />
+  </Section>
+);
+
+export const FaqSection = ({
+  items = defaultFaqs,
+  title = "Everything you need to know before you record.",
+}: {
+  items?: { question: string; answer: string }[];
+  title?: string;
+}) => {
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  return (
+    <section id="faq" className="bg-background px-4 py-20 sm:px-6">
+      <motion.div
+        className="mx-auto grid max-w-5xl gap-10 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] md:gap-16"
+        {...inView}
+        variants={containerVariants}
+      >
+        <motion.div variants={riseVariants}>
+          <p className="text-sm font-medium text-foreground/60">FAQ</p>
+          <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+            {title}
+          </h2>
+        </motion.div>
+
+        <motion.div
+          variants={riseVariants}
+          className="divide-y divide-border border-y border-border"
+        >
+          {items.map(({ question, answer }, index) => {
+            const isOpen = openFaq === index;
+            return (
+              <div key={question} className="py-5">
+                <button
+                  type="button"
+                  onClick={() => setOpenFaq(isOpen ? null : index)}
+                  aria-expanded={isOpen}
+                  className="group flex w-full cursor-pointer items-center justify-between gap-4 text-left text-base font-medium text-foreground transition-colors hover:text-(--landing-brand-text)"
+                >
+                  {question}
+                  <span
+                    className={`text-xl font-normal text-foreground/55 transition-[transform,color] duration-300 group-hover:text-(--landing-brand-text) ${
+                      isOpen ? "rotate-45" : ""
+                    }`}
+                  >
+                    +
+                  </span>
+                </button>
+                <div
+                  className={`grid transition-all duration-300 ease-out ${
+                    isOpen
+                      ? "grid-rows-[1fr] opacity-100"
+                      : "grid-rows-[0fr] opacity-0"
+                  }`}
+                >
+                  <div className="overflow-hidden">
+                    <p className="max-w-xl pt-3 text-sm leading-6 text-foreground/65">
+                      {answer}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </motion.div>
+      </motion.div>
+    </section>
+  );
+};

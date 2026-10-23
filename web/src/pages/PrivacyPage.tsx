@@ -13,7 +13,6 @@ const strong = (text: string) => (
 const PrivacyPage = () => (
   <LegalLayout
     title="Privacy Policy"
-    description="How Openside collects, uses, and protects your data."
     updated="October 23, 2026"
   >
     <LegalSection title="Overview">
