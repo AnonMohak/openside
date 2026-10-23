@@ -23,18 +23,23 @@
 
 - **Studio-quality recording** - crisp video up to 4K with clear, high-quality audio
 - **Multi-track, per-participant output** - each speaker on their own track, ready to edit
-- **Screen recorder** - quick standalone screen and camera capture, share it with a link
+- **Screen recorder** - standalone screen + camera capture with pause/resume, codec fallback, and the camera composited in a single encode
+- **Crash-safe uploads** - recordings stream up in chunks while you record, with live per-participant upload progress and automatic recovery of stuck takes
+- **Projects & library** - every meeting and screen take in one place, with server-side search from the command menu
+- **Comments & descriptions** - threaded comments with replies and edits on every recording, plus a description per project
+- **Calendar & scheduling** - schedule meetings, send calendar invites, and see past recordings and screen takes on a calendar
 - **Shareable recordings** - share any recording from your projects with a link
 - **Export in any format** - download your recordings as MP4, WebM, MP3, or WAV
 - **Cheaper than SaaS** - no per-seat fees, pay only for the infra you use
 - **Use it for free** - connect your own LiveKit and storage in settings to unlock unlimited, watermark-free recording at no cost beyond your own usage
 - **Open source & self-hostable** - MIT licensed, no vendor lock-in
+- **Editor** - coming soon
 
 ---
 
 ## Architecture
 
-Openside is **two apps, three deployable processes** - a frontend, an API server, and a media worker (the API and worker share the same `core` codebase).
+Openside is **two apps**: a frontend (`web`) and a backend (`core`). `core` builds once and runs as several processes - the API, media workers, and a scheduled maintenance job.
 
 ```mermaid
 flowchart LR
@@ -44,29 +49,38 @@ flowchart LR
     API -->|presigned upload/download URLs| W
     API --> DB[(PostgreSQL)]
     API -->|enqueue finalize/transcode| R[(Redis · BullMQ)]
-    R --> WK[core · Media Worker]
-    WK -->|ffmpeg finalize/transcode| WK
-    WK <-->|read segments / write output| R2
-    WK --> DB
+    API -.->|wake| FW
+    API -.->|wake| GW
+    R -->|finalize queue| FW[core · Finalize Worker]
+    R -->|transcode + other queues| GW[core · General Worker]
+    FW <-->|read segments / write master| R2
+    GW <-->|read master / write exports| R2
+    FW --> DB
+    GW --> DB
+    M[core · Maintenance cron] --> DB
+    M -->|recover stuck finalizes| R
+    M -.->|wake| FW
 ```
 
 | Piece | Folder | What it does |
 |-------|--------|--------------|
-| **Web** | [`web/`](web) | React 19 + Vite SPA. Recording UI, meeting rooms, dashboard, library. |
-| **API** | [`core/`](core) (`src/index.ts`) | Express server: auth, spaces, recording sessions, LiveKit tokens, billing, presigned downloads. |
-| **Worker** | [`core/`](core) (`src/worker.ts`) | BullMQ consumer running the heavy `ffmpeg` work - session finalization + on-demand transcodes - **off** the API. |
+| **Web** | [`web/`](web) | React 19 + Vite SPA served from a Cloudflare Worker (`web/worker`), which also rewrites OG tags for meeting invite links. Recording UI, meeting rooms, screen recorder, dashboard, calendar, projects, share pages. |
+| **API** | [`core/`](core) (`src/index.ts`) | Express + Socket.IO server: auth, spaces, recording sessions, LiveKit tokens, comments, search, billing, self-host keys, presigned downloads, and an admin API at `/admin/v1`. |
+| **Finalize worker** | [`core/`](core) (`src/worker.ts --role=finalize`) | BullMQ consumer for the `finalize` queue: stitches uploaded chunks into each recording's master with `ffmpeg`, **off** the API. |
+| **General worker** | [`core/`](core) (`src/worker.ts --role=general`) | BullMQ consumer for every other queue (on-demand transcodes today), so exports never delay a finalize. |
+| **Maintenance** | [`core/`](core) (`src/maintenance.ts`) | One-shot cron run (every ~5 min): recovers stuck finalizes and abandoned sessions, meters usage, applies retention, then exits. |
 
-> The worker shares `core`'s Prisma schema, queue definitions, and services with the API, so it's the **same build, a different entrypoint** - no separate repo needed. Scale it horizontally by running more worker instances.
+> All `core` processes share the Prisma schema, queue definitions, and services, so they're the **same build, different entrypoints** - no separate repo needed. Scale workers horizontally by running more instances.
 
 ### Worker roles
 
 In production the worker runs as two services so finalization never waits
 behind other media work:
 
-| Role | Start command | Env file | Queues |
-|------|---------------|----------|--------|
-| `finalize` | `pnpm worker:finalize` | `.env.production-finalize-worker` | `finalize` |
-| `general` | `pnpm worker:general` | `.env.production-general-worker` | everything else (`transcode` today) |
+| Role | Start command | Dev command | Env file | Queues |
+|------|---------------|-------------|----------|--------|
+| `finalize` | `pnpm worker:finalize` | `pnpm worker:finalize:dev` | `.env.production-finalize-worker` | `finalize` |
+| `general` | `pnpm worker:general` | `pnpm worker:general:dev` | `.env.production-general-worker` | everything else (`transcode` today) |
 
 The role comes from `--role=<role>` or `WORKER_ROLE`. With no role, one worker
 consumes every queue (`pnpm worker` / `pnpm worker:dev`, handy for local dev).
@@ -88,13 +102,14 @@ service and redeploy for the platform setting to take effect.
 For the API to sleep too, set `RATE_LIMIT_REDIS=false`. Maintenance runs only
 when real HTTP or Socket.IO traffic reaches the API, and its BullMQ producer
 connection closes automatically after 30 idle seconds. With no traffic, the API
-does not poll Redis or run recurring database sweeps.
+does not poll Redis or run recurring database sweeps - the maintenance cron
+(`pnpm maintenance`, env file `.env.production-maintenance`) covers that gap.
 
 ---
 
 ## Tech Stack
 
-**Frontend** - React 19 · Vite · TypeScript · Tailwind · TanStack Query · Framer Motion · LiveKit components · Clerk
+**Frontend** - React 19 · Vite · TypeScript · Tailwind · TanStack Query · React Router · Framer Motion · cmdk · LiveKit components · Socket.IO client · Clerk · Cloudflare Workers
 
 **Backend (`core`)** - Node · Express 5 · TypeScript · Prisma 7 (PostgreSQL) · BullMQ + Redis · LiveKit Server SDK · `ffmpeg-static` · AWS S3 SDK (R2) · Socket.IO · Clerk · Nodemailer · Polar (billing)
 
@@ -133,11 +148,20 @@ cp core/.env.example-api core/.env.local
 cp web/.env.example  web/.env.local
 ```
 
-Each key is documented in the example files. Both core processes load the
-shared `.env.local` during local development. With `NODE_ENV=production`, the
-API loads `.env.production-api` and the media worker loads
-`.env.production-worker`. These production files are gitignored; hosted Railway
-services should keep their values in Railway's Variables settings.
+Each key is documented in the example files (`core/.env.example-api`,
+`-finalize-worker`, `-general-worker`, `-maintenance`). Every core process loads
+the shared `.env.local` during local development. With `NODE_ENV=production`:
+
+| Process | Env file |
+|---------|----------|
+| API | `.env.production-api` |
+| Finalize worker | `.env.production-finalize-worker` |
+| General worker | `.env.production-general-worker` |
+| All-queue worker (no role) | `.env.production-worker` |
+| Maintenance | `.env.production-maintenance` |
+
+These production files are gitignored; hosted Railway services should keep their
+values in Railway's Variables settings.
 
 ### 3. Set up the database
 
@@ -158,9 +182,17 @@ cd core && pnpm worker:dev
 
 # Terminal 3 - frontend
 cd web && pnpm dev
+
+# Optional - run maintenance once (recovery, metering, retention)
+cd core && pnpm maintenance:dev
 ```
 
-Open the Vite dev URL (default http://localhost:3000) and you're in.
+Open http://localhost:3000 and you're in.
+
+### 5. Deploy
+
+- **Web** - `cd web && pnpm deploy` builds and deploys to Cloudflare Workers.
+- **Core** - `cd core && pnpm build`, then run `pnpm start` (API), `pnpm worker:finalize` + `pnpm worker:general` (workers), and `pnpm maintenance` on a cron schedule.
 
 ---
 
