@@ -1683,13 +1683,13 @@ const LandingPage = () => {
         <div className="absolute inset-0 bg-black/20" />
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/65 via-black/15 to-transparent" />
         <motion.div
-          className="relative mx-auto grid max-w-5xl gap-12 sm:grid-cols-[1.4fr_1fr_1fr]"
+          className="relative mx-auto grid max-w-5xl grid-cols-2 gap-12 sm:grid-cols-[1.4fr_1fr_1fr_1fr]"
           initial="hidden"
           whileInView="show"
           viewport={{ once: true, margin: "-100px" }}
           variants={containerVariants}
         >
-          <motion.div variants={riseVariants}>
+          <motion.div variants={riseVariants} className="col-span-2 sm:col-span-1">
             <Link to="/" className="flex items-center gap-2.5">
               <img
                 src="/logo/logo-dark.png"
@@ -1767,6 +1767,20 @@ const LandingPage = () => {
               >
                 GitHub
               </a>
+            </div>
+          </motion.div>
+
+          <motion.div variants={riseVariants}>
+            <p className="text-sm font-semibold uppercase tracking-wide text-white/50">
+              Legal
+            </p>
+            <div className="mt-4 flex flex-col gap-3 text-base text-white/75">
+              <Link to="/privacy" className="w-fit hover:text-white">
+                Privacy Policy
+              </Link>
+              <Link to="/terms" className="w-fit hover:text-white">
+                Terms of Service
+              </Link>
             </div>
           </motion.div>
         </motion.div>

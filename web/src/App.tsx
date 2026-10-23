@@ -4,6 +4,8 @@ import ProtectedRoute from "@/components/shared/ProtectedRoute";
 import { SocketProvider } from "@/context/socket";
 import { ClockSyncProvider } from "@/context/clockSync";
 import LandingPage from "@/pages/LandingPage";
+import PrivacyPage from "@/pages/PrivacyPage";
+import TermsPage from "@/pages/TermsPage";
 import DashboardHomePage from "@/pages/DashboardHomePage";
 import DashboardCalendarPage from "@/pages/DashboardCalendarPage";
 import DashboardProjectPage from "@/pages/DashboardProjectPage";
@@ -27,6 +29,8 @@ const App = () => {
         <RecordingChunkDrainer />
         <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route
         path="/sso-callback"
         element={
