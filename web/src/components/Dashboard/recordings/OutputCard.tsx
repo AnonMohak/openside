@@ -484,7 +484,7 @@ const OutputCard = ({
             onClick={(event) => event.stopPropagation()}
             aria-label={downloading ? "Preparing download" : "Download"}
             title={downloading ? "Preparing download" : "Download"}
-            className="group/trigger flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-muted pl-3 pr-2 text-xs font-medium text-foreground transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:opacity-80"
+            className="group/trigger flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-brand pl-3 pr-2 text-xs font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:opacity-90"
           >
             {downloading ? (
               <FiLoader className="size-3.5 animate-spin" />
@@ -492,7 +492,7 @@ const OutputCard = ({
               <LuDownload className="size-3.5" />
             )}
             {downloading ? "Preparing" : "Download"}
-            <LuChevronDown className="size-3.5 text-fg-muted transition-transform duration-150 group-data-[state=open]/trigger:rotate-180" />
+            <LuChevronDown className="size-3.5 text-white/80 transition-transform duration-150 group-data-[state=open]/trigger:rotate-180" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
