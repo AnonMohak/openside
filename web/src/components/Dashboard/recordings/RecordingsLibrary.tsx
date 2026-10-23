@@ -8,6 +8,7 @@ import {
   FiChevronLeft,
   FiCheck,
   FiEdit2,
+  FiEye,
   FiFilter,
   FiFolder,
   FiLoader,
@@ -211,7 +212,7 @@ const RecordingSessionActions = ({
 };
 
 // Above the player: the recording's title (click to rename) and when it was
-// recorded, with the share + options actions on the right.
+// recorded, with its views and the share + options actions on the right.
 const RecordingHeader = ({
   title,
   session,
@@ -228,6 +229,7 @@ const RecordingHeader = ({
   onDelete?: () => void;
 }) => {
   const date = session ? sessionDate(session) : null;
+  const views = session?.viewCount ?? 0;
   const titleRef = useRef<InlineTitleHandle>(null);
   return (
     <div className="flex w-full items-center justify-between gap-3">
@@ -256,6 +258,12 @@ const RecordingHeader = ({
           )}
         </div>
       </div>
+      {session && (
+        <span className="mr-1 flex h-8 shrink-0 items-center gap-1.5 px-1 text-xs text-fg-muted">
+          <FiEye className="size-3.5" />
+          {views} {views === 1 ? "view" : "views"}
+        </span>
+      )}
       <RecordingSessionActions
         {...actions}
         onRename={onRename ? () => titleRef.current?.edit() : undefined}
@@ -950,8 +958,9 @@ const ProjectDetailSkeleton = () => {
                 <div className="h-4 w-40 animate-pulse rounded-md bg-muted" />
                 <div className="h-3 w-32 animate-pulse rounded-md bg-muted" />
               </div>
-              {/* Share, Rename, Delete */}
+              {/* Views, Share, Rename, Delete */}
               <div className="flex shrink-0 items-center gap-1.5">
+                <div className="mr-1 h-4 w-14 animate-pulse rounded-md bg-muted" />
                 <div className="h-8 w-[74px] animate-pulse rounded-lg bg-muted" />
                 <div className="h-8 w-[86px] animate-pulse rounded-lg bg-muted" />
                 <div className="h-8 w-[78px] animate-pulse rounded-lg bg-muted" />

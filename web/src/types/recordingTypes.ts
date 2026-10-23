@@ -26,6 +26,8 @@ export interface RecordingSession {
   status: RecordingSessionStatus;
   /** Public link id once the Space host enables sharing for this session. */
   shareToken?: string | null;
+  /** Share-page opens by anyone other than the host. */
+  viewCount?: number;
   targetFps?: number;
   videoResolution?: number;
   audioSampleRate?: number;
