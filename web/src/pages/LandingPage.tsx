@@ -1043,9 +1043,13 @@ const UseCasesShowcase = ({ items }: { items: typeof useCases }) => {
   );
 };
 
-// Full-width horizontal line between stacked sections. Desktop-only chrome.
+// Full-width horizontal line between stacked sections, with a small square
+// where it meets each side border. Desktop-only chrome.
 const SectionDivider = () => (
-  <div className="hidden border-t border-border md:block" />
+  <div className="relative hidden border-t border-border md:block">
+    <span className="absolute left-[-0.5px] top-[-0.5px] z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-border bg-background" />
+    <span className="absolute right-[-0.5px] top-[-0.5px] z-10 size-2.5 translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-border bg-background" />
+  </div>
 );
 
 const themeOptions = [
