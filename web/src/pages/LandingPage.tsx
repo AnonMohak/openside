@@ -2,11 +2,11 @@ import {
   useCallback,
   useEffect,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { useTheme } from "next-themes";
 import {
   AudioLines,
   Briefcase,
@@ -25,11 +25,13 @@ import {
   MessagesSquare,
   Mic,
   Monitor,
+  Moon,
   Podcast,
   Presentation,
   Server,
   Share2,
   ShieldCheck,
+  Sun,
   UploadCloud,
   Users,
   Video,
@@ -301,19 +303,6 @@ const pricingPlans = [
     featured: false,
   },
 ];
-
-// The marketing site intentionally has a fixed light palette, independent of
-// the theme selected elsewhere in the app.
-const landingLightTheme: CSSProperties & Record<`--${string}`, string> = {
-  "--background": "#ffffff",
-  "--foreground": "#131313",
-  "--primary": "#f0f0f0",
-  "--muted": "#e2e2e2",
-  "--brand": "#0041aa",
-  "--border": "#dcdcdc",
-  "--selection-background": "#131313",
-  "--selection-text": "#ffffff",
-};
 
 const containerVariants = {
   hidden: {},
@@ -633,43 +622,43 @@ const TrackDownloadDemo = () => {
         }
         transition={{ duration: 0.5, ease: EASE }}
       >
-        <div className="flex items-center gap-2.5 rounded-lg border border-[#e6e6e6] bg-[#ffffff] px-2.5 py-2 opacity-45">
-          <span className="flex aspect-[4/3] h-9 items-center justify-center rounded-md bg-[#eaeaea]">
-            <AudioLines className="size-4 text-[#131313]/50" />
+        <div className="flex items-center gap-2.5 rounded-lg border border-(--landing-faint) bg-background px-2.5 py-2 opacity-45">
+          <span className="flex aspect-[4/3] h-9 items-center justify-center rounded-md bg-(--landing-chip)">
+            <AudioLines className="size-4 text-foreground/50" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="h-2 w-24 rounded-full bg-[#e2e2e2]" />
-            <div className="mt-1.5 h-2 w-16 rounded-full bg-[#ececec]" />
+            <div className="h-2 w-24 rounded-full bg-muted" />
+            <div className="mt-1.5 h-2 w-16 rounded-full bg-(--landing-line)" />
           </div>
         </div>
 
-        <div className="mt-2 flex items-center gap-2.5 rounded-lg border border-[#dcdcdc] bg-[#ffffff] px-2.5 py-2 shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
-          <span className="flex aspect-[4/3] h-9 items-center justify-center rounded-md bg-[#eaeaea]">
-            <Video className="size-4 text-[#131313]/60" />
+        <div className="mt-2 flex items-center gap-2.5 rounded-lg border border-border bg-background px-2.5 py-2 shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
+          <span className="flex aspect-[4/3] h-9 items-center justify-center rounded-md bg-(--landing-chip)">
+            <Video className="size-4 text-foreground/60" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold text-[#131313]">Alex</p>
-            <p className="mt-0.5 text-[0.7rem] text-[#131313]/45">
+            <p className="truncate text-xs font-semibold text-foreground">Alex</p>
+            <p className="mt-0.5 text-[0.7rem] text-foreground/45">
               Ready · 2:14 · 2160p
             </p>
           </div>
           <motion.span
             animate={{ scale: isClicking ? 0.9 : 1 }}
             transition={{ duration: 0.12, ease: EASE }}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#dcdcdc] bg-[#ffffff] px-2.5 py-1.5 text-xs font-medium text-[#131313]"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground"
           >
-            <Download className="size-3.5 text-[#131313]/60" />
+            <Download className="size-3.5 text-foreground/60" />
             Download
           </motion.span>
         </div>
 
-        <div className="mt-2 flex items-center gap-2.5 rounded-lg border border-[#e6e6e6] bg-[#ffffff] px-2.5 py-2 opacity-45">
-          <span className="flex aspect-[4/3] h-9 items-center justify-center rounded-md bg-[#eaeaea]">
-            <Monitor className="size-4 text-[#131313]/50" />
+        <div className="mt-2 flex items-center gap-2.5 rounded-lg border border-(--landing-faint) bg-background px-2.5 py-2 opacity-45">
+          <span className="flex aspect-[4/3] h-9 items-center justify-center rounded-md bg-(--landing-chip)">
+            <Monitor className="size-4 text-foreground/50" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="h-2 w-20 rounded-full bg-[#e2e2e2]" />
-            <div className="mt-1.5 h-2 w-14 rounded-full bg-[#ececec]" />
+            <div className="h-2 w-20 rounded-full bg-muted" />
+            <div className="mt-1.5 h-2 w-14 rounded-full bg-(--landing-line)" />
           </div>
         </div>
       </motion.div>
@@ -680,7 +669,7 @@ const TrackDownloadDemo = () => {
         animate={{ opacity: isOpen ? 1 : 0, scale: isOpen ? 1 : 0.92 }}
         transition={{ duration: 0.4, ease: EASE }}
       >
-        <div className="w-44 rounded-xl border border-[#dcdcdc] bg-[#ffffff] p-1.5 shadow-[0_12px_34px_rgba(0,0,0,0.16)]">
+        <div className="w-44 rounded-xl border border-border bg-background p-1.5 shadow-[0_12px_34px_rgba(0,0,0,0.16)]">
           {downloadOptions.map((opt, i) => {
             const OptIcon = opt.icon;
             const isFirstOfGroup =
@@ -688,14 +677,14 @@ const TrackDownloadDemo = () => {
             return (
               <div key={`${opt.name}-${opt.format}`}>
                 {isFirstOfGroup && (
-                  <p className="px-2 pt-1 pb-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-[#131313]/40">
+                  <p className="px-2 pt-1 pb-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-foreground/40">
                     {opt.group}
                   </p>
                 )}
-                <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[#131313]">
-                  <OptIcon className="size-3.5 text-[#131313]/55" />
+                <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground">
+                  <OptIcon className="size-3.5 text-foreground/55" />
                   {opt.name}
-                  <span className="ml-auto rounded-md bg-[#eaeaea] px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-[#131313]/55">
+                  <span className="ml-auto rounded-md bg-(--landing-chip) px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-foreground/55">
                     {opt.format}
                   </span>
                 </div>
@@ -773,17 +762,17 @@ const ScreenRecorderDemo = () => {
   const ss = String(elapsed).padStart(2, "0");
 
   return (
-    <div className="w-full max-w-[22rem] overflow-hidden rounded-xl border border-[#dcdcdc] bg-white shadow-[0_10px_34px_rgba(0,0,0,0.14)]">
+    <div className="w-full max-w-[22rem] overflow-hidden rounded-xl border border-border bg-background shadow-[0_10px_34px_rgba(0,0,0,0.14)]">
       {/* Window title bar. */}
-      <div className="flex items-center gap-1.5 border-b border-[#ececec] px-3 py-2">
+      <div className="flex items-center gap-1.5 border-b border-(--landing-line) px-3 py-2">
         <span className="size-2 rounded-full bg-[#ff5f57]" />
         <span className="size-2 rounded-full bg-[#febc2e]" />
         <span className="size-2 rounded-full bg-[#28c840]" />
-        <div className="ml-2 h-3 w-32 rounded-full bg-[#f0f0f0]" />
+        <div className="ml-2 h-3 w-32 rounded-full bg-primary" />
       </div>
 
       {/* Recorded screen content. */}
-      <div className="relative aspect-[16/9] bg-gradient-to-br from-[#ebf0f8] to-[#ccd9ee]">
+      <div className="relative aspect-[16/9] bg-gradient-to-br from-(--landing-brand-soft) to-(--landing-brand-mid)">
         {/* Faux page content. */}
         <div className="absolute left-4 top-4 space-y-2">
           <div className="h-2.5 w-28 rounded-full bg-white/70" />
@@ -803,7 +792,7 @@ const ScreenRecorderDemo = () => {
 
         {/* Click ripple at the current waypoint. */}
         <motion.span
-          className="pointer-events-none absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#131313]/15"
+          className="pointer-events-none absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/15"
           style={{ left: target.x, top: target.y }}
           animate={
             clicking
@@ -883,9 +872,9 @@ const CommentsDemo = () => {
   return (
     <div className="relative w-full max-w-[23rem]">
       {/* Share link row with a Share button. */}
-      <div className="relative flex items-center gap-2 rounded-xl border border-[#dcdcdc] bg-white px-3 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
-        <Link2 className="size-4 shrink-0 text-[#131313]/45" />
-        <span className="flex-1 truncate text-xs text-[#131313]/70">
+      <div className="relative flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
+        <Link2 className="size-4 shrink-0 text-foreground/45" />
+        <span className="flex-1 truncate text-xs text-foreground/70">
           openside.to/r/9f2k
         </span>
         <motion.span
@@ -894,7 +883,7 @@ const CommentsDemo = () => {
           className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[0.7rem] font-medium ${
             copied
               ? "bg-emerald-500/10 text-emerald-600"
-              : "bg-[#131313] text-white"
+              : "bg-foreground text-background"
           }`}
         >
           {copied ? (
@@ -934,7 +923,7 @@ const CommentsDemo = () => {
               initial={{ opacity: 0, y: 8, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.35, ease: EASE }}
-              className="flex items-center gap-2 rounded-xl border border-[#ececec] bg-white px-2.5 py-2 shadow-[0_2px_10px_rgba(0,0,0,0.04)]"
+              className="flex items-center gap-2 rounded-xl border border-(--landing-line) bg-background px-2.5 py-2 shadow-[0_2px_10px_rgba(0,0,0,0.04)]"
             >
               <span
                 className="flex size-6 shrink-0 items-center justify-center rounded-full text-[0.65rem] font-semibold text-white"
@@ -943,10 +932,10 @@ const CommentsDemo = () => {
                 {c.name[0]}
               </span>
               <div className="min-w-0">
-                <p className="text-[0.7rem] font-semibold leading-tight text-[#131313]">
+                <p className="text-[0.7rem] font-semibold leading-tight text-foreground">
                   {c.name}
                 </p>
-                <p className="truncate text-[0.7rem] leading-tight text-[#131313]/60">
+                <p className="truncate text-[0.7rem] leading-tight text-foreground/60">
                   {c.text}
                 </p>
               </div>
@@ -984,15 +973,15 @@ const UseCasesShowcase = ({ items }: { items: typeof useCases }) => {
               onClick={() => setActive(i)}
               className={`group flex shrink-0 cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors md:shrink ${
                 isActive
-                  ? "border-[#0041aa] bg-[#0041aa]/[0.06] text-[#0041aa]"
-                  : "border-[#dcdcdc] bg-[#ffffff] text-[#131313]/70 hover:border-[#0041aa]/40 hover:text-[#131313]"
+                  ? "border-(--landing-brand-text) bg-(--landing-brand-text)/[0.08] text-(--landing-brand-text)"
+                  : "border-border bg-background text-foreground/70 hover:border-(--landing-brand-text)/40 hover:text-foreground"
               }`}
             >
               <span
                 className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
                   isActive
                     ? "bg-[#0041aa] text-white"
-                    : "bg-[#eaeaea] text-[#131313]/70 group-hover:bg-[#dcdcdc]"
+                    : "bg-(--landing-chip) text-foreground/70 group-hover:bg-border"
                 }`}
               >
                 <ItemIcon className="size-4" />
@@ -1005,7 +994,7 @@ const UseCasesShowcase = ({ items }: { items: typeof useCases }) => {
         })}
       </div>
 
-      <div className="relative min-h-[30rem] overflow-hidden rounded-2xl border border-[#dcdcdc] sm:min-h-[34rem] md:min-h-[28rem]">
+      <div className="relative min-h-[30rem] overflow-hidden rounded-2xl border border-border sm:min-h-[34rem] md:min-h-[28rem]">
         <AnimatePresence>
           <motion.div
             key={current.title}
@@ -1056,8 +1045,48 @@ const UseCasesShowcase = ({ items }: { items: typeof useCases }) => {
 
 // Full-width horizontal line between stacked sections. Desktop-only chrome.
 const SectionDivider = () => (
-  <div className="hidden border-t border-[#dcdcdc] md:block" />
+  <div className="hidden border-t border-border md:block" />
 );
+
+const themeOptions = [
+  { id: "system", label: "System", icon: Monitor },
+  { id: "light", label: "Light", icon: Sun },
+  { id: "dark", label: "Dark", icon: Moon },
+] as const;
+
+const ThemeSwitcher = () => {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Theme"
+      className="flex w-fit items-center gap-0.5 rounded-lg border border-white/20 bg-white/5 p-0.5"
+    >
+      {themeOptions.map(({ id, label, icon: Icon }) => {
+        const selected = (theme ?? "system") === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={label}
+            title={label}
+            onClick={() => setTheme(id)}
+            className={`flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors ${
+              selected
+                ? "bg-white/20 text-white"
+                : "text-white/60 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            <Icon className="size-3.5" />
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 const LandingPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1097,14 +1126,13 @@ const LandingPage = () => {
 
   return (
     <div
-      className="min-h-screen bg-[#ffffff] text-[#131313]"
-      style={landingLightTheme}
+      className="landing min-h-screen bg-background text-foreground"
     >
       <PageTitle
         title="Home"
         description="Openside. Record, meet, and create together."
       />
-      <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-[#ffffff] px-4 pt-24 sm:px-6 sm:pt-28">
+      <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-background px-4 pt-24 sm:px-6 sm:pt-28">
         <div className="absolute inset-0 z-0 bg-[url('/img/landing/hero-bg.webp')] bg-cover bg-bottom" />
 
         <header className="absolute inset-x-0 top-0 z-20">
@@ -1309,8 +1337,8 @@ const LandingPage = () => {
         </motion.section>
       </main>
 
-      <div className="mx-auto max-w-6xl border-x-0 border-[#dcdcdc] md:border-x">
-        <section id="features" className="bg-[#ffffff] px-4 py-20 sm:px-6">
+      <div className="mx-auto max-w-6xl border-x-0 border-border md:border-x">
+        <section id="features" className="bg-background px-4 py-20 sm:px-6">
         <div className="mx-auto max-w-5xl">
           <motion.div
             className="max-w-xl"
@@ -1319,11 +1347,11 @@ const LandingPage = () => {
             viewport={{ once: true, margin: "-100px" }}
             variants={riseVariants}
           >
-            <p className="text-sm font-medium text-[#131313]/60">Features</p>
-            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-[#131313] sm:text-3xl">
+            <p className="text-sm font-medium text-foreground/60">Features</p>
+            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Record, download, and share in one place.
             </h2>
-            <p className="mt-3 text-base leading-7 text-[#131313]/70">
+            <p className="mt-3 text-base leading-7 text-foreground/70">
               From capture to sharing, Openside handles the whole workflow so you
               can focus on the recording itself.
             </p>
@@ -1340,15 +1368,15 @@ const LandingPage = () => {
               <motion.article
                 key={title}
                 variants={riseVariants}
-                className="flex flex-col rounded-2xl border border-[#dcdcdc] bg-[#ffffff] p-6"
+                className="flex flex-col rounded-2xl border border-border bg-background p-6"
               >
-                <div className="flex size-11 items-center justify-center rounded-xl bg-[#eaeaea] text-[#131313]">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
                   <Icon className="size-5" />
                 </div>
-                <h3 className="font-bricolage mt-5 text-lg font-semibold tracking-tight text-[#131313]">
+                <h3 className="font-bricolage mt-5 text-lg font-semibold tracking-tight text-foreground">
                   {title}
                 </h3>
-                <p className="mt-2 text-sm leading-6 text-[#131313]/65">
+                <p className="mt-2 text-sm leading-6 text-foreground/65">
                   {description}
                 </p>
                 <div className="relative mt-6 flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-xl bg-[url('/img/landing/feature-bg.jpg')] bg-cover bg-center px-5 sm:aspect-[16/10]">
@@ -1369,7 +1397,7 @@ const LandingPage = () => {
 
       <SectionDivider />
 
-      <section id="use-cases" className="bg-[#ffffff] px-4 py-20 sm:px-6">
+      <section id="use-cases" className="bg-background px-4 py-20 sm:px-6">
         <div className="mx-auto max-w-5xl">
           <motion.div
             className="max-w-xl"
@@ -1378,11 +1406,11 @@ const LandingPage = () => {
             viewport={{ once: true, margin: "-100px" }}
             variants={riseVariants}
           >
-            <p className="text-sm font-medium text-[#131313]/60">Use cases</p>
-            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-[#131313] sm:text-3xl">
+            <p className="text-sm font-medium text-foreground/60">Use cases</p>
+            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Built for how you actually work.
             </h2>
-            <p className="mt-3 text-base leading-7 text-[#131313]/70">
+            <p className="mt-3 text-base leading-7 text-foreground/70">
               From solo creators to compliance-sensitive teams, here is who
               records with Openside.
             </p>
@@ -1401,7 +1429,7 @@ const LandingPage = () => {
 
       <SectionDivider />
 
-      <section id="privacy" className="bg-[#ffffff] px-4 py-20 sm:px-6">
+      <section id="privacy" className="bg-background px-4 py-20 sm:px-6">
         <div className="mx-auto max-w-5xl">
           <motion.div
             className="max-w-xl"
@@ -1410,11 +1438,11 @@ const LandingPage = () => {
             viewport={{ once: true, margin: "-100px" }}
             variants={riseVariants}
           >
-            <p className="text-sm font-medium text-[#131313]/60">Privacy</p>
-            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-[#131313] sm:text-3xl">
+            <p className="text-sm font-medium text-foreground/60">Privacy</p>
+            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Your recordings stay yours.
             </h2>
-            <p className="mt-3 text-base leading-7 text-[#131313]/70">
+            <p className="mt-3 text-base leading-7 text-foreground/70">
               Two things matter here: keeping your recordings safe, and letting
               you run the whole thing yourself. Here is how each works.
             </p>
@@ -1429,25 +1457,25 @@ const LandingPage = () => {
           >
             <motion.div
               variants={riseVariants}
-              className="rounded-2xl border border-[#dcdcdc] bg-[#ffffff] p-6 sm:p-8"
+              className="rounded-2xl border border-border bg-background p-6 sm:p-8"
             >
-              <h3 className="font-bricolage text-lg font-semibold tracking-tight text-[#131313]">
+              <h3 className="font-bricolage text-lg font-semibold tracking-tight text-foreground">
                 Your recordings
               </h3>
-              <p className="mt-1 text-sm leading-6 text-[#131313]/60">
+              <p className="mt-1 text-sm leading-6 text-foreground/60">
                 From the moment you hit record to the moment you share.
               </p>
               <ul className="mt-6 space-y-6">
                 {recordingPoints.map(({ icon: Icon, title, description }) => (
                   <li key={title} className="flex gap-4">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#d3e0f5]/45 text-[#0041aa]">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
                       <Icon className="size-5" />
                     </div>
                     <div>
-                      <h4 className="font-bricolage text-base font-medium text-[#131313]">
+                      <h4 className="font-bricolage text-base font-medium text-foreground">
                         {title}
                       </h4>
-                      <p className="mt-1 text-sm leading-6 text-[#131313]/65">
+                      <p className="mt-1 text-sm leading-6 text-foreground/65">
                         {description}
                       </p>
                     </div>
@@ -1458,25 +1486,25 @@ const LandingPage = () => {
 
             <motion.div
               variants={riseVariants}
-              className="rounded-2xl border border-[#dcdcdc] bg-[#ffffff] p-6 sm:p-8"
+              className="rounded-2xl border border-border bg-background p-6 sm:p-8"
             >
-              <h3 className="font-bricolage text-lg font-semibold tracking-tight text-[#131313]">
+              <h3 className="font-bricolage text-lg font-semibold tracking-tight text-foreground">
                 Self-hosting and keys
               </h3>
-              <p className="mt-1 text-sm leading-6 text-[#131313]/60">
+              <p className="mt-1 text-sm leading-6 text-foreground/60">
                 Run Openside on your own infrastructure, with your own keys.
               </p>
               <ul className="mt-6 space-y-6">
                 {selfHostPoints.map(({ icon: Icon, title, description }) => (
                   <li key={title} className="flex gap-4">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#d3e0f5]/45 text-[#0041aa]">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
                       <Icon className="size-5" />
                     </div>
                     <div>
-                      <h4 className="font-bricolage text-base font-medium text-[#131313]">
+                      <h4 className="font-bricolage text-base font-medium text-foreground">
                         {title}
                       </h4>
-                      <p className="mt-1 text-sm leading-6 text-[#131313]/65">
+                      <p className="mt-1 text-sm leading-6 text-foreground/65">
                         {description}
                       </p>
                     </div>
@@ -1490,7 +1518,7 @@ const LandingPage = () => {
 
       <SectionDivider />
 
-      <section id="pricing" className="bg-[#ffffff] px-4 py-20 sm:px-6">
+      <section id="pricing" className="bg-background px-4 py-20 sm:px-6">
         <div className="mx-auto max-w-5xl">
           <motion.div
             className="max-w-xl"
@@ -1499,11 +1527,11 @@ const LandingPage = () => {
             viewport={{ once: true, margin: "-100px" }}
             variants={riseVariants}
           >
-            <p className="text-sm font-medium text-[#131313]/60">Pricing</p>
-            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-[#131313] sm:text-3xl">
+            <p className="text-sm font-medium text-foreground/60">Pricing</p>
+            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Simple pricing that scales with you.
             </h2>
-            <p className="mt-3 text-base leading-7 text-[#131313]/70">
+            <p className="mt-3 text-base leading-7 text-foreground/70">
               Self-host it for free, or let us handle the infrastructure. No
               hidden fees, cancel anytime.
             </p>
@@ -1520,10 +1548,10 @@ const LandingPage = () => {
               <motion.div
                 key={plan.name}
                 variants={riseVariants}
-                className={`flex flex-col rounded-2xl border p-6 text-[#131313] ${
+                className={`flex flex-col rounded-2xl border p-6 text-foreground ${
                   plan.featured
-                    ? "border-[#d3e0f5] bg-[#ebf0f8] shadow-[0_12px_34px_rgba(0,65,170,0.14)] ring-1 ring-[#d3e0f5]"
-                    : "border-[#dcdcdc] bg-[#ffffff]"
+                    ? "border-(--landing-brand-tint) bg-(--landing-brand-soft) shadow-[0_12px_34px_rgba(0,65,170,0.14)] ring-1 ring-(--landing-brand-tint)"
+                    : "border-border bg-background"
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -1531,7 +1559,7 @@ const LandingPage = () => {
                     {plan.name}
                   </h3>
                   {plan.featured && (
-                    <span className="rounded-full bg-[#d3e0f5] px-2.5 py-1 text-xs font-medium text-[#0041aa]">
+                    <span className="rounded-full bg-(--landing-brand-tint) px-2.5 py-1 text-xs font-medium text-(--landing-brand-text)">
                       Popular
                     </span>
                   )}
@@ -1542,13 +1570,13 @@ const LandingPage = () => {
                     {plan.price}
                   </span>
                   {plan.priceSuffix && (
-                    <span className="text-sm text-[#131313]/55">
+                    <span className="text-sm text-foreground/55">
                       {plan.priceSuffix}
                     </span>
                   )}
                 </div>
 
-                <p className="mt-3 text-sm leading-6 text-[#131313]/65">
+                <p className="mt-3 text-sm leading-6 text-foreground/65">
                   {plan.description}
                 </p>
 
@@ -1560,10 +1588,10 @@ const LandingPage = () => {
                     >
                       <Check
                         className={`mt-0.5 size-4 shrink-0 ${
-                          plan.featured ? "text-[#0041aa]" : "text-[#131313]"
+                          plan.featured ? "text-(--landing-brand-text)" : "text-foreground"
                         }`}
                       />
-                      <span className="text-[#131313]/75">{feature}</span>
+                      <span className="text-foreground/75">{feature}</span>
                     </li>
                   ))}
                 </ul>
@@ -1572,10 +1600,10 @@ const LandingPage = () => {
                   label={plan.cta}
                   isPro={plan.name === "Pro"}
                   onOpenAuth={openAuth}
-                  className={`mt-auto w-full cursor-pointer rounded-lg px-4 py-2.5 text-sm font-medium text-[#ffffff] transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+                  className={`mt-auto w-full cursor-pointer rounded-lg px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
                     plan.featured
-                      ? "bg-[#0041aa] hover:bg-[#0041aa]/90"
-                      : "bg-[#131313] hover:bg-[#131313]/90"
+                      ? "bg-[#0041aa] text-white hover:bg-[#0041aa]/90"
+                      : "bg-foreground text-background hover:bg-foreground/90"
                   }`}
                 />
               </motion.div>
@@ -1586,7 +1614,7 @@ const LandingPage = () => {
 
       <SectionDivider />
 
-      <section id="faq" className="bg-[#ffffff] px-4 py-20 sm:px-6">
+      <section id="faq" className="bg-background px-4 py-20 sm:px-6">
         <motion.div
           className="mx-auto grid max-w-5xl gap-10 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] md:gap-16"
           initial="hidden"
@@ -1595,17 +1623,17 @@ const LandingPage = () => {
           variants={containerVariants}
         >
           <motion.div variants={riseVariants}>
-            <p className="text-sm font-medium text-[#131313]/60">
+            <p className="text-sm font-medium text-foreground/60">
               FAQ
             </p>
-            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-[#131313] sm:text-3xl">
+            <h2 className="font-bricolage mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Everything you need to know before you record.
             </h2>
           </motion.div>
 
           <motion.div
             variants={riseVariants}
-            className="divide-y divide-[#dcdcdc] border-y border-[#dcdcdc]"
+            className="divide-y divide-border border-y border-border"
           >
             {faqs.map(({ question, answer }, index) => {
               const isOpen = openFaq === index;
@@ -1615,11 +1643,11 @@ const LandingPage = () => {
                     type="button"
                     onClick={() => setOpenFaq(isOpen ? null : index)}
                     aria-expanded={isOpen}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-4 text-left text-base font-medium text-[#131313] transition-colors hover:text-[#0041aa]"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-4 text-left text-base font-medium text-foreground transition-colors hover:text-(--landing-brand-text)"
                   >
                     {question}
                     <span
-                      className={`text-xl font-normal text-[#131313]/55 transition-[transform,color] duration-300 group-hover:text-[#0041aa] ${
+                      className={`text-xl font-normal text-foreground/55 transition-[transform,color] duration-300 group-hover:text-(--landing-brand-text) ${
                         isOpen ? "rotate-45" : ""
                       }`}
                     >
@@ -1634,7 +1662,7 @@ const LandingPage = () => {
                     }`}
                   >
                     <div className="overflow-hidden">
-                      <p className="max-w-xl pt-3 text-sm leading-6 text-[#131313]/65">
+                      <p className="max-w-xl pt-3 text-sm leading-6 text-foreground/65">
                         {answer}
                       </p>
                     </div>
@@ -1749,7 +1777,10 @@ const LandingPage = () => {
             © {new Date().getFullYear()} Openside. Open source under the MIT
             License.
           </p>
-          <p className="text-white/50">Built for creators who own their footage.</p>
+          <div className="flex items-center gap-4">
+            <p className="text-white/50">Built for creators who own their footage.</p>
+            <ThemeSwitcher />
+          </div>
         </motion.div>
       </footer>
 
@@ -1758,7 +1789,6 @@ const LandingPage = () => {
         mode={authMode}
         onModeChange={setAuthMode}
         onClose={() => setAuthOpen(false)}
-        forceLight
       />
     </div>
   );

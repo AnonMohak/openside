@@ -70,6 +70,39 @@
   --info: #38bdf8;
 }
 
+/* Landing page palette. Follows the app theme (system by default). */
+.landing {
+  --background: #ffffff;
+  --foreground: #131313;
+  --primary: #f0f0f0;
+  --muted: #e2e2e2;
+  --border: #dcdcdc;
+  --landing-chip: #eaeaea;
+  --landing-line: #ececec;
+  --landing-faint: #e6e6e6;
+  --landing-brand-tint: #d3e0f5;
+  --landing-brand-soft: #ebf0f8;
+  --landing-brand-mid: #ccd9ee;
+  --landing-brand-text: #0041aa;
+  --selection-background: var(--foreground);
+  --selection-text: var(--background);
+}
+
+.dark .landing {
+  --background: #0c0c0d;
+  --foreground: #f2f2f3;
+  --primary: #161618;
+  --muted: #232326;
+  --border: #29292d;
+  --landing-chip: #1f1f22;
+  --landing-line: #1c1c1f;
+  --landing-faint: #222225;
+  --landing-brand-tint: #15294d;
+  --landing-brand-soft: #0d1830;
+  --landing-brand-mid: #1b3566;
+  --landing-brand-text: #7ea6ff;
+}
+
 @theme inline {
   /* Neutrals */
   --color-background: var(--background);

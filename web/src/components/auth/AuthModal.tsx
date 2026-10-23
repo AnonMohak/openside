@@ -23,7 +23,6 @@ interface AuthModalProps {
   mode: AuthMode;
   onModeChange: (mode: AuthMode) => void;
   onClose: () => void;
-  forceLight?: boolean;
 }
 
 const inputClass =
@@ -34,7 +33,6 @@ const AuthModal = ({
   mode,
   onModeChange,
   onClose,
-  forceLight = false,
 }: AuthModalProps) => {
   const {
     loginWithGoogle,
@@ -257,9 +255,7 @@ const AuthModal = ({
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             onClick={(event) => event.stopPropagation()}
-            className={`relative w-full max-w-[360px] overflow-hidden rounded-xl shadow-2xl shadow-black/20 ${
-              forceLight ? "bg-[#ffffff]" : "bg-background dark:bg-black"
-            }`}
+            className="relative w-full max-w-[360px] overflow-hidden rounded-xl bg-background shadow-2xl shadow-black/20 dark:bg-black"
           >
             <motion.div style={{ height: contentHeight }}>
               <div ref={contentRef} className="p-6">
