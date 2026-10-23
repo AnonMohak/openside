@@ -111,7 +111,7 @@ does not poll Redis or run recurring database sweeps - the maintenance cron
 
 **Frontend** - React 19 · Vite · TypeScript · Tailwind · TanStack Query · React Router · Framer Motion · cmdk · LiveKit components · Socket.IO client · Clerk · Cloudflare Workers
 
-**Backend (`core`)** - Node · Express 5 · TypeScript · Prisma 7 (PostgreSQL) · BullMQ + Redis · LiveKit Server SDK · `ffmpeg-static` · AWS S3 SDK (R2) · Socket.IO · Clerk · Nodemailer · Polar (billing)
+**Backend (`core`)** - Node · Express 5 · TypeScript · Prisma 7 (PostgreSQL) · BullMQ + Redis · LiveKit Server SDK · `ffmpeg-static` · AWS S3 SDK (R2) · Socket.IO · Clerk · Resend · Polar (billing)
 
 ---
 

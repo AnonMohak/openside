@@ -1,29 +1,49 @@
-import nodemailer, { type Transporter } from "nodemailer";
 import { buildIcs } from "../lib/ics";
 
 // Fallback when the scheduler doesn't pass an explicit meeting length.
 const DEFAULT_MEETING_DURATION_MINUTES = 60;
 
-let transporter: Transporter | null = null;
+const RESEND_API_URL = "https://api.resend.com/emails";
 
-// Build (once) an SMTP transport from env. Returns null when SMTP isn't
-// configured so invite sending is skipped instead of crashing the schedule call.
-function getTransport(): Transporter | null {
-	const host = process.env.SMTP_HOST;
-	const user = process.env.SMTP_USER;
-	const pass = process.env.SMTP_PASS;
-	if (!host || !user || !pass) return null;
-	if (!transporter) {
-		const port = Number(process.env.SMTP_PORT) || 465;
-		transporter = nodemailer.createTransport({
-			host,
-			port,
-			// Port 465 uses implicit TLS (SSL); 587 and others upgrade via STARTTLS.
-			secure: port === 465,
-			auth: { user, pass },
-		});
+interface EmailAttachment {
+	filename: string;
+	/** Base64-encoded file content. */
+	content: string;
+	content_type?: string;
+}
+
+interface EmailMessage {
+	from: string;
+	to: string;
+	subject: string;
+	html: string;
+	attachments?: EmailAttachment[];
+}
+
+// Resend credentials from env. Returns null when they aren't configured so
+// invite sending is skipped instead of crashing the schedule call.
+function getResendConfig(): { apiKey: string; from: string } | null {
+	const apiKey = process.env.RESEND_API_KEY;
+	const from = process.env.EMAIL_FROM;
+	if (!apiKey || !from) return null;
+	return { apiKey, from };
+}
+
+// Send one email through Resend's REST API. Throws on a non-2xx response so a
+// failed send (bad key, unverified domain, rejected recipient) is never
+// miscounted as sent.
+async function sendEmail(apiKey: string, message: EmailMessage): Promise<void> {
+	const res = await fetch(RESEND_API_URL, {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${apiKey}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(message),
+	});
+	if (!res.ok) {
+		throw new Error(`Resend ${res.status}: ${await res.text()}`);
 	}
-	return transporter;
 }
 
 interface ScheduledInviteParams {
@@ -72,8 +92,8 @@ function inviteHtml(params: {
 
 /**
  * Email each invitee a meeting invite with a join link and an .ics attachment.
- * Best-effort and non-fatal: if SMTP isn't configured (no SMTP_* vars) or a
- * send fails, we log and move on so scheduling the meeting still succeeds. The
+ * Best-effort and non-fatal: if Resend isn't configured (no RESEND_API_KEY /
+ * EMAIL_FROM) or a send fails, we log and move on so scheduling the meeting still succeeds. The
  * .ics attachment lets recipients add it to any calendar (Google/Apple/Outlook).
  */
 export async function sendScheduledInvites(
@@ -84,12 +104,11 @@ export async function sendScheduledInvites(
 		return { sent: 0, skipped: true };
 	}
 
-	const transport = getTransport();
-	const from = process.env.EMAIL_FROM;
+	const resend = getResendConfig();
 
-	if (!transport || !from) {
+	if (!resend) {
 		console.warn(
-			"[email] SMTP_* or EMAIL_FROM not set - skipping invite emails.",
+			"[email] RESEND_API_KEY or EMAIL_FROM not set - skipping invite emails.",
 		);
 		return { sent: 0, skipped: true };
 	}
@@ -126,11 +145,8 @@ export async function sendScheduledInvites(
 	await Promise.all(
 		invitees.map(async (to) => {
 			try {
-				// nodemailer rejects the promise on a failed send, so a thrown error
-				// (bad auth, recipient refused, etc.) lands in the catch below and is
-				// never miscounted as sent.
-				await transport.sendMail({
-					from,
+				await sendEmail(resend.apiKey, {
+					from: resend.from,
 					to,
 					subject: `Invite: ${params.title} - ${when}`,
 					html,
@@ -138,8 +154,7 @@ export async function sendScheduledInvites(
 						{
 							filename: "invite.ics",
 							content: icsBase64,
-							encoding: "base64",
-							contentType: "text/calendar; method=REQUEST",
+							content_type: "text/calendar; method=REQUEST",
 						},
 					],
 				});
@@ -181,7 +196,7 @@ function liveInviteHtml(params: {
 /**
  * Email a single recipient an invite to join a space right now (no scheduled
  * time, no .ics - just a join link). Best-effort: returns { skipped: true }
- * when SMTP isn't configured, and throws only on a genuine send failure so the
+ * when Resend isn't configured, and throws only on a genuine send failure so the
  * caller can surface an error to the host.
  */
 export async function sendSpaceInvite(
@@ -192,12 +207,11 @@ export async function sendSpaceInvite(
 		return { sent: 0, skipped: true };
 	}
 
-	const transport = getTransport();
-	const from = process.env.EMAIL_FROM;
+	const resend = getResendConfig();
 
-	if (!transport || !from) {
+	if (!resend) {
 		console.warn(
-			"[email] SMTP_* or EMAIL_FROM not set - skipping invite email.",
+			"[email] RESEND_API_KEY or EMAIL_FROM not set - skipping invite email.",
 		);
 		return { sent: 0, skipped: true };
 	}
@@ -211,8 +225,8 @@ export async function sendSpaceInvite(
 		hostName: params.hostName,
 	});
 
-	await transport.sendMail({
-		from,
+	await sendEmail(resend.apiKey, {
+		from: resend.from,
 		to,
 		subject: `${params.hostName} invited you to ${params.title}`,
 		html,
