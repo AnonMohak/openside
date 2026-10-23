@@ -173,7 +173,7 @@ function inviteLayout(params: {
           <tr>
             <td>
               <a href="${PUBLIC_SITE_URL}" style="text-decoration:none;">
-                <img src="${PUBLIC_SITE_URL}/apple-touch-icon.png" width="28" height="28" alt="Openside" style="display:block;border:0;border-radius:7px;">
+                <img src="${PUBLIC_SITE_URL}/logo/logo-light.png" width="32" height="37" alt="Openside" style="display:block;border:0;">
               </a>
               <h1 style="margin:32px 0 0;font-family:${HEADING_STACK};font-size:24px;line-height:30px;font-weight:700;letter-spacing:-0.02em;color:${COLORS.fg};">${title}</h1>
               ${body}
