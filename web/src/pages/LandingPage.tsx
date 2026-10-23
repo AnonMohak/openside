@@ -39,6 +39,7 @@ import {
 import { BsFillRecordCircleFill, BsFillTelephoneFill } from "react-icons/bs";
 import { FaGithub } from "react-icons/fa";
 import { FaXTwitter } from "react-icons/fa6";
+import { SiLoom } from "react-icons/si";
 import { FiUploadCloud, FiVideo } from "react-icons/fi";
 import { LuScreenShare } from "react-icons/lu";
 import { RiMicLine } from "react-icons/ri";
@@ -55,6 +56,20 @@ import AuthModal, { type AuthMode } from "@/components/auth/AuthModal";
 
 // Snappy easeOutExpo curve so things decelerate cleanly instead of drifting.
 const EASE = [0.16, 1, 0.3, 1] as const;
+
+// Riverside's logo mark (not in react-icons), taken from their site's navbar SVG.
+function RiversideIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 25.14 25.14"
+      fill="currentColor"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M22.14 0H3C1.34 0 0 1.34 0 3V22.14C0 23.8 1.34 25.14 3 25.14H22.14C23.8 25.14 25.14 23.8 25.14 22.14V3C25.14 1.34 23.8 0 22.14 0ZM19 12.79C18.8 13.37 18.46 14.23 17.96 15.04C17.43 15.91 16.84 16.51 16.22 16.81C15.9 16.97 15.57 17.05 15.24 17.05C15.11 17.05 14.98 17.04 14.86 17.01C14.4 16.92 13.96 16.69 13.56 16.3C12.86 15.62 12.26 14.47 11.71 12.77C11.16 11.06 10.66 10.34 10.34 10.03C10.18 9.88 10.08 9.84 10.03 9.83C10 9.83 9.95 9.83 9.85 9.87C9.57 10 9.22 10.38 8.88 10.92C8.55 11.44 8.23 12.1 7.98 12.8C7.8 13.3 7.25 13.56 6.74 13.38C6.49 13.29 6.29 13.12 6.18 12.88C6.07 12.65 6.06 12.39 6.14 12.15C6.35 11.57 6.71 10.71 7.22 9.9C7.77 9.03 8.37 8.44 9 8.14C9.45 7.93 9.91 7.86 10.37 7.94C10.84 8.02 11.28 8.26 11.68 8.64C12.39 9.32 13 10.48 13.55 12.18C14.1 13.89 14.59 14.62 14.91 14.92C15.07 15.08 15.17 15.11 15.2 15.11C15.22 15.11 15.26 15.12 15.35 15.07C15.62 14.94 15.96 14.56 16.28 14.03C16.6 13.51 16.9 12.84 17.14 12.15C17.31 11.65 17.86 11.38 18.37 11.55C18.62 11.63 18.82 11.81 18.94 12.04C19.05 12.27 19.07 12.53 18.99 12.77L19 12.79Z" />
+    </svg>
+  );
+}
 
 const features = [
   {
@@ -1111,25 +1126,25 @@ const LandingPage = () => {
             >
               <a
                 href="#features"
-                className="rounded-full px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-lg px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
               >
                 Features
               </a>
               <a
                 href="#use-cases"
-                className="rounded-full px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-lg px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
               >
                 Use cases
               </a>
               <a
                 href="#privacy"
-                className="rounded-full px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-lg px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
               >
                 Privacy
               </a>
               <a
                 href="#pricing"
-                className="rounded-full px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-lg px-3 py-2 transition-colors hover:bg-white/10 hover:text-white"
               >
                 Pricing
               </a>
@@ -1147,7 +1162,7 @@ const LandingPage = () => {
                 onClick={() => setMobileMenuOpen((open) => !open)}
                 aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
                 aria-expanded={mobileMenuOpen}
-                className="flex size-9 cursor-pointer items-center justify-center rounded-full text-white transition-colors hover:bg-white/10 md:hidden"
+                className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-white transition-colors hover:bg-white/10 md:hidden"
               >
                 {mobileMenuOpen ? (
                   <X className="size-5" />
@@ -1229,13 +1244,30 @@ const LandingPage = () => {
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="relative z-10 flex w-full max-w-5xl flex-col items-start gap-3 pt-6 pb-20 text-left sm:pt-8"
+          className="relative z-10 flex w-full max-w-5xl flex-col items-start gap-3 pt-2 pb-20 text-left sm:pt-4"
         >
+          <motion.span
+            variants={riseVariants}
+            className="inline-flex select-none items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 sm:text-sm"
+          >
+            <FaGithub className="size-3.5" />
+            Open-source alternative to
+            <span className="inline-flex items-center gap-1 text-white">
+              <RiversideIcon className="size-3.5" />
+              Riverside
+            </span>
+            and
+            <span className="inline-flex items-center gap-1 text-white">
+              <SiLoom className="size-3.5" />
+              Loom
+            </span>
+          </motion.span>
+
           <motion.h1
             variants={riseVariants}
             className="font-bricolage max-w-4xl text-3xl font-semibold leading-[1.2] text-white sm:text-[2.5rem]"
           >
-            Record high quality podcasts, interviews, and videos right from your
+            Record high quality podcasts, interviews, and calls right from your
             browser
           </motion.h1>
 
@@ -1253,13 +1285,13 @@ const LandingPage = () => {
           >
             <StartRecordingCTA
               onOpenAuth={openAuth}
-              className="flex select-none items-center gap-2 rounded-full bg-white px-4.5 py-2.5 text-sm font-semibold text-[#131313] transition-colors hover:bg-white/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
+              className="flex select-none items-center gap-2 rounded-lg bg-white px-4.5 py-2.5 text-[0.9375rem] font-semibold text-[#131313] transition-colors hover:bg-white/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
             />
             <a
               href="https://github.com/rinkitadhana/openside"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex select-none cursor-pointer items-center gap-2 rounded-full bg-[#131313] px-4.5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#131313]/90"
+              className="flex select-none cursor-pointer items-center gap-2 rounded-lg bg-[#131313] px-4.5 py-2.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#131313]/90"
             >
               <FaGithub className="size-4" />
               Star on GitHub
@@ -1646,7 +1678,7 @@ const LandingPage = () => {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub"
-                className="flex size-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white transition-colors hover:bg-white/15"
+                className="flex size-10 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-white transition-colors hover:bg-white/15"
               >
                 <FaGithub className="size-4" />
               </a>
@@ -1655,7 +1687,7 @@ const LandingPage = () => {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="X (Twitter)"
-                className="flex size-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white transition-colors hover:bg-white/15"
+                className="flex size-10 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-white transition-colors hover:bg-white/15"
               >
                 <FaXTwitter className="size-4" />
               </a>

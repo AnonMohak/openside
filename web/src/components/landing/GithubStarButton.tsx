@@ -49,7 +49,7 @@ const GithubStarButton = () => {
       rel="noopener noreferrer"
       aria-label="GitHub repository"
       title="GitHub repository"
-      className="flex items-center gap-2 rounded-full border border-border bg-primary px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+      className="flex items-center gap-2 rounded-lg border border-border bg-primary px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
     >
       <FaGithub className="size-4" />
       <span className="flex items-center gap-1 border-l border-border pl-2 tabular-nums">
