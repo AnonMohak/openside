@@ -23,7 +23,7 @@ const ActionCard = ({
     <button
       type="button"
       onClick={onClick}
-      className={`group relative flex cursor-pointer flex-col items-start gap-3 rounded-xl border border-border bg-white p-4 text-left shadow-sm transition-colors dark:bg-[#232327] dark:hover:bg-[#2a2a2f] ${className}`}
+      className={`group relative flex cursor-pointer flex-col items-start gap-3 rounded-xl border border-border bg-white p-4 text-left transition-colors dark:bg-[#232327] dark:hover:bg-[#2a2a2f] ${className}`}
     >
       <span className="flex w-full items-start justify-between">
         <span
