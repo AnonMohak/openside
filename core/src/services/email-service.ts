@@ -72,18 +72,20 @@ function formatWhen(date: Date): string {
 	});
 }
 
-// The app's dark theme tokens (web/src/styles/globals.css).
+// The app's light theme tokens (web/src/styles/globals.css).
 const COLORS = {
-	canvas: "#0a0a0b",
-	border: "#2b2b31",
-	fg: "#f4f4f5",
-	fgMuted: "#a9a9ae",
-	fgSubtle: "#7b7b81",
-	fgFaint: "#505056",
+	canvas: "#ffffff",
+	border: "#dededf",
+	fg: "#131316",
+	fgMuted: "#5c5c60",
+	fgSubtle: "#8a8a8d",
+	fgFaint: "#a8a8ab",
 	brand: "#0041aa",
-	// Brand lifted for text on black; #0041aa itself is too dark to read there.
-	brandText: "#7aa2ff",
 };
+
+// Always the public site, never WEB_URL: mail clients fetch images from the
+// open internet, so a localhost or private URL would show a broken image.
+const PUBLIC_SITE_URL = "https://openside.pro";
 const FONT_STACK =
 	"'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const HEADING_STACK = `'Bricolage Grotesque',${FONT_STACK}`;
@@ -140,7 +142,6 @@ function inviteLayout(params: {
 	joinUrl: string;
 	footerNote: string;
 }): string {
-	const base = webBaseUrl();
 	const { preheader, title, lines, description, joinUrl, footerNote } = params;
 	const safeUrl = escapeHtml(joinUrl);
 	const paragraph = (html: string, color: string = COLORS.fgMuted) =>
@@ -158,8 +159,8 @@ function inviteLayout(params: {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="supported-color-schemes" content="dark">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700&family=Public+Sans:wght@400;600&display=swap" rel="stylesheet">
   <title>${title}</title>
 </head>
@@ -171,8 +172,8 @@ function inviteLayout(params: {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">
           <tr>
             <td>
-              <a href="${escapeHtml(base || "https://openside.pro")}" style="text-decoration:none;">
-                <img src="${escapeHtml(base)}/apple-touch-icon.png" width="28" height="28" alt="Openside" style="display:block;border:0;border-radius:7px;">
+              <a href="${PUBLIC_SITE_URL}" style="text-decoration:none;">
+                <img src="${PUBLIC_SITE_URL}/apple-touch-icon.png" width="28" height="28" alt="Openside" style="display:block;border:0;border-radius:7px;">
               </a>
               <h1 style="margin:32px 0 0;font-family:${HEADING_STACK};font-size:24px;line-height:30px;font-weight:700;letter-spacing:-0.02em;color:${COLORS.fg};">${title}</h1>
               ${body}
@@ -184,7 +185,7 @@ function inviteLayout(params: {
                 </tr>
               </table>
               <p style="margin:16px 0 0;font-family:${FONT_STACK};font-size:13px;line-height:20px;color:${COLORS.fgSubtle};">
-                Or open <a href="${safeUrl}" style="color:${COLORS.brandText};text-decoration:none;word-break:break-all;">${safeUrl}</a>
+                Or open <a href="${safeUrl}" style="color:${COLORS.brand};text-decoration:none;word-break:break-all;">${safeUrl}</a>
               </p>
               <p style="margin:40px 0 0;padding-top:20px;border-top:1px solid ${COLORS.border};font-family:${FONT_STACK};font-size:12px;line-height:19px;color:${COLORS.fgFaint};">
                 ${footerNote}
