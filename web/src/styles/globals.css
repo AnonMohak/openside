@@ -70,6 +70,16 @@
   --info: #38bdf8;
 }
 
+/* Fills a use-case progress segment on the landing page. */
+@keyframes usecase-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* Landing page palette. Follows the app theme (system by default). */
 .landing {
   --background: #ffffff;
