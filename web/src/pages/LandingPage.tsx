@@ -714,9 +714,10 @@ const TrackDownloadDemo = () => {
 
 // Waypoints the cursor visits across the recorded screen (content-area coords).
 const SCREEN_POINTS = [
-  { x: 58, y: 44 },
-  { x: 196, y: 84 },
+  { x: 140, y: 46 },
+  { x: 314, y: 20 },
 ];
+
 
 // Live, code-only demo for the "Screen recorder" feature: a browser window being
 // recorded Loom-style — a REC timer, a camera bubble, and a cursor that moves
@@ -773,11 +774,18 @@ const ScreenRecorderDemo = () => {
 
       {/* Recorded screen content. */}
       <div className="relative aspect-[16/9] bg-gradient-to-br from-(--landing-brand-soft) to-(--landing-brand-mid)">
-        {/* Faux page content. */}
-        <div className="absolute left-4 top-4 space-y-2">
-          <div className="h-2.5 w-28 rounded-full bg-white/70" />
-          <div className="h-2 w-40 rounded-full bg-white/50" />
-          <div className="h-2 w-36 rounded-full bg-white/50" />
+        {/* Faux page being recorded: a header and some text. */}
+        <div className="absolute inset-0 flex flex-col gap-2.5 p-3">
+          <div className="flex h-4 items-center justify-between">
+            <div className="h-2.5 w-24 rounded-full bg-white/85 dark:bg-white/35" />
+            <span className="flex h-4 w-12 items-center justify-center rounded bg-[#0041aa] text-[0.45rem] font-semibold text-white">
+              Publish
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            <div className="h-2 w-40 rounded-full bg-white/60 dark:bg-white/20" />
+            <div className="h-2 w-32 rounded-full bg-white/60 dark:bg-white/20" />
+          </div>
         </div>
 
         {/* REC indicator + timer. */}
@@ -788,6 +796,13 @@ const ScreenRecorderDemo = () => {
             transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
           />
           REC 00:{ss}
+          <span className="mx-0.5 h-3 w-px bg-black/10" />
+          {/* Pause and stop controls. */}
+          <span className="flex items-center gap-[2px]">
+            <span className="h-2 w-[2px] rounded-full bg-[#131313]/70" />
+            <span className="h-2 w-[2px] rounded-full bg-[#131313]/70" />
+          </span>
+          <span className="ml-1 size-2 rounded-[2px] bg-red-500" />
         </div>
 
         {/* Click ripple at the current waypoint. */}
@@ -813,9 +828,12 @@ const ScreenRecorderDemo = () => {
 
         {/* Presenter camera, shown as a square video box on the right. */}
         <div className="absolute bottom-2 right-2 flex size-16 items-center justify-center overflow-hidden rounded-lg bg-white/85 shadow-[0_2px_10px_rgba(0,0,0,0.06)] ring-1 ring-black/5 backdrop-blur-md">
-          <span className="flex size-7 items-center justify-center rounded-full bg-gradient-to-br from-[#935ac9] to-[#5b6cff] text-xs font-semibold text-white">
-            R
-          </span>
+          <img
+            src="/img/landing/screen-recorder-user.webp"
+            alt=""
+            loading="lazy"
+            className="size-8 select-none rounded-full object-cover"
+          />
         </div>
       </div>
     </div>
