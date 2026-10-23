@@ -17,6 +17,8 @@ interface EmailMessage {
 	to: string;
 	subject: string;
 	html: string;
+	/** Plain-text alternative for clients that don't render HTML. */
+	text: string;
 	attachments?: EmailAttachment[];
 }
 
@@ -70,24 +72,175 @@ function formatWhen(date: Date): string {
 	});
 }
 
-function inviteHtml(params: {
+// The app's dark theme tokens (web/src/styles/globals.css).
+const COLORS = {
+	canvas: "#0a0a0b",
+	border: "#2b2b31",
+	fg: "#f4f4f5",
+	fgMuted: "#a9a9ae",
+	fgSubtle: "#7b7b81",
+	fgFaint: "#505056",
+	brand: "#0041aa",
+	// Brand lifted for text on black; #0041aa itself is too dark to read there.
+	brandText: "#7aa2ff",
+};
+const FONT_STACK =
+	"'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const HEADING_STACK = `'Bricolage Grotesque',${FONT_STACK}`;
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+function webBaseUrl(): string {
+	return (process.env.WEB_URL ?? "").replace(/\/$/, "");
+}
+
+function formatDate(date: Date): string {
+	return date.toLocaleDateString("en-US", {
+		weekday: "long",
+		month: "long",
+		day: "numeric",
+		year: "numeric",
+	});
+}
+
+function formatTimeRange(start: Date, end: Date): string {
+	const time = (date: Date, withZone: boolean) =>
+		date.toLocaleTimeString("en-US", {
+			hour: "numeric",
+			minute: "2-digit",
+			...(withZone ? { timeZoneName: "short" } : {}),
+		});
+	return `${time(start, false)} – ${time(end, true)}`;
+}
+
+function formatDuration(minutes: number): string {
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	if (hours === 0) return `${rest} min`;
+	return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`;
+}
+
+// Shared shell for every invite: logo, title, a short message, the join
+// button and a fallback link on the app's dark background. Table layout +
+// inline styles so it renders in Gmail, Outlook and Apple Mail alike.
+// Everything user-provided arrives here already escaped.
+function inviteLayout(params: {
+	preheader: string;
+	title: string;
+	/** Paragraphs under the title, as HTML. */
+	lines: string[];
+	description?: string | null;
+	joinUrl: string;
+	footerNote: string;
+}): string {
+	const base = webBaseUrl();
+	const { preheader, title, lines, description, joinUrl, footerNote } = params;
+	const safeUrl = escapeHtml(joinUrl);
+	const paragraph = (html: string, color: string = COLORS.fgMuted) =>
+		`<p style="margin:12px 0 0;font-family:${FONT_STACK};font-size:15px;line-height:24px;color:${color};">${html}</p>`;
+	const body = [
+		...lines.map((line) => paragraph(line)),
+		...(description
+			? [
+					`<p style="margin:20px 0 0;font-family:${FONT_STACK};font-size:15px;line-height:24px;color:${COLORS.fgMuted};white-space:pre-line;">${description}</p>`,
+				]
+			: []),
+	].join("\n              ");
+	return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700&family=Public+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;background:${COLORS.canvas};-webkit-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${preheader}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${COLORS.canvas}" style="background:${COLORS.canvas};">
+    <tr>
+      <td align="center" style="padding:48px 24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">
+          <tr>
+            <td>
+              <a href="${escapeHtml(base || "https://openside.pro")}" style="text-decoration:none;">
+                <img src="${escapeHtml(base)}/apple-touch-icon.png" width="28" height="28" alt="Openside" style="display:block;border:0;border-radius:7px;">
+              </a>
+              <h1 style="margin:32px 0 0;font-family:${HEADING_STACK};font-size:24px;line-height:30px;font-weight:700;letter-spacing:-0.02em;color:${COLORS.fg};">${title}</h1>
+              ${body}
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
+                <tr>
+                  <td bgcolor="${COLORS.brand}" style="border-radius:8px;">
+                    <a href="${safeUrl}" style="display:inline-block;padding:11px 22px;font-family:${FONT_STACK};font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Join meeting</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:16px 0 0;font-family:${FONT_STACK};font-size:13px;line-height:20px;color:${COLORS.fgSubtle};">
+                Or open <a href="${safeUrl}" style="color:${COLORS.brandText};text-decoration:none;word-break:break-all;">${safeUrl}</a>
+              </p>
+              <p style="margin:40px 0 0;padding-top:20px;border-top:1px solid ${COLORS.border};font-family:${FONT_STACK};font-size:12px;line-height:19px;color:${COLORS.fgFaint};">
+                ${footerNote}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+function scheduledInviteEmail(params: {
 	title: string;
 	description?: string | null;
-	when: string;
+	start: Date;
+	end: Date;
+	durationMinutes: number;
 	joinUrl: string;
 	hostName: string;
-}): string {
-	const { title, description, when, joinUrl, hostName } = params;
-	return `
-  <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;color:#111">
-    <h2 style="margin:0 0 4px">${title}</h2>
-    <p style="margin:0 0 16px;color:#555">${hostName} invited you to a meeting on Openside.</p>
-    ${description ? `<p style="margin:0 0 16px;color:#333">${description}</p>` : ""}
-    <p style="margin:0 0 8px"><strong>When:</strong> ${when}</p>
-    <a href="${joinUrl}" style="display:inline-block;margin-top:12px;background:#15803d;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Join space</a>
-    <p style="margin:16px 0 0;color:#888;font-size:13px">Or paste this link: <br/>${joinUrl}</p>
-    <p style="margin:16px 0 0;color:#aaa;font-size:12px">A calendar invite (.ics) is attached.</p>
-  </div>`;
+}): { html: string; text: string } {
+	const { start, end, durationMinutes, joinUrl } = params;
+	const title = escapeHtml(params.title);
+	const host = escapeHtml(params.hostName);
+	const date = formatDate(start);
+	const time = formatTimeRange(start, end);
+	const duration = formatDuration(durationMinutes);
+
+	const html = inviteLayout({
+		preheader: `${host} invited you to ${title} on ${date}.`,
+		title,
+		lines: [
+			`<strong style="color:${COLORS.fg};font-weight:600;">${host}</strong> invited you to a recording on Openside.`,
+			`<span style="color:${COLORS.fg};">${date}</span><br>${time} · ${duration}`,
+		],
+		description: params.description ? escapeHtml(params.description) : null,
+		joinUrl,
+		footerNote:
+			"A calendar invite is attached. If you weren't expecting this, you can ignore it.",
+	});
+
+	const text = [
+		`${params.hostName} invited you to a recording on Openside.`,
+		"",
+		params.title,
+		`When: ${date}, ${time} (${duration})`,
+		...(params.description ? ["", params.description] : []),
+		"",
+		`Join: ${joinUrl}`,
+		"",
+		"A calendar invite (.ics) is attached.",
+	].join("\n");
+
+	return { html, text };
 }
 
 /**
@@ -113,11 +266,11 @@ export async function sendScheduledInvites(
 		return { sent: 0, skipped: true };
 	}
 
-	const webUrl = (process.env.WEB_URL ?? "").replace(/\/$/, "");
-	const joinUrl = `${webUrl}/${params.joinCode}`;
+	const joinUrl = `${webBaseUrl()}/${params.joinCode}`;
 	const start = params.scheduledFor;
-	const durationMs =
-		(params.durationMinutes ?? DEFAULT_MEETING_DURATION_MINUTES) * 60 * 1000;
+	const durationMinutes =
+		params.durationMinutes ?? DEFAULT_MEETING_DURATION_MINUTES;
+	const durationMs = durationMinutes * 60 * 1000;
 	const end = new Date(start.getTime() + durationMs);
 	const when = formatWhen(start);
 
@@ -133,10 +286,12 @@ export async function sendScheduledInvites(
 	});
 
 	const icsBase64 = Buffer.from(ics, "utf-8").toString("base64");
-	const html = inviteHtml({
+	const { html, text } = scheduledInviteEmail({
 		title: params.title,
 		description: params.description,
-		when,
+		start,
+		end,
+		durationMinutes,
 		joinUrl,
 		hostName: params.hostName,
 	});
@@ -150,6 +305,7 @@ export async function sendScheduledInvites(
 					to,
 					subject: `Invite: ${params.title} - ${when}`,
 					html,
+					text,
 					attachments: [
 						{
 							filename: "invite.ics",
@@ -176,21 +332,37 @@ interface SpaceInviteParams {
 	hostName: string;
 }
 
-function liveInviteHtml(params: {
+function liveInviteEmail(params: {
 	title: string;
 	description?: string | null;
 	joinUrl: string;
 	hostName: string;
-}): string {
-	const { title, description, joinUrl, hostName } = params;
-	return `
-  <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;color:#111">
-    <h2 style="margin:0 0 4px">${title}</h2>
-    <p style="margin:0 0 16px;color:#555">${hostName} invited you to join a meeting on Openside.</p>
-    ${description ? `<p style="margin:0 0 16px;color:#333">${description}</p>` : ""}
-    <a href="${joinUrl}" style="display:inline-block;margin-top:12px;background:#15803d;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Join space</a>
-    <p style="margin:16px 0 0;color:#888;font-size:13px">Or paste this link: <br/>${joinUrl}</p>
-  </div>`;
+}): { html: string; text: string } {
+	const { joinUrl } = params;
+	const title = escapeHtml(params.title);
+	const host = escapeHtml(params.hostName);
+
+	const html = inviteLayout({
+		preheader: `${host} is waiting for you in ${title}.`,
+		title,
+		lines: [
+			`<strong style="color:${COLORS.fg};font-weight:600;">${host}</strong> invited you to join their recording on Openside. It's happening now.`,
+		],
+		description: params.description ? escapeHtml(params.description) : null,
+		joinUrl,
+		footerNote: "If you weren't expecting this, you can ignore it.",
+	});
+
+	const text = [
+		`${params.hostName} invited you to join their recording on Openside. It's happening now.`,
+		"",
+		params.title,
+		...(params.description ? ["", params.description] : []),
+		"",
+		`Join: ${joinUrl}`,
+	].join("\n");
+
+	return { html, text };
 }
 
 /**
@@ -216,9 +388,8 @@ export async function sendSpaceInvite(
 		return { sent: 0, skipped: true };
 	}
 
-	const webUrl = (process.env.WEB_URL ?? "").replace(/\/$/, "");
-	const joinUrl = `${webUrl}/${params.joinCode}`;
-	const html = liveInviteHtml({
+	const joinUrl = `${webBaseUrl()}/${params.joinCode}`;
+	const { html, text } = liveInviteEmail({
 		title: params.title,
 		description: params.description,
 		joinUrl,
@@ -230,6 +401,7 @@ export async function sendSpaceInvite(
 		to,
 		subject: `${params.hostName} invited you to ${params.title}`,
 		html,
+		text,
 	});
 
 	return { sent: 1, skipped: false };
