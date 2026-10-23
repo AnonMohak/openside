@@ -208,7 +208,9 @@ const QuickActions = () => {
                 >
                   <button
                     type="button"
-                    onClick={() => navigate("/dashboard/calendar")}
+                    // Opens the space's join link so the host can start it
+                    // (and invitees can join), same as the calendar.
+                    onClick={() => navigate(`/${space.joinCode}`)}
                     className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-3 text-left cursor-pointer"
                   >
                     <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border/50 bg-muted leading-none">
