@@ -2,12 +2,11 @@
  * Background housekeeping: recording recovery, usage metering, retention and
  * LiveKit/egress reconciliation.
  *
- * Two runners share this list. The API runs due tasks opportunistically while
- * it has traffic (no timers, so Railway Serverless can still put it to sleep),
- * and the `maintenance` cron service runs every task once on a schedule - so a
- * stuck finalize, an abandoned session or an unmetered take is recovered even
- * when nobody is using the app. Every task is safe to run concurrently with
- * itself (conditional updates, deduped queue jobs).
+ * The API runs these on a timer for as long as it's up, so a stuck finalize,
+ * an abandoned session or an unmetered take is recovered even when nobody is
+ * using the app. That needs an always-on API (not Railway Serverless). Every
+ * task is safe to run concurrently with itself (conditional updates, deduped
+ * queue jobs), so several API replicas can each run them.
  */
 
 import { expireDownloadCache } from "../services/download-cache-service.ts";
@@ -27,8 +26,6 @@ interface MaintenanceTask {
 	running: boolean;
 }
 
-// Recovery first: on a scheduled run it's the one that must not wait behind a
-// slow LiveKit call.
 const maintenanceTasks: MaintenanceTask[] = [
 	{
 		name: "Recording recovery sweep",
@@ -77,8 +74,11 @@ const maintenanceTasks: MaintenanceTask[] = [
 	},
 ];
 
-/** Kick off every task whose interval has elapsed (API: called per request). */
-export function runDueMaintenance(): void {
+/** How often the API checks for due tasks; below the shortest task interval. */
+const MAINTENANCE_TICK_MS = 15 * 1000;
+
+/** Kick off every task whose interval has elapsed. */
+function runDueMaintenance(): void {
 	const now = Date.now();
 	for (const task of maintenanceTasks) {
 		if (task.running || now < task.nextRunAt) continue;
@@ -93,32 +93,8 @@ export function runDueMaintenance(): void {
 	}
 }
 
-/** A hung task (a LiveKit call that never answers) must not stall the rest. */
-const SCHEDULED_TASK_TIMEOUT_MS = 2 * 60 * 1000;
-
-/** Run every task once, in order (the cron service). Returns the ones that failed. */
-export async function runAllMaintenance(): Promise<string[]> {
-	const failed: string[] = [];
-	for (const task of maintenanceTasks) {
-		const started = Date.now();
-		let timer: NodeJS.Timeout | null = null;
-		try {
-			await Promise.race([
-				task.run(),
-				new Promise((_, reject) => {
-					timer = setTimeout(
-						() => reject(new Error("timed out")),
-						SCHEDULED_TASK_TIMEOUT_MS,
-					);
-				}),
-			]);
-			console.log(`[Maintenance] ${task.name}: ok (${Date.now() - started}ms)`);
-		} catch (error) {
-			console.error(`[Maintenance] ${task.name} failed:`, error);
-			failed.push(task.name);
-		} finally {
-			if (timer) clearTimeout(timer);
-		}
-	}
-	return failed;
+/** Run due tasks now, then keep checking for as long as the API is up. */
+export function startMaintenance(): void {
+	runDueMaintenance();
+	setInterval(runDueMaintenance, MAINTENANCE_TICK_MS);
 }

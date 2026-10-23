@@ -62,7 +62,7 @@ export function emitRecordingCommentUpdated(
 		.emit("recording-comment-updated", comment);
 }
 
-export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
+export function initSocket(httpServer: HTTPServer) {
 	const io = new SocketIOServer(httpServer, {
 		cors: {
 			origin: process.env.WEB_URL || "http://localhost:3000",
@@ -83,11 +83,6 @@ export function initSocket(httpServer: HTTPServer, onActivity?: () => void) {
 	});
 
 	io.on("connection", (socket) => {
-		onActivity?.();
-		socket.use((_event, next) => {
-			onActivity?.();
-			next();
-		});
 		/**
 		 * EVENT: time:sync
 		 * Clock-synchronization handshake. The client sends this with an ack

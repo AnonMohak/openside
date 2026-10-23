@@ -4,7 +4,7 @@ import cors from "cors";
 import express, { type Request, type Response } from "express";
 import { adminRoutes } from "./admin/index.ts";
 import { logFfmpegAvailability } from "./lib/ffmpeg-check.ts";
-import { runDueMaintenance } from "./lib/maintenance.ts";
+import { startMaintenance } from "./lib/maintenance.ts";
 import { apiLimiter, getTrustProxyHops } from "./lib/rate-limit.ts";
 import authRouter from "./routes/auth-route.ts";
 import billingRouter from "./routes/billing-route.ts";
@@ -40,15 +40,6 @@ app.use(
 	}),
 );
 
-// Housekeeping runs opportunistically while real traffic is using the API
-// (see lib/maintenance.ts). With no HTTP or Socket.IO activity, this creates no
-// timers or outbound traffic, allowing Railway Serverless to put the API to
-// sleep - the scheduled `maintenance` service covers that time.
-app.use((_req, _res, next) => {
-	runDueMaintenance();
-	next();
-});
-
 // LiveKit webhooks must be mounted BEFORE express.json(): the WebhookReceiver
 // verifies the signature against the raw request body, so it cannot be parsed.
 app.use("/api/livekit", livekitRouter);
@@ -80,9 +71,10 @@ app.use("/admin/v1", adminRoutes);
 
 const httpServer = createServer(app);
 
-initSocket(httpServer, runDueMaintenance);
+initSocket(httpServer);
 
 httpServer.listen(PORT, () => {
 	console.log(`Server running on http://localhost:${PORT} :D`);
 	logFfmpegAvailability("API");
+	startMaintenance();
 });
