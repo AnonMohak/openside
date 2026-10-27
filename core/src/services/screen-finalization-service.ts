@@ -57,9 +57,9 @@ function watermarkFilter(x: string): string {
 	return `drawtext=${WATERMARK_FONT_ARG}text='openside.pro':x=${x}:y=h-th-24:fontsize=44:fontcolor=white:borderw=2:bordercolor=black@0.6:box=1:boxcolor=black@0.45:boxborderw=16`;
 }
 const WATERMARK_FILTER = watermarkFilter("w-tw-28");
-// The "both" composite parks the camera PiP in the bottom-right - exactly over
-// the masters' badge - so the composite re-stamps its own at the bottom-LEFT,
-// where nothing covers it.
+// The "both" composite can park the camera PiP over the masters' bottom-right
+// badge, so the composite re-stamps its own in whichever bottom corner the
+// camera leaves free (see cameraCoversRight).
 const WATERMARK_FILTER_LEFT = watermarkFilter("28");
 
 const inFlight = new Set<string>();
@@ -106,7 +106,53 @@ interface Composition {
 	cameraShape?: "square" | "rectangle" | "circle";
 	/** Flipped horizontally, like a mirror. */
 	cameraMirror?: boolean;
-	cameraCorner?: string; // currently always "bottom-right"
+	cameraCorner?: string; // legacy takes: always "bottom-right"
+	/**
+	 * Where the camera bubble sat on the recorded screen, as fractions (0-1)
+	 * of the captured frame. The bubble itself is in the screen capture, so the
+	 * PiP goes exactly over it. Absent on older takes (bottom-right corner).
+	 */
+	cameraRect?: {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+		/** The bubble's corner radius as a fraction of its height. */
+		radius?: number;
+	};
+}
+
+// The PiP is drawn slightly larger than the captured bubble so the bubble's
+// own edge (and its anti-aliasing) never peeks out from under it.
+const CAMERA_RECT_BLEED = 1.06;
+
+/** The composition's camera rect, or null when it's missing or malformed. */
+function cameraRectOf(
+	comp: Composition,
+): NonNullable<Composition["cameraRect"]> | null {
+	const rect = comp.cameraRect;
+	if (!rect || typeof rect !== "object") return null;
+	const { x, y, width, height } = rect;
+	const values = [x, y, width, height];
+	if (!values.every((v) => typeof v === "number" && Number.isFinite(v)))
+		return null;
+	if (width <= 0 || height <= 0 || width > 1 || height > 1) return null;
+	if (x < -0.5 || y < -0.5 || x > 1 || y > 1) return null;
+	const radius =
+		typeof rect.radius === "number" &&
+		Number.isFinite(rect.radius) &&
+		rect.radius >= 0 &&
+		rect.radius <= 0.5
+			? rect.radius
+			: undefined;
+	return { x, y, width, height, radius };
+}
+
+/** True when the camera sits over the bottom-right corner (legacy default,
+ *  or a bubble whose centre is in the right half). */
+function cameraCoversRight(comp: Composition): boolean {
+	const rect = cameraRectOf(comp);
+	return rect ? rect.x + rect.width / 2 >= 0.5 : true;
 }
 
 function errorMessage(error: unknown): string {
@@ -394,6 +440,8 @@ async function buildMaster(
 		maxFps: number;
 		/** Composited in the same encode - the screen take's camera PiP. */
 		overlay?: VideoOverlay;
+		/** With an overlay: stamp the DEMO badge bottom-left, clear of the PiP. */
+		watermarkLeft?: boolean;
 	},
 ): Promise<MasterInfo> {
 	const role = roleOf(rec);
@@ -408,13 +456,17 @@ async function buildMaster(
 		rec.width && rec.height && rec.width > 1 && rec.height > 1
 			? { width: rec.width, height: rec.height }
 			: null;
-	// Mirror first so the DEMO badge isn't flipped with the picture. With the
-	// PiP parked bottom-right, the badge moves bottom-left where nothing
+	// Mirror first so the DEMO badge isn't flipped with the picture. With a
+	// PiP over the bottom-right, the badge moves bottom-left where nothing
 	// covers it.
 	const extraFilters = [
 		...(opts.mirror ? ["hflip"] : []),
 		...(opts.watermark
-			? [opts.overlay ? WATERMARK_FILTER_LEFT : WATERMARK_FILTER]
+			? [
+					opts.overlay && opts.watermarkLeft
+						? WATERMARK_FILTER_LEFT
+						: WATERMARK_FILTER,
+				]
 			: []),
 	];
 	const originMs = parts[0]?.startMs ?? 0;
@@ -647,33 +699,57 @@ async function salvageCopy(
 }
 
 /**
- * The camera master as a bottom-right PiP over the screen, matching the size
- * and shape the user picked. Sized from the screen master's final height;
- * rounded corners come from a per-pixel alpha that only runs on the small
- * camera image.
+ * The camera master as a PiP over the screen, in the shape the user picked.
+ * With a recorded `cameraRect` it goes exactly over the bubble captured in the
+ * screen (a touch larger, so the bubble can't peek out); older takes fall back
+ * to a bottom-right corner sized from `cameraSize`. Rounded corners come from
+ * a per-pixel alpha that only runs on the small camera image.
  */
 function cameraOverlay(camera: MasterInfo, comp: Composition): VideoOverlay {
+	const rect = cameraRectOf(comp);
 	return {
 		path: camera.path,
 		startMs: camera.originMs,
 		build: (target) => {
 			const baseH = target.height > 0 ? target.height : 1080;
+			const baseW = target.width > 0 ? target.width : 1920;
 			const aspect = comp.cameraShape === "rectangle" ? 16 / 9 : 1;
 			const camH = evenDim(
-				Math.round((comp.cameraSize === "big" ? 0.3 : 0.22) * baseH),
+				Math.min(
+					baseH,
+					Math.round(
+						rect
+							? rect.height * baseH * CAMERA_RECT_BLEED
+							: (comp.cameraSize === "big" ? 0.3 : 0.22) * baseH,
+					),
+				),
 			);
-			const camW = evenDim(Math.round(camH * aspect));
+			const camW = evenDim(Math.min(baseW, Math.round(camH * aspect)));
 			const margin = Math.round(0.03 * baseH);
+			const clamp = (value: number, max: number) =>
+				Math.min(Math.max(0, Math.round(value)), Math.max(0, max));
+			const position = rect
+				? {
+						x: String(
+							clamp((rect.x + rect.width / 2) * baseW - camW / 2, baseW - camW),
+						),
+						y: String(
+							clamp(
+								(rect.y + rect.height / 2) * baseH - camH / 2,
+								baseH - camH,
+							),
+						),
+					}
+				: { x: `main_w-overlay_w-${margin}`, y: `main_h-overlay_h-${margin}` };
 			// A circle is a square whose corner radius is half its side.
 			const radius =
 				comp.cameraShape === "circle"
 					? Math.floor(camH / 2)
-					: Math.max(2, Math.round(0.12 * camH));
+					: Math.max(2, Math.round((rect?.radius ?? 0.12) * camH));
 			const aspectStr = aspect.toFixed(6);
 			return {
 				filter: `crop='min(iw,ih*${aspectStr})':'min(ih,iw/${aspectStr})',${comp.cameraMirror ? "hflip," : ""}scale=${camW}:${camH},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlphaExpr(radius)}'`,
-				x: `main_w-overlay_w-${margin}`,
-				y: `main_h-overlay_h-${margin}`,
+				...position,
 			};
 		},
 	};
@@ -836,7 +912,10 @@ export async function finalizeScreenSession(
 							...limits,
 							mirror: false,
 							...(wantsBoth && camera?.pinned
-								? { overlay: cameraOverlay(camera, comp) }
+								? {
+										overlay: cameraOverlay(camera, comp),
+										watermarkLeft: cameraCoversRight(comp),
+									}
 								: {}),
 						}),
 					)

@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -33,6 +34,7 @@ import useScreenRecordingManager, {
 import useUnloadWarning from "@/hooks/useUnloadWarning";
 import { usePresence } from "@/hooks/usePresence";
 import type { ScreenStreams } from "@/hooks/useScreenLocalRecording";
+import { measureCaptureRect } from "@/lib/captureGeometry";
 import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
 
 interface RecordingInfo {
@@ -79,6 +81,9 @@ interface ScreenRecordingContextValue {
   setCameraSize: (size: PipSize) => void;
   cameraShape: PipShape;
   setCameraShape: (shape: PipShape) => void;
+  /** The camera bubble's video box, measured at record start so the final
+   *  video lays the camera exactly over the bubble captured in the screen. */
+  cameraBoxRef: RefObject<HTMLDivElement | null>;
   /** What the share picker opens on when Start is pressed. */
   screenSurface: ScreenSurface;
   setScreenSurface: (surface: ScreenSurface) => void;
@@ -146,6 +151,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   const layoutRef = useRef(layout);
   const cameraSizeRef = useRef(cameraSize);
   const cameraShapeRef = useRef(cameraShape);
+  const cameraBoxRef = useRef<HTMLDivElement | null>(null);
   const [screenSurface, setScreenSurfaceState] =
     useState<ScreenSurface>("monitor");
   const screenSurfaceRef = useRef(screenSurface);
@@ -218,7 +224,16 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       cameraShape: cameraShapeRef.current,
       // The camera is always shown mirrored, so the video matches the preview.
       cameraMirror: true,
-      cameraCorner: "bottom-right",
+      // Where the bubble sits in what's being captured. The bubble is locked
+      // in place once a take starts, so this holds for the whole recording.
+      cameraRect:
+        layoutRef.current === "screen-camera"
+          ? measureCaptureRect(
+              cameraBoxRef.current,
+              getStreams().screen?.getVideoTracks()[0]?.getSettings()
+                .displaySurface,
+            )
+          : undefined,
     }),
   });
 
@@ -378,6 +393,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       setCameraSize,
       cameraShape,
       setCameraShape,
+      cameraBoxRef,
       screenSurface,
       setScreenSurface,
     }),

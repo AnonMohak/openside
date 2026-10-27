@@ -38,6 +38,7 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
     setCameraSize,
     cameraShape,
     setCameraShape,
+    cameraBoxRef,
   } = useScreenRecordingContext();
   const { ref, style, isDragging, handleProps } = useDraggable<HTMLDivElement>({
     corner: "bottom-right",
@@ -102,6 +103,7 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
               </div>
             )}
             <div
+              ref={cameraBoxRef}
               className={cn(
                 "relative overflow-hidden bg-neutral-900 shadow-2xl transition-[width,border-radius] duration-200",
                 cameraShape === "circle" ? "rounded-full" : "rounded-3xl",
