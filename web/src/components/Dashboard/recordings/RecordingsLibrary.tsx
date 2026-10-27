@@ -865,7 +865,7 @@ const SpaceOutputs = ({
 
 // Boxed exactly like ProjectCard / ScreenRecordingCard: thumbnail, title, meta.
 const SkeletonCard = () => (
-  <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-primary p-3">
+  <div className="flex flex-col gap-3 rounded-xl border border-border bg-primary p-3 dark:border-border/50">
     <div className="skeleton-shimmer aspect-video rounded-lg" />
     <div className="space-y-2 px-1 pb-1">
       <div className="skeleton-shimmer h-3.5 w-3/4 rounded" />
@@ -1514,7 +1514,7 @@ const RecordingsLibrary = () => {
                     ),
                   )
                 }
-                className="flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-opacity hover:opacity-70"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-primary px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Show more
                 <span className="text-fg-subtle">({remainingSpaces} more)</span>

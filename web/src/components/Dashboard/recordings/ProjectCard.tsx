@@ -261,7 +261,7 @@ const ProjectCard = ({
             onOpen(space);
           }
         }}
-        className="flex cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border border-border/50 bg-primary p-3 text-left transition-opacity hover:opacity-80"
+        className="flex cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border border-border bg-primary p-3 dark:border-border/50 text-left transition-opacity hover:opacity-80"
       >
         <ProjectThumbnail spaceId={space.id} />
 

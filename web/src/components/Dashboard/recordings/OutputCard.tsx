@@ -223,7 +223,7 @@ const DownloadItem = ({
       {/* What this download is, beside the menu on hover / keyboard focus. */}
       <span
         role="tooltip"
-        className="pointer-events-none invisible absolute right-[calc(100%+0.875rem)] top-1/2 z-[70] w-60 -translate-y-1/2 translate-x-1 scale-95 rounded-xl border border-border bg-popover px-3 py-2.5 text-left opacity-0 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45),0_0_0_1px_rgba(0,0,0,0.06)] transition-[opacity,transform,visibility] duration-150 ease-out group-hover/download:visible group-hover/download:translate-x-0 group-hover/download:scale-100 group-hover/download:opacity-100 group-focus-visible/download:visible group-focus-visible/download:translate-x-0 group-focus-visible/download:scale-100 group-focus-visible/download:opacity-100"
+        className="pointer-events-none invisible absolute right-[calc(100%+0.875rem)] top-1/2 z-[70] w-60 -translate-y-1/2 translate-x-1 scale-95 rounded-xl border border-border bg-popover px-3 py-2.5 text-left opacity-0 shadow-[0_6px_16px_-6px_rgba(0,0,0,0.18)] transition-[opacity,transform,visibility] duration-150 ease-out group-hover/download:visible group-hover/download:translate-x-0 group-hover/download:scale-100 group-hover/download:opacity-100 group-focus-visible/download:visible group-focus-visible/download:translate-x-0 group-focus-visible/download:scale-100 group-focus-visible/download:opacity-100"
       >
         <span className="flex items-center gap-1.5 text-xs font-semibold text-popover-foreground">
           <Icon className="size-3.5 text-fg-muted" />
