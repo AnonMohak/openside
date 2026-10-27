@@ -21,9 +21,9 @@ const SHAPE_OPTIONS: { value: PipShape; label: string; icon: ReactNode }[] = [
 ];
 
 /**
- * The camera bubble: bottom-right to start, draggable anywhere. Shape and size
- * sit above it on hover while setting up; the take's controls live in the
- * left-hand bar.
+ * The camera bubble: bottom-right to start, draggable anywhere while setting
+ * up. Shape and size sit above it on hover; once a take starts it's locked in
+ * place. The take's controls live in the left-hand bar.
  */
 interface RecorderCameraOverlayProps {
   isClosing: boolean;
@@ -49,14 +49,16 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
   return (
     // The outer box only positions (and is dragged); the inner one only
     // animates, so the open/close scale never mixes with the drag offset.
+    // Draggable only while setting up: once a take starts, the camera stays
+    // where it is, like its shape and size.
     <div
       ref={ref}
       style={style}
-      {...handleProps}
+      {...(isActive ? {} : handleProps)}
       className={cn(
         "group/camera fixed z-[88] touch-none select-none",
         isClosing && "pointer-events-none",
-        isDragging ? "cursor-grabbing" : "cursor-grab",
+        !isActive && (isDragging ? "cursor-grabbing" : "cursor-grab"),
       )}
     >
       <div
@@ -101,7 +103,7 @@ const RecorderCameraOverlay = ({ isClosing }: RecorderCameraOverlayProps) => {
             )}
             <div
               className={cn(
-                "relative overflow-hidden border border-call-border bg-neutral-900 shadow-2xl transition-[width,border-radius] duration-200",
+                "relative overflow-hidden bg-neutral-900 shadow-2xl transition-[width,border-radius] duration-200",
                 cameraShape === "circle" ? "rounded-full" : "rounded-3xl",
                 "aspect-square",
                 isBig ? "w-72" : "w-52",
