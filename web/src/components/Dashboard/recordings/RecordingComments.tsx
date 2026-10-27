@@ -280,7 +280,7 @@ const EditComposer = ({
   };
 
   return (
-    <div className="mt-1 overflow-hidden rounded-lg border border-border/50 bg-background">
+    <div className="mt-1 overflow-hidden rounded-lg border border-border bg-background dark:border-border/50">
       <textarea
         ref={textareaRef}
         value={value}
@@ -652,7 +652,7 @@ const RecordingComments = ({
       </div>
 
       <div className="p-3">
-        <div className="overflow-hidden rounded-xl border border-border/50 bg-background">
+        <div className="overflow-hidden rounded-xl border border-border bg-background dark:border-border/50">
           {replyingTo && (
             <div className="mx-2 mt-2 flex items-center gap-2 rounded-lg border-l-2 border-brand bg-muted/60 py-1.5 pl-2.5 pr-1.5 animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
               <div className="min-w-0 flex-1">
@@ -684,7 +684,7 @@ const RecordingComments = ({
               maxLength={80}
               placeholder="Your name"
               aria-label="Your name"
-              className="h-10 w-full border-b border-border/50 bg-transparent px-3 text-sm font-medium text-foreground outline-none placeholder:font-normal placeholder:text-fg-faint"
+              className="h-10 w-full border-b border-border bg-transparent dark:border-border/50 px-3 text-sm font-medium text-foreground outline-none placeholder:font-normal placeholder:text-fg-faint"
             />
           )}
           <textarea
@@ -777,7 +777,7 @@ export const RecordingCommentsSkeleton = () => (
     </div>
     {/* Composer: text area, then emoji + send */}
     <div className="p-3">
-      <div className="rounded-xl border border-border/50 px-3 pb-2.5 pt-3">
+      <div className="rounded-xl border border-border px-3 dark:border-border/50 pb-2.5 pt-3">
         <div className="h-3.5 w-32 animate-pulse rounded-md bg-muted" />
         <div className="mt-6 flex items-center justify-end gap-1.5">
           <div className="size-8 animate-pulse rounded-lg bg-muted" />

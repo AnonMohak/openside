@@ -37,7 +37,7 @@ const formatTime = (seconds: number) => {
  * Keyboard: space/k play, ←/→ seek 5s, m mute, f fullscreen.
  */
 export interface VideoPlayerHandle {
-  /** Current position in seconds, or null if playback never started. */
+  /** Current position in seconds (0 before playback starts), or null if no video. */
   getTime: () => number | null;
   /** Jump to `seconds`, bring the player into view, and play. */
   playFrom: (seconds: number) => void;
@@ -99,7 +99,7 @@ const VideoPlayer = ({
   useImperativeHandle(ref, () => ({
     getTime: () => {
       const video = videoRef.current;
-      return video && video.currentTime > 0 ? video.currentTime : null;
+      return video ? video.currentTime : null;
     },
     playFrom: (seconds) => {
       const video = videoRef.current;
