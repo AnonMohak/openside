@@ -118,6 +118,8 @@ function videoArgs(
 	settings: MasterEncodeSettings,
 	leadMs?: number,
 	overlay?: VideoOverlay,
+	/** How far into this piece the overlay's first frame belongs. */
+	overlayDelayMs = 0,
 ): string[] {
 	const anchor =
 		leadMs === undefined
@@ -136,12 +138,18 @@ function videoArgs(
 	if (overlay) {
 		// The overlay (input 1, already seeked to this piece) goes on after the
 		// base is pinned to its final size; extra filters (the DEMO badge) land
-		// on top of both. eof_action=pass keeps the base going if the overlay
-		// ends first.
+		// on top of both. An overlay that starts late is shifted to its real
+		// time, holding its first frame until then, and one that ends early
+		// holds its last frame - it never pops off over the base mid-piece. A
+		// piece past the overlay's end gets no frames and stays plain.
 		const { filter, x, y } = overlay.build(settings.target);
+		const delay =
+			overlayDelayMs >= 1
+				? `,tpad=start_duration=${(overlayDelayMs / 1000).toFixed(3)}:start_mode=clone`
+				: "";
 		filterArgs = [
 			"-filter_complex",
-			`[0:v:0]${base}[base];[1:v:0]setpts=PTS-STARTPTS,${filter}[ov];[base][ov]overlay=${x}:${y}:format=auto:eof_action=pass,format=yuv420p${extra ? `,${extra}` : ""}[v]`,
+			`[0:v:0]${base}[base];[1:v:0]setpts=PTS-STARTPTS${delay},${filter}[ov];[base][ov]overlay=${x}:${y}:format=auto:eof_action=repeat,format=yuv420p${extra ? `,${extra}` : ""}[v]`,
 			"-map",
 			"[v]",
 		];
@@ -209,6 +217,9 @@ async function encodeVideoPiece(params: {
 				params.settings,
 				Math.max(0, params.leadMs),
 				params.overlay?.overlay,
+				// The overlay starts after this piece does (the camera's recorder
+				// came up late): delay it rather than pulling it early.
+				Math.max(0, -(params.overlay?.offsetMs ?? 0)),
 			),
 			...(params.maxDurationMs !== undefined
 				? ["-t", durationArg(params.maxDurationMs)]
