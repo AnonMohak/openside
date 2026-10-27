@@ -35,7 +35,7 @@ import useUnloadWarning from "@/hooks/useUnloadWarning";
 import { usePresence } from "@/hooks/usePresence";
 import type { ScreenStreams } from "@/hooks/useScreenLocalRecording";
 import { measureCaptureRect } from "@/lib/captureGeometry";
-import { playCallSound, prepareCallSounds } from "@/lib/callSounds";
+import { prepareCallSounds } from "@/lib/callSounds";
 import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
 
 interface RecordingInfo {
@@ -57,6 +57,8 @@ interface ScreenRecordingContextValue {
   closeRecorder: () => void;
   recordingState: ScreenRecordingState;
   isActive: boolean;
+  /** Paused, and the recorders are still finishing - Resume waits. */
+  isPausing: boolean;
   recordingDurationMs: number;
   countdownValue: number | null;
   pendingUploads: number;
@@ -284,21 +286,6 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isCameraEnabled, isMicrophoneEnabled, toggleCamera, toggleMicrophone]);
 
-  // Chime when a take actually begins - right after the countdown - like a
-  // space's recording.
-  const recordingStateForSound = manager.recordingState;
-  const previousRecordingStateRef = useRef(recordingStateForSound);
-  useEffect(() => {
-    const previous = previousRecordingStateRef.current;
-    previousRecordingStateRef.current = recordingStateForSound;
-    if (
-      recordingStateForSound === "recording" &&
-      (previous === "countdown" || previous === "starting")
-    ) {
-      playCallSound("recordingStart");
-    }
-  }, [recordingStateForSound]);
-
   const closeRecorder = useCallback(() => {
     if (isActive) return;
     setIsOpen(false);
@@ -402,6 +389,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
       closeRecorder,
       recordingState: manager.recordingState,
       isActive,
+      isPausing: manager.isPausing,
       recordingDurationMs: manager.recordingDurationMs,
       countdownValue: manager.countdownValue,
       pendingUploads: manager.pendingUploads,
@@ -453,9 +441,11 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     <ScreenRecordingContext.Provider value={value}>
       {children}
       {panel.rendered && <ScreenRecorderPanel isClosing={panel.isClosing} />}
-      {manager.recordingState === "countdown" && (
-        <CountdownOverlay value={manager.countdownValue} />
-      )}
+      {/* Gone the moment it hits zero, before the chime and the capture. */}
+      {manager.recordingState === "countdown" &&
+        manager.countdownValue !== null && (
+          <CountdownOverlay value={manager.countdownValue} />
+        )}
     </ScreenRecordingContext.Provider>
   );
 };

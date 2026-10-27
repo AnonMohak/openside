@@ -24,13 +24,15 @@ interface RecorderControlsBarProps {
 }
 
 /**
- * The take's controls, docked on the left edge: stop, timer, pause / resume,
- * restart and delete. Shown greyed out while setting up and come alive once
- * Start is pressed; restart and delete throw the take away, so they ask first.
+ * The take's controls, docked bottom-center where the settings toolbar was:
+ * stop, timer, pause / resume, restart and delete. Only shown once Start is
+ * pressed (the panel swaps the toolbar for it); restart and delete throw the
+ * take away, so they ask first.
  */
 const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
   const {
     recordingState,
+    isPausing,
     recordingDurationMs,
     stopRecording,
     pauseRecording,
@@ -60,9 +62,6 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
     if (action === "delete") void discardRecording();
   };
 
-  // Before Start (and after a take is saved) the bar is just a grey preview.
-  const isLive = isCapturing || isStarting || isSaving;
-
   // Upload progress has its own card (RecorderUploadCard); the timer just
   // holds the take's length.
   const timer =
@@ -70,20 +69,19 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
 
   return (
     // The outer box only positions; the inner one only animates, so the
-    // scale never fights the vertical centering transform.
+    // scale never fights the horizontal centering transform.
     <div
       className={cn(
-        "fixed left-4 top-1/2 z-[95] -translate-y-1/2 select-none",
+        "fixed bottom-6 left-1/2 z-[95] -translate-x-1/2 select-none",
         isClosing && "pointer-events-none",
       )}
     >
       <div
         className={cn(
-          "relative flex w-14 flex-col items-center gap-1.5 rounded-[22px] border border-white/10 bg-neutral-900 p-2 text-white shadow-2xl",
+          "relative flex items-center gap-1.5 rounded-[22px] border border-white/10 bg-neutral-900 p-2 text-white shadow-2xl",
           isClosing
             ? "animate-out fade-out-0 zoom-out-95 fill-mode-forwards duration-150 ease-in"
             : "animate-in fade-in-0 zoom-in-95 duration-200 ease-out",
-          !isLive && "border-white/5 bg-neutral-800/90",
         )}
       >
         <button
@@ -92,35 +90,30 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
           disabled={!isCapturing}
           aria-label="Stop and save"
           title="Stop and save"
-          className="mb-0.5 flex size-10 cursor-pointer items-center justify-center rounded-[14px] bg-white/10 transition-colors enabled:hover:bg-white/15 disabled:cursor-not-allowed"
+          className="flex size-10 cursor-pointer items-center justify-center rounded-[14px] bg-white/10 transition-colors enabled:hover:bg-white/15 disabled:cursor-not-allowed"
         >
           {isSaving ? (
             <Loader2 size={16} className="animate-spin text-white/70" />
           ) : (
-            <span
-              className={cn(
-                "size-4 rounded-[5px] transition-colors",
-                isLive ? "bg-red-500" : "bg-white/25",
-              )}
-            />
+            <span className="size-4 rounded-[5px] bg-red-500" />
           )}
         </button>
 
         <span
           className={cn(
-            "mb-0.5 text-xs font-semibold tabular-nums",
+            "min-w-12 px-1 text-center text-sm font-semibold tabular-nums",
             isPaused && "animate-pulse text-amber-400",
             (isStarting || isSaving) && "text-white/60",
-            !isLive && "text-white/30",
           )}
         >
           {timer}
         </span>
 
         <BarButton
-          label={isPaused ? "Resume" : "Pause"}
+          label={isPausing ? "Pausing…" : isPaused ? "Resume" : "Pause"}
           onClick={isPaused ? resumeRecording : pauseRecording}
-          disabled={!isCapturing}
+          // Resume waits until the last chunks before the pause are saved.
+          disabled={!isCapturing || isPausing}
         >
           {isPaused ? (
             <Play size={16} className="fill-current" />
@@ -146,7 +139,7 @@ const RecorderControlsBar = ({ isClosing }: RecorderControlsBarProps) => {
         </BarButton>
 
         {confirming && (
-          <div className="absolute bottom-0 left-full ml-3 w-52 rounded-2xl border border-call-border bg-call-background p-3 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150">
+          <div className="absolute bottom-full right-0 mb-3 w-52 rounded-2xl border border-call-border bg-call-background p-3 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-150">
             <p className="text-sm font-medium text-foreground">
               {CONFIRM_COPY[confirming].title}
             </p>

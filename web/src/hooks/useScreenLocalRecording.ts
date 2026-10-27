@@ -59,8 +59,14 @@ interface TrackSize {
 interface UseScreenLocalRecordingReturn {
   isRecording: boolean;
   isPaused: boolean;
+  /** Paused, but the recorders are still handing over their last chunks. */
+  isPausing: boolean;
   recordingDurationMs: number;
   chunkCounts: Record<ScreenTrackType, number>;
+  /** Settle the camera at its recording size before the countdown ends. */
+  prepareRecording: (streams: ScreenStreams) => Promise<void>;
+  /** Undo prepareRecording when the take is called off before it starts. */
+  cancelPreparedRecording: () => void;
   startRecording: (streams: ScreenStreams) => Promise<void>;
   /** Stops every recorder; resolves with how many chunks each one emitted. */
   stopRecording: () => Promise<Record<ScreenTrackType, number>>;
@@ -137,8 +143,13 @@ const ROTATE_PART_MS = 10 * 60 * 1000;
 /** Retries when no codec at all could start for a track. */
 const MAX_FATAL_RETRIES = 3;
 const FATAL_RETRY_DELAY_MS = 2000;
-/** onstop can fail to fire on a recorder whose encoder crashed. */
-const STOP_TIMEOUT_MS = 3000;
+/**
+ * How long a stopping recorder gets to hand over its last chunk. A healthy one
+ * takes well under a second; this only bounds a recorder that never fires
+ * onstop (a crashed encoder), so Pause / Stop can't hang. Past it, the part is
+ * given up (see RecorderPart.abandoned).
+ */
+const STOP_TIMEOUT_MS = 10_000;
 
 const emptyCounts = (): Record<ScreenTrackType, number> => ({
   combined: 0,
@@ -178,21 +189,23 @@ function mixAudioTracks(stream: MediaStream): {
   };
 }
 
-function stopRecorder(recorder: MediaRecorder | null): Promise<void> {
-  if (!recorder || recorder.state === "inactive") return Promise.resolve();
+/** Resolves true once the recorder has really stopped (its last chunk is
+ *  out), false if it was given up on after STOP_TIMEOUT_MS. */
+function stopRecorder(recorder: MediaRecorder | null): Promise<boolean> {
+  if (!recorder || recorder.state === "inactive") return Promise.resolve(true);
   return new Promise((resolve) => {
-    const done = () => {
+    const done = (stopped: boolean) => {
       clearTimeout(timeout);
-      resolve();
+      resolve(stopped);
     };
     // onstop fires after the final ondataavailable, so the last chunk is
     // captured before we resolve.
-    const timeout = setTimeout(done, STOP_TIMEOUT_MS);
-    recorder.addEventListener("stop", done, { once: true });
+    const timeout = setTimeout(() => done(false), STOP_TIMEOUT_MS);
+    recorder.addEventListener("stop", () => done(true), { once: true });
     try {
       recorder.stop();
     } catch {
-      done();
+      done(true);
     }
   });
 }
@@ -206,8 +219,14 @@ interface RecorderPart {
   stopped: boolean;
   /** No codec could start (or the encoder died) - this part records nothing. */
   dead: boolean;
+  /** It never finished stopping: anything it emits later is dropped, so a
+   *  stray chunk can't land after a newer part's. */
+  abandoned: boolean;
   cleanup: () => void;
 }
+
+/** A chunk waiting for its sequence number (see TrackState.held). */
+type ChunkDraft = Omit<LocalChunk, "sequenceNumber" | "timestamp">;
 
 interface TrackState {
   type: ScreenTrackType;
@@ -221,6 +240,10 @@ interface TrackState {
   fatalRetries: number;
   /** Every part start/stop runs in order, so two can't interleave. */
   chain: Promise<void>;
+  /** Parts still stopping. Their last chunks must be numbered first. */
+  settling: number;
+  /** A newer part's chunks that arrived while an older part was settling. */
+  held: ChunkDraft[];
 }
 
 export default function useScreenLocalRecording(
@@ -233,6 +256,9 @@ export default function useScreenLocalRecording(
 
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  // Pause was pressed and the recorders are still handing over their last
+  // chunks - Resume waits for that.
+  const [isPausing, setIsPausing] = useState(false);
   const [recordingDurationMs, setRecordingDurationMs] = useState(0);
   const [chunkCounts, setChunkCounts] =
     useState<Record<ScreenTrackType, number>>(emptyCounts);
@@ -240,6 +266,8 @@ export default function useScreenLocalRecording(
   const activeRef = useRef(false);
   // Undoes the PiP camera cap (see capPipCamera).
   const restoreCameraRef = useRef<() => void>(() => undefined);
+  // The cap was applied ahead of the take (see prepareRecording).
+  const preparedRef = useRef(false);
   const tracksRef = useRef<Partial<Record<ScreenTrackType, TrackState>>>({});
   const metadataRef = useRef<
     Partial<Record<ScreenTrackType, RecordingMetadata>>
@@ -325,24 +353,46 @@ export default function useScreenLocalRecording(
     [],
   );
 
+  // Numbers a chunk and hands it on. Sequence order is the order the
+  // finalizer stitches chunks in, so it has to follow recording order.
+  const deliverChunk = useCallback((track: TrackState, draft: ChunkDraft) => {
+    const chunk: LocalChunk = {
+      ...draft,
+      sequenceNumber: track.sequence,
+      timestamp: performance.now(),
+    };
+    track.sequence += 1;
+    const sequence = track.sequence;
+    setChunkCounts((prev) => ({ ...prev, [track.type]: sequence }));
+    optionsRef.current.onChunkReady?.(track.type, chunk);
+  }, []);
+
   const emitChunk = useCallback(
     (track: TrackState, part: RecorderPart, blob: Blob) => {
+      if (part.abandoned) {
+        console.warn(
+          `[ScreenRecording] ${track.type}: dropped a chunk from a recorder that never finished stopping`,
+        );
+        return;
+      }
       const now = recordedMs();
-      const chunk: LocalChunk = {
+      const draft: ChunkDraft = {
         blob,
-        sequenceNumber: track.sequence,
         startMs: Math.max(0, part.chunkStart),
         durationMs: Math.max(0, now - part.chunkStart),
-        timestamp: performance.now(),
         mimeType: part.mimeType,
       };
-      track.sequence += 1;
       part.chunkStart = now;
-      const sequence = track.sequence;
-      setChunkCounts((prev) => ({ ...prev, [track.type]: sequence }));
-      optionsRef.current.onChunkReady?.(track.type, chunk);
+      // A newer part's chunk while an older part is still stopping: hold it
+      // until the older part's last chunk is out, so that one keeps the lower
+      // number and can't be stitched into the wrong part.
+      if (!part.stopped && track.settling > 0) {
+        track.held.push(draft);
+        return;
+      }
+      deliverChunk(track, draft);
     },
-    [recordedMs],
+    [deliverChunk, recordedMs],
   );
 
   // Forward refs so part handlers can reach the logic defined below.
@@ -385,6 +435,7 @@ export default function useScreenLocalRecording(
         startedAt: performance.now(),
         stopped: false,
         dead: false,
+        abandoned: false,
         cleanup: () => undefined,
       };
 
@@ -460,12 +511,34 @@ export default function useScreenLocalRecording(
     [chunkIntervalMs, emitChunk, recordedMs],
   );
 
-  const stopPart = useCallback(async (part: RecorderPart | null) => {
-    if (!part || part.stopped) return;
-    part.stopped = true;
-    await stopRecorder(part.recorder);
-    part.cleanup();
-  }, []);
+  // Waits for the recorder's real stop (its last chunk), up to
+  // STOP_TIMEOUT_MS. The audio mixer is only closed after that, so the end of
+  // the last chunk keeps its sound.
+  const stopPart = useCallback(
+    async (track: TrackState, part: RecorderPart | null) => {
+      if (!part || part.stopped) return;
+      part.stopped = true;
+      track.settling += 1;
+      try {
+        const finished = await stopRecorder(part.recorder);
+        if (!finished) {
+          part.abandoned = true;
+          console.warn(
+            `[ScreenRecording] ${track.type}: recorder didn't stop within ${STOP_TIMEOUT_MS}ms - moving on`,
+          );
+        }
+        part.cleanup();
+      } finally {
+        track.settling -= 1;
+        if (track.settling === 0 && track.held.length > 0) {
+          const held = track.held;
+          track.held = [];
+          for (const draft of held) deliverChunk(track, draft);
+        }
+      }
+    },
+    [deliverChunk],
+  );
 
   /** New part first, then stop the old one: the overlap is trimmed when the
    *  take is finalized, while a gap would be lost footage. */
@@ -475,7 +548,7 @@ export default function useScreenLocalRecording(
       const current = track.part;
       const next = startPart(track);
       track.part = next;
-      await stopPart(current);
+      await stopPart(track, current);
       // No codec could even construct (onFatal fired before this part was
       // current, so it couldn't schedule its own retry).
       if (next?.dead && track.part === next) {
@@ -557,17 +630,23 @@ export default function useScreenLocalRecording(
           failedMimes: new Set(),
           fatalRetries: 0,
           chain: Promise.resolve(),
+          settling: 0,
+          held: [],
         };
       }
       if (Object.keys(tracks).length === 0) {
         throw new Error("No tracks to record");
       }
 
-      const pipTrack = tracks.camera?.source.getVideoTracks()[0];
-      restoreCameraRef.current =
-        tracks.camera?.videoRole === "pip" && pipTrack
-          ? await capPipCamera(pipTrack)
-          : () => undefined;
+      if (preparedRef.current) {
+        preparedRef.current = false;
+      } else {
+        const pipTrack = tracks.camera?.source.getVideoTracks()[0];
+        restoreCameraRef.current =
+          tracks.camera?.videoRole === "pip" && pipTrack
+            ? await capPipCamera(pipTrack)
+            : () => undefined;
+      }
 
       activeRef.current = true;
       tracksRef.current = tracks;
@@ -589,7 +668,9 @@ export default function useScreenLocalRecording(
         Object.values(tracks).every((track) => !track.part || track.part.dead)
       ) {
         activeRef.current = false;
-        for (const track of Object.values(tracks)) await stopPart(track.part);
+        for (const track of Object.values(tracks)) {
+          await stopPart(track, track.part);
+        }
         tracksRef.current = {};
         restoreCameraRef.current();
         restoreCameraRef.current = () => undefined;
@@ -604,6 +685,31 @@ export default function useScreenLocalRecording(
     },
     [replacePart, runOnTrack, sampleTrackSizes, stopPart],
   );
+
+  /**
+   * Run before the countdown: drops the PiP camera to its recording size
+   * now, so the webcam's reconfigure (a blink and an exposure ramp on most
+   * cameras) is over before the first frame is recorded.
+   */
+  const prepareRecording = useCallback(async (streams: ScreenStreams) => {
+    if (activeRef.current) return;
+    restoreCameraRef.current();
+    const pipTrack = streams.combined
+      ? streams.camera?.getVideoTracks()[0]
+      : undefined;
+    restoreCameraRef.current = pipTrack
+      ? await capPipCamera(pipTrack)
+      : () => undefined;
+    preparedRef.current = true;
+  }, []);
+
+  /** The take was called off before it started: undo prepareRecording. */
+  const cancelPreparedRecording = useCallback(() => {
+    if (activeRef.current || !preparedRef.current) return;
+    preparedRef.current = false;
+    restoreCameraRef.current();
+    restoreCameraRef.current = () => undefined;
+  }, []);
 
   const stopRecording = useCallback(async (): Promise<
     Record<ScreenTrackType, number>
@@ -626,7 +732,7 @@ export default function useScreenLocalRecording(
         runOnTrack(track, async () => {
           const part = track.part;
           track.part = null;
-          await stopPart(part);
+          await stopPart(track, part);
         }),
       ),
     );
@@ -649,27 +755,29 @@ export default function useScreenLocalRecording(
   // clock puts the next part right where the last one ended.
   const pauseRecording = useCallback(() => {
     if (!activeRef.current || pausedAtRef.current !== null) return;
-    for (const track of Object.values(tracksRef.current)) {
-      void runOnTrack(track, async () => {
+    const stops = Object.values(tracksRef.current).map((track) =>
+      runOnTrack(track, async () => {
         const part = track.part;
         track.part = null;
-        await stopPart(part);
-      });
-    }
+        await stopPart(track, part);
+      }),
+    );
     pausedAtRef.current = performance.now();
     setRecordingDurationMs(recordedMs());
     setIsPaused(true);
+    setIsPausing(true);
+    void Promise.all(stops).finally(() => setIsPausing(false));
   }, [recordedMs, runOnTrack, stopPart]);
 
   const resumeRecording = useCallback(() => {
-    if (!activeRef.current || pausedAtRef.current === null) return;
+    if (!activeRef.current || pausedAtRef.current === null || isPausing) return;
     pausedTotalRef.current += performance.now() - pausedAtRef.current;
     pausedAtRef.current = null;
     for (const track of Object.values(tracksRef.current)) {
       void runOnTrack(track, () => replacePart(track));
     }
     setIsPaused(false);
-  }, [replacePart, runOnTrack]);
+  }, [isPausing, replacePart, runOnTrack]);
 
   // Cleanup on unmount.
   useEffect(() => {
@@ -693,8 +801,11 @@ export default function useScreenLocalRecording(
   return {
     isRecording,
     isPaused,
+    isPausing,
     recordingDurationMs,
     chunkCounts,
+    prepareRecording,
+    cancelPreparedRecording,
     startRecording,
     stopRecording,
     pauseRecording,

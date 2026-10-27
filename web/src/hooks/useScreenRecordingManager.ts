@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import api from "@/lib/axiosInstance";
+import { callSoundDurationMs, playCallSound } from "@/lib/callSounds";
 import { toast } from "@/lib/toast";
 import useChunkUploader from "./useChunkUploader";
 import { sendUsageHeartbeat } from "./useUsage";
@@ -38,6 +39,9 @@ export type ScreenRecordingState =
   | "error";
 
 const COUNTDOWN_SECONDS = 3;
+// Even with sounds off, give the countdown overlay a moment to leave the
+// screen before the first frame is captured.
+const CAPTURE_SETTLE_MS = 150;
 
 const SCREEN_ENDPOINTS = {
   scope: "screen" as const,
@@ -56,6 +60,8 @@ interface UseScreenRecordingManagerOptions {
 
 interface UseScreenRecordingManagerReturn {
   recordingState: ScreenRecordingState;
+  /** Paused, but the last chunks before the pause are still coming in. */
+  isPausing: boolean;
   recordingDurationMs: number;
   countdownValue: number | null;
   pendingUploads: number;
@@ -234,6 +240,8 @@ export default function useScreenRecordingManager({
   });
 
   const {
+    prepareRecording: prepareLocal,
+    cancelPreparedRecording: cancelPreparedLocal,
     startRecording: startLocal,
     stopRecording: stopLocal,
     pauseRecording: pauseLocal,
@@ -315,6 +323,10 @@ export default function useScreenRecordingManager({
         throw rowError;
       }
 
+      // Camera at its recording size now, so its reconfigure blink is over
+      // (and both tracks start on a steady stream) when the countdown ends.
+      await prepareLocal(buildStreams());
+
       // Local 3-2-1 lead-in.
       setRecordingState("countdown");
       setCountdownValue(COUNTDOWN_SECONDS);
@@ -331,8 +343,16 @@ export default function useScreenRecordingManager({
         setCountdownValue(remaining);
       }, 1000);
 
+      // At zero: clear the countdown off the screen, chime, and only start
+      // capturing once the chime has finished - so neither ends up in the
+      // recording.
       countdownTimeoutRef.current = setTimeout(() => {
-        void beginRecording();
+        setCountdownValue(null);
+        playCallSound("recordingStart");
+        countdownTimeoutRef.current = setTimeout(
+          () => void beginRecording(),
+          Math.max(CAPTURE_SETTLE_MS, callSoundDurationMs("recordingStart")),
+        );
       }, COUNTDOWN_SECONDS * 1000);
     } catch (err) {
       // Out of metered recording credit - show the upgrade CTA, not an error.
@@ -355,7 +375,7 @@ export default function useScreenRecordingManager({
       setError(message);
       setRecordingState("error");
     }
-  }, [beginRecording, buildStreams, getInfo, getComposition]);
+  }, [beginRecording, buildStreams, getInfo, getComposition, prepareLocal]);
 
   // Usage heartbeat while recording: credits metered seconds server-side (a
   // crashed tab still counts what ran), warns near the limit, and reacts to a
@@ -416,6 +436,7 @@ export default function useScreenRecordingManager({
   const cancelCountdown = useCallback(
     async (nextState: ScreenRecordingState = "idle") => {
       clearCountdown();
+      cancelPreparedLocal();
       if (sessionIdRef.current) {
         await api
           .delete(`/recording/screen/${sessionIdRef.current}`)
@@ -425,7 +446,7 @@ export default function useScreenRecordingManager({
       }
       setRecordingState(nextState);
     },
-    [clearCountdown],
+    [clearCountdown, cancelPreparedLocal],
   );
 
   const stopRecording = useCallback(async () => {
@@ -544,12 +565,14 @@ export default function useScreenRecordingManager({
     notifyPaused(true);
   }, [recordingState, pauseLocal, notifyPaused]);
 
+  const isPausing = recorder.isPausing;
   const resumeRecording = useCallback(() => {
-    if (recordingState !== "paused") return;
+    // Not until the last chunks before the pause are in (see isPausing).
+    if (recordingState !== "paused" || isPausing) return;
     resumeLocal();
     setRecordingState("recording");
     notifyPaused(false);
-  }, [recordingState, resumeLocal, notifyPaused]);
+  }, [recordingState, isPausing, resumeLocal, notifyPaused]);
 
   // Throw the current take away: stop capture without uploading the tail,
   // drop whatever is still queued, then delete the session (rows + storage).
@@ -616,6 +639,7 @@ export default function useScreenRecordingManager({
 
   return {
     recordingState,
+    isPausing,
     recordingDurationMs: recorder.recordingDurationMs,
     countdownValue,
     pendingUploads: uploader.pendingCount,

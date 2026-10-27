@@ -286,6 +286,10 @@ export const installCallSoundsWarmup = () => {
   window.addEventListener("keydown", prepareCallSounds, options);
 };
 
+/** How long a sound plays (0 when sounds are switched off). */
+export const callSoundDurationMs = (sound: CallSound) =>
+  soundsEnabled ? Math.ceil(soundLength(SOUNDS[sound]) * 1000) : 0;
+
 export const playCallSound = (sound: CallSound) => {
   if (!soundsEnabled) return;
   try {
