@@ -263,27 +263,35 @@ const ScreenVideoCard = ({
             <FiLoader className="size-4 animate-spin" /> Loading…
           </div>
         )}
+        {kind === "preview" && (
+          <span className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/70 px-2 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
+            Preview · not final
+          </span>
+        )}
       </div>
-      <div className="flex items-center justify-end pt-3">
-        <button
-          type="button"
-          disabled={downloading}
-          onClick={() => void handleDownload()}
-          className="flex h-9 items-center gap-2 rounded-lg bg-brand pl-3 pr-1.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer"
-        >
-          {downloading ? (
-            <FiLoader className="size-4 animate-spin" />
-          ) : (
-            <LuDownload className="size-4" />
-          )}
-          {downloading ? "Preparing…" : "Download"}
-          {fileType && (
-            <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide">
-              {fileType}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* The preview is a stand-in - download the final video once it's in. */}
+      {kind !== "preview" && (
+        <div className="flex items-center justify-end pt-3">
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={() => void handleDownload()}
+            className="flex h-9 items-center gap-2 rounded-lg bg-brand pl-3 pr-1.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer"
+          >
+            {downloading ? (
+              <FiLoader className="size-4 animate-spin" />
+            ) : (
+              <LuDownload className="size-4" />
+            )}
+            {downloading ? "Preparing…" : "Download"}
+            {fileType && (
+              <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide">
+                {fileType}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -455,6 +463,9 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
     rec.status === "STOPPED" ||
     rec.status === "PROCESSING";
   const isFailed = rec.status === "FAILED" && !screenVideoKind;
+  // A quick copy of the capture to watch while the final video renders.
+  const showPreview =
+    isProcessing && !screenVideoKind && !!outputs.preview?.key;
 
   const handleDelete = () => {
     // Optimistic: the hook drops it from the cached list right away, so leave
@@ -499,11 +510,13 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
               </h1>
               <p className="flex items-center gap-x-2 truncate text-xs text-fg-subtle">
                 {[
-                  screenVideoKind === "both"
-                    ? "Screen + camera"
-                    : screenVideoKind === "camera"
-                      ? "Camera"
-                      : "Screen recording",
+                  showPreview
+                    ? "Preview · final video processing"
+                    : screenVideoKind === "both"
+                      ? "Screen + camera"
+                      : screenVideoKind === "camera"
+                        ? "Camera"
+                        : "Screen recording",
                   rec.startedAt &&
                     new Date(rec.startedAt).toLocaleString("en-US", {
                       month: "short",
@@ -577,7 +590,25 @@ const ScreenProjectDetail = ({ sessionId }: { sessionId: string }) => {
         >
           {railResizer.handle}
           <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-border lg:p-6">
-            {isProcessing && !screenVideoKind ? (
+            {showPreview ? (
+              <section className="flex flex-col gap-3">
+                <p className="flex items-start gap-2.5 rounded-xl bg-primary px-3.5 py-3 text-sm text-fg-muted ring-1 ring-border/50">
+                  <FiLoader className="mt-0.5 size-4 shrink-0 animate-spin" />
+                  <span>
+                    <span className="font-medium text-foreground">
+                      This is a quick preview, not the final video.
+                    </span>{" "}
+                    The final video is still being made and will replace this
+                    automatically when it's ready.
+                  </span>
+                </p>
+                <ScreenVideoCard
+                  rec={rec}
+                  kind="preview"
+                  playerRef={playerRef}
+                />
+              </section>
+            ) : isProcessing && !screenVideoKind ? (
               <section className="flex flex-col gap-4">
                 <ProcessingStagePanel rec={rec} />
               </section>

@@ -4,7 +4,13 @@ import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
 import { useGetMe, type MeUser } from "@/hooks/useUserQuery";
 
-export type ScreenOutputKind = "screen" | "screenAligned" | "camera" | "both";
+/** "preview" is a quick, un-encoded copy shown while the final video renders. */
+export type ScreenOutputKind =
+  | "screen"
+  | "screenAligned"
+  | "camera"
+  | "both"
+  | "preview";
 
 export interface ScreenRecording {
   id: string;

@@ -11,6 +11,7 @@ import {
 	publishRecordingStarted,
 	publishRecordingStopped,
 } from "../lib/recording-events.ts";
+import { deleteTrackChunks } from "./chunk-cleanup-service.ts";
 import {
 	buildCloudRecordingKey,
 	buildScreenCloudRecordingKey,
@@ -38,7 +39,6 @@ import {
 	deletePrefixTargets,
 	resolvePrefixTarget,
 	sessionStoragePrefix,
-	trackChunkPrefix,
 } from "./storage-service.ts";
 import {
 	assertCanRecord,
@@ -1629,25 +1629,7 @@ async function cleanupFinalizedChunks(): Promise<void> {
 
 	for (const recording of recordings) {
 		try {
-			await deleteObjects(recording.segments.map((seg) => seg.assetKey));
-			// Plus anything uploaded but never registered (a chunk whose
-			// register call never landed) - the track's folder holds only chunks.
-			const firstKey = recording.segments[0]?.assetKey;
-			const prefix = firstKey ? trackChunkPrefix(firstKey, recording.id) : null;
-			if (prefix) {
-				await resolvePrefixTarget(prefix)
-					.then((target) => deletePrefixTargets([target]))
-					.catch((error) =>
-						console.error(
-							`[Recording] orphan chunk sweep failed for ${recording.id}:`,
-							error,
-						),
-					);
-			}
-			await prisma.recordingSegment.updateMany({
-				where: { id: { in: recording.segments.map((seg) => seg.id) } },
-				data: { status: "PROCESSED" },
-			});
+			await deleteTrackChunks(recording);
 		} catch (error) {
 			console.error(
 				`[Recording] chunk cleanup failed for ${recording.id} (will retry):`,

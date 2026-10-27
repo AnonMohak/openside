@@ -42,8 +42,13 @@ import {
 } from "../lib/segment-gaps.ts";
 import { evenDim, probeMedia } from "../lib/video-geometry.ts";
 import { escapeFilterPath, watermarkFontPath } from "../lib/watermark-font.ts";
+import { deleteTrackChunks } from "./chunk-cleanup-service.ts";
 import { sessionNeedsWatermark } from "./entitlements-service.ts";
-import { getObjectBuffer, putFileObject } from "./storage-service.ts";
+import {
+	deleteObjects,
+	getObjectBuffer,
+	putFileObject,
+} from "./storage-service.ts";
 import { reconcileRecordedSeconds } from "./usage-service.ts";
 
 /** Bottom-right "openside.pro" badge burned into DEMO masters only. Points
@@ -641,10 +646,24 @@ function roundedAlphaExpr(r: number): string {
 	return `if(gt(${tl}+${tr}+${bl}+${br},0),0,255)`;
 }
 
+/** A preview output's storage key, from a session's `outputs` JSON. */
+function previewKeyOf(outputs: unknown): string | null {
+	if (!outputs || typeof outputs !== "object") return null;
+	const preview = (outputs as Record<string, { key?: unknown }>).preview;
+	return typeof preview?.key === "string" ? preview.key : null;
+}
+
+/** The session already has its real (non-preview) video. */
+function hasFinalOutput(outputs: unknown): boolean {
+	if (!outputs || typeof outputs !== "object") return false;
+	return Object.keys(outputs).some((kind) => kind !== "preview");
+}
+
 /**
- * Last resort when every encode failed: the recorder's own stream copied into
- * a playable file (no encoding, no camera PiP) beats losing the take. Returns
- * the local file, or null if even that fails.
+ * The recorder's own stream copied into a playable file - no encoding, no
+ * camera PiP, so it's ready within seconds. Published as the take's quick
+ * "preview" while the real video renders, and kept as the take's video only
+ * if every encode fails. Returns the local file, or null if even that fails.
  */
 async function salvageCopy(
 	fetched: FetchedTrack,
@@ -885,6 +904,41 @@ export async function finalizeScreenSession(
 		const screenFetched = await fetch(screenRec);
 		const cameraFirst = screenRec ? null : await fetch(cameraRec);
 		const primary = screenFetched ?? cameraFirst;
+
+		// A quick, un-encoded copy of the capture goes up first, so there's
+		// something to watch while the real video (with the camera) renders.
+		// The page shows it as not final; it's deleted once the real one is in.
+		const quickCopy = primary
+			? await salvageCopy(primary, sessionId, tmp)
+			: null;
+		let previewKey: string | null = null;
+		if (quickCopy && !hasFinalOutput(session.outputs)) {
+			try {
+				const key = screenKey(
+					session.userId,
+					sessionId,
+					"preview",
+					quickCopy.ext,
+				);
+				await putFileObject(
+					key,
+					quickCopy.path,
+					masterContentType(quickCopy.ext),
+				);
+				const durationMs = (await probeMedia(quickCopy.path)).durationMs ?? 0;
+				await prisma.recordingSession.updateMany({
+					where: { id: sessionId, status: "PROCESSING" },
+					data: { outputs: { preview: { key, durationMs } } as never },
+				});
+				previewKey = key;
+				console.log(`[ScreenFinalize] ${sessionId}: preview up (${key})`);
+			} catch (error) {
+				console.warn(`[ScreenFinalize] ${sessionId}: no quick preview:`, error);
+			}
+		}
+		// A preview from an earlier attempt that this pass didn't replace.
+		const stalePreviewKey = previewKeyOf(session.outputs);
+
 		const cameraFetched = screenRec ? await fetch(cameraRec) : cameraFirst;
 
 		// For a screen + camera take the (small, fast) camera goes first, then
@@ -943,9 +997,8 @@ export async function finalizeScreenSession(
 
 		if (screen?.composited && camera && screenRec && cameraRec) {
 			// The composite is the only output; the camera master was just its
-			// input and is never uploaded. Raw chunks stay for a day (the shared
-			// cleanup removes them) so a straggler chunk can still rebuild a
-			// fuller video.
+			// input and is never uploaded. The raw chunks are deleted once the
+			// take is READY (below).
 			const key = screenKey(session.userId, sessionId, "both", screen.ext);
 			await uploadMaster(screen, key);
 			outputs.both = {
@@ -979,12 +1032,9 @@ export async function finalizeScreenSession(
 			}
 		}
 
-		// Every encode failed: keep a stream copy of the capture rather than
+		// Every encode failed: keep the stream copy of the capture rather than
 		// lose the take.
-		const salvaged =
-			Object.keys(outputs).length === 0 && primary
-				? await salvageCopy(primary, sessionId, tmp)
-				: null;
+		const salvaged = Object.keys(outputs).length === 0 ? quickCopy : null;
 		if (salvaged) {
 			const key = screenKey(session.userId, sessionId, "screen", salvaged.ext);
 			await putFileObject(key, salvaged.path, masterContentType(salvaged.ext));
@@ -1016,6 +1066,19 @@ export async function finalizeScreenSession(
 			where: { id: sessionId },
 			data: { status: "READY", outputs: outputs as never },
 		});
+
+		// The real video is in: the quick preview has served its purpose.
+		const previewKeys = [previewKey, stalePreviewKey].filter(
+			(key): key is string => Boolean(key),
+		);
+		if (previewKeys.length > 0) {
+			await deleteObjects(previewKeys).catch((error) =>
+				console.warn(
+					`[ScreenFinalize] ${sessionId}: preview cleanup failed:`,
+					error,
+				),
+			);
+		}
 
 		// Bill what was actually recorded if the meter came up short (pause is
 		// the client's word; the video's length is the proof).
@@ -1052,6 +1115,32 @@ export async function finalizeScreenSession(
 				`[ScreenFinalize] ${sessionId}: chunks arrived during finalize - re-running`,
 			);
 			await reopenScreenSession(sessionId);
+		} else if (outputs.both) {
+			// Screen + camera are baked into the one video, so their separate
+			// raw tracks are of no further use - drop them now rather than a
+			// day later. (Marked PROCESSED, a straggler can't re-stitch them.)
+			const tracks = await prisma.participantRecording.findMany({
+				where: {
+					recordingSessionId: sessionId,
+					segments: { some: { status: "UPLOADED" } },
+				},
+				select: {
+					id: true,
+					segments: {
+						where: { status: "UPLOADED" },
+						select: { id: true, assetKey: true },
+					},
+				},
+			});
+			for (const track of tracks) {
+				await deleteTrackChunks(track).catch((error) =>
+					// The daily cleanup sweep picks it up instead.
+					console.warn(
+						`[ScreenFinalize] ${sessionId}: chunk cleanup failed for ${track.id}:`,
+						error,
+					),
+				);
+			}
 		}
 	} catch (error) {
 		const message = errorMessage(error);
