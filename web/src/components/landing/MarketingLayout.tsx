@@ -322,8 +322,10 @@ const MarketingLayout = ({
   useSeoMeta();
 
   // Each marketing page starts at the top, unless the link targets a section.
+  // Instant, because the global smooth scrolling would otherwise glide up
+  // from wherever the previous page was scrolled to.
   useEffect(() => {
-    if (!hash) window.scrollTo(0, 0);
+    if (!hash) window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [pathname, hash]);
 
   // Stable so the memoized auth CTAs don't re-render on every page render.
