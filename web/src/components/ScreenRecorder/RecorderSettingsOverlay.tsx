@@ -27,6 +27,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/shared/ui/dropdown-menu";
+import { playCallSound } from "@/lib/callSounds";
 import { cleanDeviceLabel, sortMediaDevices } from "@/lib/mediaDevices";
 import { cn } from "@/lib/utils";
 import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
@@ -97,8 +98,17 @@ const RecorderSettingsOverlay = ({
     selectMicrophone,
     selectCamera,
   } = useLocalMedia();
-  const { startRecording, layout, setLayout, screenSurface, setScreenSurface } =
-    useScreenRecordingContext();
+  const {
+    startRecording,
+    isStartingMedia,
+    layout,
+    setLayout,
+    screenSurface,
+    setScreenSurface,
+  } = useScreenRecordingContext();
+  // Like a space while its media starts: the mic and camera the recorder
+  // opens with stay locked until they're ready, so clicks can't race them.
+  // Later toggles are quick and stay live.
   const microphoneDevices = sortMediaDevices(rawMicrophoneDevices);
   const cameraDevices = sortMediaDevices(rawCameraDevices);
   const source: RecordSource = layout === "camera" ? "camera" : screenSurface;
@@ -111,7 +121,9 @@ const RecorderSettingsOverlay = ({
   const handleLayoutChange = (next: ScreenRecorderLayout) => {
     const nextShowsCamera = next !== "screen";
     if (nextShowsCamera !== isCameraEnabled) {
-      void toggleCamera().catch(() => undefined);
+      void toggleCamera()
+        .then(() => playCallSound(nextShowsCamera ? "cameraOn" : "cameraOff"))
+        .catch(() => undefined);
     }
     if (next === "camera" && isScreenShareEnabled) void stopScreenShare();
     setLayout(next);
@@ -141,9 +153,19 @@ const RecorderSettingsOverlay = ({
 
   const handleMicrophoneSelect = (deviceId: string) => {
     void selectMicrophone(deviceId)
-      .then(() => {
-        if (!isMicrophoneEnabled) return toggleMicrophone();
+      .then(async () => {
+        if (isMicrophoneEnabled) return;
+        await toggleMicrophone();
+        playCallSound("micOn");
       })
+      .catch(() => undefined);
+  };
+
+  // Same blips as a space's mic button.
+  const handleMicrophoneToggle = () => {
+    const turningOn = !isMicrophoneEnabled;
+    void toggleMicrophone()
+      .then(() => playCallSound(turningOn ? "micOn" : "micOff"))
       .catch(() => undefined);
   };
 
@@ -184,7 +206,8 @@ const RecorderSettingsOverlay = ({
             isMicrophoneEnabled ? "Turn off microphone" : "Turn on microphone"
           }
           active={isMicrophoneEnabled}
-          onToggle={() => void toggleMicrophone().catch(() => undefined)}
+          onToggle={handleMicrophoneToggle}
+          loading={isStartingMedia}
           menuLabel="Microphone options"
           deviceHeading="Input Device"
           devices={microphoneDevices}
@@ -197,6 +220,7 @@ const RecorderSettingsOverlay = ({
           label={layout === "screen" ? "Turn on camera" : "Turn off camera"}
           active={layout !== "screen"}
           onToggle={handleCameraToggle}
+          loading={isStartingMedia}
           toggleDisabled={layout === "camera"}
           menuLabel="Camera options"
           deviceHeading="Camera"
@@ -220,6 +244,9 @@ interface SplitMediaControlProps {
   active: boolean;
   onToggle: () => void;
   toggleDisabled?: boolean;
+  /** A device is turning on: the whole control shows disabled until it's
+   *  ready, like a space's controls while media starts. */
+  loading?: boolean;
   menuLabel: string;
   deviceHeading: string;
   devices: MediaDeviceInfo[];
@@ -238,6 +265,7 @@ const SplitMediaControl = ({
   active,
   onToggle,
   toggleDisabled = false,
+  loading = false,
   menuLabel,
   deviceHeading,
   devices,
@@ -253,12 +281,12 @@ const SplitMediaControl = ({
       <button
         type="button"
         onClick={onToggle}
-        disabled={toggleDisabled}
+        disabled={toggleDisabled || loading}
         aria-label={label}
         title={label}
         className={cn(
           "flex min-h-11 w-11 items-center justify-center rounded-l-xl border text-lg font-medium transition-all duration-200",
-          toggleDisabled
+          toggleDisabled || loading
             ? DISABLED_CONTROL_CLASS
             : active
               ? "cursor-pointer border-call-border bg-primary hover:bg-muted"
@@ -272,15 +300,18 @@ const SplitMediaControl = ({
           <button
             type="button"
             aria-label={menuLabel}
+            disabled={loading}
             className={cn(
               "flex min-h-11 w-6 cursor-pointer items-center justify-center rounded-r-xl border text-base font-medium transition-all duration-200",
-              active
-                ? isOpen
-                  ? "border-call-border bg-muted"
-                  : "border-call-border bg-primary hover:bg-muted"
-                : isOpen
-                  ? "border-red-400/10 bg-red-400/40 text-red-400"
-                  : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
+              loading
+                ? DISABLED_CONTROL_CLASS
+                : active
+                  ? isOpen
+                    ? "border-call-border bg-muted"
+                    : "border-call-border bg-primary hover:bg-muted"
+                  : isOpen
+                    ? "border-red-400/10 bg-red-400/40 text-red-400"
+                    : "border-red-400/10 bg-red-400/20 text-red-400 hover:bg-red-400/40",
             )}
           >
             {isOpen ? <FiChevronUp /> : <FiChevronDown />}

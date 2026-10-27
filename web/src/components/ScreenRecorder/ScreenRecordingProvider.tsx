@@ -35,6 +35,7 @@ import useUnloadWarning from "@/hooks/useUnloadWarning";
 import { usePresence } from "@/hooks/usePresence";
 import type { ScreenStreams } from "@/hooks/useScreenLocalRecording";
 import { measureCaptureRect } from "@/lib/captureGeometry";
+import { playCallSound, prepareCallSounds } from "@/lib/callSounds";
 import { useLocalMedia, type ScreenSurface } from "./LocalMediaProvider";
 
 interface RecordingInfo {
@@ -50,6 +51,8 @@ interface ScreenRecordingContextValue {
   /** Whether the floating recorder panel is showing. */
   isOpen: boolean;
   openRecorder: () => void;
+  /** The camera/mic the recorder turns on when it opens are still starting. */
+  isStartingMedia: boolean;
   /** Hides the panel and releases every device. No-op while a take is live. */
   closeRecorder: () => void;
   recordingState: ScreenRecordingState;
@@ -251,6 +254,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   // The panel plays its exit animation before unmounting; the devices are
   // released after it, so the camera preview doesn't go black mid-fade.
   const panel = usePresence(isOpen);
+  const [isStartingMedia, setIsStartingMedia] = useState(false);
   const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -260,16 +264,40 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const openRecorder = useCallback(() => {
+    // Opened from a click, so the audio engine can wake for the blips.
+    prepareCallSounds();
     if (releaseTimerRef.current) {
       clearTimeout(releaseTimerRef.current);
       releaseTimerRef.current = null;
     }
     setIsOpen(true);
+    const starts: Promise<void>[] = [];
     if (layoutRef.current !== "screen" && !isCameraEnabled) {
-      void toggleCamera().catch(() => undefined);
+      starts.push(toggleCamera().catch(() => undefined));
     }
-    if (!isMicrophoneEnabled) void toggleMicrophone().catch(() => undefined);
+    if (!isMicrophoneEnabled) {
+      starts.push(toggleMicrophone().catch(() => undefined));
+    }
+    if (starts.length > 0) {
+      setIsStartingMedia(true);
+      void Promise.all(starts).finally(() => setIsStartingMedia(false));
+    }
   }, [isCameraEnabled, isMicrophoneEnabled, toggleCamera, toggleMicrophone]);
+
+  // Chime when a take actually begins - right after the countdown - like a
+  // space's recording.
+  const recordingStateForSound = manager.recordingState;
+  const previousRecordingStateRef = useRef(recordingStateForSound);
+  useEffect(() => {
+    const previous = previousRecordingStateRef.current;
+    previousRecordingStateRef.current = recordingStateForSound;
+    if (
+      recordingStateForSound === "recording" &&
+      (previous === "countdown" || previous === "starting")
+    ) {
+      playCallSound("recordingStart");
+    }
+  }, [recordingStateForSound]);
 
   const closeRecorder = useCallback(() => {
     if (isActive) return;
@@ -370,6 +398,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     () => ({
       isOpen,
       openRecorder,
+      isStartingMedia,
       closeRecorder,
       recordingState: manager.recordingState,
       isActive,
@@ -400,6 +429,7 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
     [
       isOpen,
       openRecorder,
+      isStartingMedia,
       closeRecorder,
       manager,
       isActive,
