@@ -1,27 +1,42 @@
 import { AuthenticateWithRedirectCallback } from "@clerk/clerk-react";
-import DashboardWrapper from "@/components/Dashboard/DashboardWrapper";
 import ProtectedRoute from "@/components/shared/ProtectedRoute";
-import { SocketProvider } from "@/context/socket";
-import { ClockSyncProvider } from "@/context/clockSync";
 import LandingPage from "@/pages/LandingPage";
-import FeaturesPage from "@/pages/FeaturesPage";
-import UseCasesPage from "@/pages/UseCasesPage";
-import OpenSourcePage from "@/pages/OpenSourcePage";
-import PricingPage from "@/pages/PricingPage";
-import PrivacyPage from "@/pages/PrivacyPage";
-import TermsPage from "@/pages/TermsPage";
-import DashboardHomePage from "@/pages/DashboardHomePage";
-import DashboardCalendarPage from "@/pages/DashboardCalendarPage";
-import DashboardProjectPage from "@/pages/DashboardProjectPage";
-import DashboardSettingsPage from "@/pages/DashboardSettingsPage";
-import RoomPage from "@/pages/RoomPage";
-import ScreenRecorderPage from "@/pages/ScreenRecorderPage";
-import SharedRecordingPage from "@/pages/SharedRecordingPage";
-import MeetingEndedPage from "@/pages/MeetingEndedPage";
 import LocalMediaProvider from "@/components/ScreenRecorder/LocalMediaProvider";
 import ScreenRecordingProvider from "@/components/ScreenRecorder/ScreenRecordingProvider";
 import RecordingChunkDrainer from "@/components/Space/recording/RecordingChunkDrainer";
+import { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import AppLoader from "@/components/shared/AppLoader";
+
+// Only the landing page ships in the main bundle; every other page (and the
+// call/recorder code behind it) downloads when it's first visited.
+const FeaturesPage = lazy(() => import("@/pages/FeaturesPage"));
+const UseCasesPage = lazy(() => import("@/pages/UseCasesPage"));
+const OpenSourcePage = lazy(() => import("@/pages/OpenSourcePage"));
+const PricingPage = lazy(() => import("@/pages/PricingPage"));
+const PrivacyPage = lazy(() => import("@/pages/PrivacyPage"));
+const TermsPage = lazy(() => import("@/pages/TermsPage"));
+const DashboardWrapper = lazy(
+  () => import("@/components/Dashboard/DashboardWrapper"),
+);
+const DashboardHomePage = lazy(() => import("@/pages/DashboardHomePage"));
+const DashboardCalendarPage = lazy(
+  () => import("@/pages/DashboardCalendarPage"),
+);
+const DashboardProjectPage = lazy(() => import("@/pages/DashboardProjectPage"));
+const DashboardSettingsPage = lazy(
+  () => import("@/pages/DashboardSettingsPage"),
+);
+const ScreenRecorderPage = lazy(() => import("@/pages/ScreenRecorderPage"));
+const SharedRecordingPage = lazy(() => import("@/pages/SharedRecordingPage"));
+const MeetingEndedPage = lazy(() => import("@/pages/MeetingEndedPage"));
+const RoomPage = lazy(() => import("@/pages/RoomPage"));
+const SocketProvider = lazy(() =>
+  import("@/context/socket").then((m) => ({ default: m.SocketProvider })),
+);
+const ClockSyncProvider = lazy(() =>
+  import("@/context/clockSync").then((m) => ({ default: m.ClockSyncProvider })),
+);
 
 const App = () => {
   return (
@@ -31,6 +46,7 @@ const App = () => {
     <LocalMediaProvider>
       <ScreenRecordingProvider>
         <RecordingChunkDrainer />
+        <Suspense fallback={<AppLoader />}>
         <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/features" element={<FeaturesPage />} />
@@ -119,6 +135,7 @@ const App = () => {
       />
         <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </ScreenRecordingProvider>
     </LocalMediaProvider>
   );

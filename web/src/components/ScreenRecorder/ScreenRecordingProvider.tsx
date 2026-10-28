@@ -13,6 +13,8 @@
 
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -25,7 +27,10 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import CountdownOverlay from "@/components/Space/recording/CountdownOverlay";
-import ScreenRecorderPanel from "./ScreenRecorderPanel";
+
+// The provider wraps every page; the panel's UI only downloads once the
+// recorder is first opened.
+const ScreenRecorderPanel = lazy(() => import("./ScreenRecorderPanel"));
 import { useGetMe } from "@/hooks/useUserQuery";
 import { toast } from "@/lib/toast";
 import useScreenRecordingManager, {
@@ -440,7 +445,11 @@ const ScreenRecordingProvider = ({ children }: { children: ReactNode }) => {
   return (
     <ScreenRecordingContext.Provider value={value}>
       {children}
-      {panel.rendered && <ScreenRecorderPanel isClosing={panel.isClosing} />}
+      {panel.rendered && (
+        <Suspense fallback={null}>
+          <ScreenRecorderPanel isClosing={panel.isClosing} />
+        </Suspense>
+      )}
       {/* Gone the moment it hits zero, before the chime and the capture. */}
       {manager.recordingState === "countdown" &&
         manager.countdownValue !== null && (
