@@ -162,9 +162,9 @@ export const IconCardGrid = ({
       <motion.article
         key={title}
         variants={riseVariants}
-        className="rounded-2xl border border-border bg-background p-6"
+        className="rounded-2xl border border-border bg-foreground/[0.03] p-6"
       >
-        <div className="flex size-10 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
+        <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
           <Icon className="size-5" />
         </div>
         <h3 className="font-bricolage mt-5 text-base font-semibold tracking-tight text-foreground">
@@ -190,7 +190,7 @@ export const FeaturesGrid = () => (
         <motion.article
           key={title}
           variants={riseVariants}
-          className="flex flex-col rounded-2xl border border-border bg-background p-6"
+          className="flex flex-col rounded-2xl border border-border bg-foreground/[0.03] p-6"
         >
           <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
             <Icon className="size-5" />
@@ -201,7 +201,7 @@ export const FeaturesGrid = () => (
           <p className="mt-2 text-sm leading-6 text-foreground/65">
             {description}
           </p>
-          <div className="relative mt-6 flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-xl bg-[url('/img/landing/feature-bg.jpg')] bg-cover bg-center px-5 sm:aspect-[16/10]">
+          <div className="relative mt-6 flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-[url('/img/landing/feature-bg.jpg')] bg-cover bg-center px-5 sm:aspect-[16/10]">
             {Demo && <Demo />}
           </div>
         </motion.article>
@@ -247,7 +247,7 @@ const PointsCard = ({
 }) => (
   <motion.div
     variants={riseVariants}
-    className="rounded-2xl border border-border bg-background p-6 sm:p-8"
+    className="rounded-2xl border border-border bg-foreground/[0.03] p-6 sm:p-8"
   >
     <h3 className="font-bricolage text-lg font-semibold tracking-tight text-foreground">
       {title}
@@ -318,7 +318,7 @@ export const PricingCards = () => {
           className={`flex flex-col rounded-2xl border p-6 text-foreground ${
             plan.featured
               ? "border-(--landing-brand-tint) bg-(--landing-brand-soft) shadow-[0_12px_34px_rgba(0,65,170,0.14)] ring-1 ring-(--landing-brand-tint)"
-              : "border-border bg-background"
+              : "border-border bg-foreground/[0.03]"
           }`}
         >
           <div className="flex items-center justify-between">

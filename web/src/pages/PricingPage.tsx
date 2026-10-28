@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Check, Minus } from "lucide-react";
 
@@ -16,7 +17,7 @@ import { riseVariants } from "@/components/landing/motion";
 const PLAN_NAMES = ["Demo", "Pro", "Self-host"] as const;
 
 // One row per capability; `true`/`false` render as a check or a dash.
-const comparisonRows: { label: string; values: (string | boolean)[] }[] = [
+const comparisonRows: { label: string; values: (ReactNode | boolean)[] }[] = [
   { label: "Price", values: ["Free", "$8.99/mo", "Free"] },
   { label: "Video quality", values: ["720p", "Up to 4K", "Up to 4K"] },
   { label: "Audio quality", values: ["44.1kHz", "48kHz", "48kHz"] },
@@ -32,7 +33,11 @@ const comparisonRows: { label: string; values: (string | boolean)[] }[] = [
   { label: "Cloud backup", values: [false, true, true] },
   {
     label: "Setup",
-    values: ["None", "None", "Your LiveKit and R2 keys"],
+    values: [
+      <span className="text-green-500">None</span>,
+      <span className="text-green-500">None</span>,
+      <span className="text-red-400">Your LiveKit and R2 keys</span>,
+    ],
   },
 ];
 
@@ -69,7 +74,7 @@ const pricingFaqs = [
   },
 ];
 
-const CellValue = ({ value }: { value: string | boolean }) => {
+const CellValue = ({ value }: { value: ReactNode | boolean }) => {
   if (value === true) {
     return (
       <Check

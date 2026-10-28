@@ -168,7 +168,7 @@ export const selfHostPoints = [
     icon: Server,
     title: "Run it on your own infra",
     description:
-      "Connect your own LiveKit and Cloudflare R2, and recordings are stored entirely on infrastructure you control.",
+      "Connect your own LiveKit and R2 to keep recordings on your infrastructure.",
   },
   {
     icon: KeyRound,
