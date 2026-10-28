@@ -100,9 +100,10 @@ const ProjectThumbnail = ({ spaceId }: { spaceId: string }) => {
       const hasReadyVideo = data.some(
         (o) => o.status === "READY" && o.hasVideo,
       );
-      const allFailed =
-        data.length > 0 && data.every((o) => o.status === "FAILED");
-      return hasReadyVideo || allFailed ? false : 5000;
+      const settled =
+        data.length > 0 &&
+        data.every((o) => o.status === "READY" || o.status === "FAILED");
+      return hasReadyVideo || settled ? false : 5000;
     },
   );
 
@@ -132,6 +133,11 @@ const ProjectThumbnail = ({ spaceId }: { spaceId: string }) => {
       return (
         <div className="skeleton-shimmer aspect-video overflow-hidden rounded-lg" />
       );
+    }
+    // Ready but audio-only (camera off the whole take): a black frame, like
+    // the video would have been - not "Processing" forever.
+    if ((outputs ?? []).some((o) => o.status === "READY")) {
+      return <div className="aspect-video overflow-hidden rounded-lg bg-black" />;
     }
     const allFailed =
       (outputs ?? []).length > 0 &&
