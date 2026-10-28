@@ -376,11 +376,9 @@ const RecordingProvider = ({
       return;
     }
 
-    const stream = buildLocalStream();
-    if (!stream || stream.getTracks().length === 0) {
-      return;
-    }
-
+    // Camera and mic both off still records: the take is black until they're
+    // turned on.
+    const stream = buildLocalStream() ?? new MediaStream();
     setStream(stream);
     void startRecording(stream, buildLocalScreenStream());
   }, [

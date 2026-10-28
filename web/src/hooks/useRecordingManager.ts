@@ -28,6 +28,10 @@ import { useClockSync } from "@/context/clockSync";
 import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
 import { getMaxBufferedSequence } from "@/lib/recordingDb";
+import {
+  type BlackVideoSource,
+  createBlackVideoTrack,
+} from "@/lib/blackVideoTrack";
 import { sendUsageHeartbeat } from "./useUsage";
 import useLocalRecording, {
   type LocalChunk,
@@ -317,6 +321,8 @@ export default function useRecordingManager(
   >(new Map());
   const pcmSourceTrackIdRef = useRef<string | null>(null);
   const pcmStartingRef = useRef(false);
+  // Stands in for the camera while it's off; lives for one take.
+  const blackVideoRef = useRef<BlackVideoSource | null>(null);
   const sourceSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -741,6 +747,23 @@ export default function useRecordingManager(
     [ensureRoute],
   );
 
+  /** The camera track's recorder tracks: the live ones, with black video in
+   *  place of the camera while it's off (mic off too: black on its own). */
+  const combinedTracksFor = useCallback(
+    (live: MediaStreamTrack[]): MediaStreamTrack[] => {
+      if (live.some((track) => track.kind === "video")) return live;
+      blackVideoRef.current ??= createBlackVideoTrack();
+      const black = blackVideoRef.current?.track;
+      return black ? [black, ...live] : live;
+    },
+    [],
+  );
+
+  const releaseBlackVideo = useCallback(() => {
+    blackVideoRef.current?.stop();
+    blackVideoRef.current = null;
+  }, []);
+
   /** Point every recorder at the participant's current tracks. */
   const syncSources = useCallback(() => {
     const sessionForSync = capturingSessionRef.current;
@@ -750,8 +773,9 @@ export default function useRecordingManager(
     const live = liveTracks(stream);
 
     if (data.recordingMode !== "AUDIO_ONLY") {
+      const tracks = combinedTracksFor(live);
       void localRef.current.setCombinedStream(
-        live.length > 0 ? new MediaStream(live) : null,
+        tracks.length > 0 ? new MediaStream(tracks) : null,
       );
     }
 
@@ -768,7 +792,7 @@ export default function useRecordingManager(
       });
     }
     if (data.recordingMode === "AUDIO_ONLY") setError(null);
-  }, [readLiveStream, startPcm]);
+  }, [readLiveStream, combinedTracksFor, startPcm]);
 
   const scheduleSourceSyncRef = useRef<(delayMs?: number) => void>(
     () => undefined,
@@ -807,23 +831,25 @@ export default function useRecordingManager(
       if (!capturingSessionRef.current || !data) return;
       if (sourceSyncTimerRef.current) return; // a sync is already scheduled
       const live = liveTracks(readLiveStream());
-      const liveIds = live
-        .map((track) => track.id)
-        .sort()
-        .join(",");
-      const recordingIds = [...localRef.current.getCombinedTrackIds()]
-        .sort()
-        .join(",");
       const mic = live.find((track) => track.kind === "audio");
-      const cameraDrift =
-        data.recordingMode !== "AUDIO_ONLY" && liveIds !== recordingIds;
+      let cameraDrift = false;
+      if (data.recordingMode !== "AUDIO_ONLY") {
+        const expectedIds = combinedTracksFor(live)
+          .map((track) => track.id)
+          .sort()
+          .join(",");
+        const recordingIds = [...localRef.current.getCombinedTrackIds()]
+          .sort()
+          .join(",");
+        cameraDrift = expectedIds !== recordingIds;
+      }
       const micDrift =
         !!mic &&
         (!pcmRef.current.isRunning() || pcmSourceTrackIdRef.current !== mic.id);
       if (cameraDrift || micDrift) scheduleSourceSyncRef.current(0);
     }, 1000);
     return () => clearInterval(interval);
-  }, [recordingState, readLiveStream]);
+  }, [recordingState, readLiveStream, combinedTracksFor]);
 
   /** Only one tab records a participant: a newer tab (same participant)
    *  takes over, and this one stops and completes what it captured. */
@@ -1091,6 +1117,7 @@ export default function useRecordingManager(
         }
 
         const { combinedChunks, screen } = await localRef.current.stopRecording();
+        releaseBlackVideo();
         // stop() flushes the final partial PCM chunk before closing.
         await pcmRef.current.stop();
         const pcmChunks = pcmRef.current.getChunkCount();
@@ -1158,7 +1185,13 @@ export default function useRecordingManager(
         captureStoppedRef.current = null;
       }
     },
-    [clearCountdown, completeRoute, releaseRecorderLock, stopSessionClock],
+    [
+      clearCountdown,
+      completeRoute,
+      releaseRecorderLock,
+      releaseBlackVideo,
+      stopSessionClock,
+    ],
   );
   handleRecordingStoppedRef.current = handleRecordingStopped;
 
@@ -1386,8 +1419,9 @@ export default function useRecordingManager(
       stopSessionClock();
       if (sourceSyncTimerRef.current) clearTimeout(sourceSyncTimerRef.current);
       releaseRecorderLockRef.current?.();
+      releaseBlackVideo();
     },
-    [clearCountdown, stopSessionClock],
+    [clearCountdown, stopSessionClock, releaseBlackVideo],
   );
 
   // Missed the socket start (joined during the take, socket reconnecting, or
