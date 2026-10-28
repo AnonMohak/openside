@@ -133,7 +133,10 @@ export const useUploadAvatar = () => {
     mutationFn: async (file: File) => {
       const { data: presign } = await api.post<{
         data: { url: string; key: string };
-      }>("/settings/avatar/presign", { contentType: file.type });
+      }>("/settings/avatar/presign", {
+        contentType: file.type,
+        sizeBytes: file.size,
+      });
 
       await fetch(presign.data.url, {
         method: "PUT",

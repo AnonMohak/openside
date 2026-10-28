@@ -179,12 +179,11 @@ export async function createSpaceController(
 			return;
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to create space:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to create space: ${errorMessage}!`,
+			message: "Failed to create space!",
 		});
 	}
 }
@@ -345,12 +344,11 @@ export async function scheduleSpaceController(
 			return;
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to schedule meeting:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to schedule meeting: ${errorMessage}!`,
+			message: "Failed to schedule meeting!",
 		});
 	}
 }
@@ -401,12 +399,11 @@ export async function deleteSpaceController(
 			}
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to delete project:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to delete project: ${errorMessage}!`,
+			message: "Failed to delete project!",
 		});
 	}
 }
@@ -466,12 +463,11 @@ export async function updateSpaceController(
 			message: "Space updated successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to update space:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to update space: ${errorMessage}!`,
+			message: "Failed to update space!",
 		});
 	}
 }
@@ -567,12 +563,11 @@ export async function endSpaceController(
 			}
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to end space:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to end space: ${errorMessage}!`,
+			message: "Failed to end space!",
 		});
 	}
 }
@@ -629,12 +624,11 @@ export async function getSpaceByIdController(
 			message: "Space retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get space:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get space: ${errorMessage}!`,
+			message: "Failed to get space!",
 		});
 	}
 }
@@ -672,12 +666,11 @@ export async function getSpaceByJoinCodeController(
 			message: "Space retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get space:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get space: ${errorMessage}!`,
+			message: "Failed to get space!",
 		});
 	}
 }
@@ -723,12 +716,11 @@ export async function getUserSpacesController(
 			message: "User spaces retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get user spaces:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get user spaces: ${errorMessage}!`,
+			message: "Failed to get user spaces!",
 		});
 	}
 }
@@ -814,12 +806,11 @@ export async function sendSpaceInviteController(
 			message: `Invite sent to ${recipient}!`,
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to send invite:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to send invite: ${errorMessage}!`,
+			message: "Failed to send invite!",
 		});
 	}
 }

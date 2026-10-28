@@ -28,12 +28,11 @@ export async function searchProjectsController(
 			message: "Search completed successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to search projects:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to search projects: ${errorMessage}!`,
+			message: "Failed to search projects!",
 		});
 	}
 }

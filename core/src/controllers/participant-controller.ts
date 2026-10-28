@@ -138,12 +138,11 @@ export async function joinSpaceController(
 			}
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to join space:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to join space: ${errorMessage}!`,
+			message: "Failed to join space!",
 		});
 	}
 }
@@ -318,12 +317,11 @@ export async function updateRoleController(
 			}
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to update role:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to update role: ${errorMessage}!`,
+			message: "Failed to update role!",
 		});
 	}
 }
@@ -420,12 +418,11 @@ export async function kickParticipantController(
 			}
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to kick participant:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to kick participant: ${errorMessage}!`,
+			message: "Failed to kick participant!",
 		});
 	}
 }
@@ -537,12 +534,11 @@ export async function stopParticipantTrackController(
 			}
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to stop participant track:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to stop participant track: ${errorMessage}!`,
+			message: "Failed to stop participant track!",
 		});
 	}
 }

@@ -549,6 +549,8 @@ class ChunkUploadQueue {
         sequenceNumber: item.sequenceNumber,
         contentType,
         ext: ext(item.mimeType),
+        // Signed into the URL: R2 refuses a body of any other size.
+        sizeBytes: item.blob.size,
       });
       const { uploadUrl, assetKey } = presign.data.data;
 

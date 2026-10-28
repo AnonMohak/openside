@@ -96,7 +96,11 @@ router.post(
 				return;
 			}
 			const user = await findOrCreateUser(req.user);
-			const result = await presignAvatarUpload(user.id, contentType);
+			const result = await presignAvatarUpload(
+				user.id,
+				contentType,
+				req.body?.sizeBytes,
+			);
 			res
 				.status(200)
 				.json({ success: true, data: result, message: "Upload URL created!" });
@@ -109,6 +113,14 @@ router.post(
 					success: false,
 					data: { code: "UNSUPPORTED_AVATAR_TYPE" },
 					message: "Avatar must be a PNG, JPEG, WebP, or GIF image!",
+				});
+				return;
+			}
+			if (error instanceof Error && error.message === "AVATAR_TOO_LARGE") {
+				res.status(400).json({
+					success: false,
+					data: { code: "AVATAR_TOO_LARGE" },
+					message: "Avatar must be 5 MB or smaller!",
 				});
 				return;
 			}

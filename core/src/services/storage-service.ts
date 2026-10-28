@@ -92,10 +92,59 @@ export function buildScreenSegmentKey(params: {
 	return `screen/${userId}/sessions/${recordingSessionId}/${participantRecordingId}/${trackType}/${sequenceNumber}.${ext}`;
 }
 
-/** Presigned PUT URL for a direct browser → R2 upload. */
+/** A recording chunk is a few seconds of media - even 4K at a high bitrate
+ *  stays far below this. */
+export const MAX_SEGMENT_BYTES = 100 * 1024 * 1024;
+
+/** The containers the browser recorders produce (see the web's ext()). */
+const SEGMENT_EXTS = new Set(["webm", "mp4", "mkv", "ogg", "pcm"]);
+/** A recorder's mimeType, codecs included ("video/webm;codecs=vp9,opus"). */
+const SEGMENT_CONTENT_TYPE =
+	/^(?:(?:video|audio)\/(?:webm|mp4|x-matroska|ogg)|audio\/pcm-raw|application\/octet-stream)(?:\s*;[\w\s=.,"+-]*)?$/i;
+
+export type SegmentUploadCheck =
+	| { ok: true; ext: string; contentType: string; sizeBytes: number }
+	| { ok: false; message: string };
+
+/** Validate a chunk upload request: only recorder media, of a bounded size. */
+export function checkSegmentUpload(body: {
+	ext?: unknown;
+	contentType?: unknown;
+	sizeBytes?: unknown;
+}): SegmentUploadCheck {
+	const ext = body.ext === undefined ? "webm" : body.ext;
+	if (typeof ext !== "string" || !SEGMENT_EXTS.has(ext)) {
+		return { ok: false, message: "Unsupported file extension!" };
+	}
+	const contentType = body.contentType ?? "application/octet-stream";
+	if (
+		typeof contentType !== "string" ||
+		!SEGMENT_CONTENT_TYPE.test(contentType)
+	) {
+		return { ok: false, message: "Unsupported content type!" };
+	}
+	const { sizeBytes } = body;
+	if (
+		typeof sizeBytes !== "number" ||
+		!Number.isInteger(sizeBytes) ||
+		sizeBytes <= 0 ||
+		sizeBytes > MAX_SEGMENT_BYTES
+	) {
+		return { ok: false, message: "Chunk size is missing or too large!" };
+	}
+	return { ok: true, ext, contentType, sizeBytes };
+}
+
+/**
+ * Presigned PUT URL for a direct browser → R2 upload. The content type and,
+ * when given, the exact byte length are signed into the URL, so the upload
+ * must match what was validated here (the presigner leaves Content-Type
+ * unsigned unless told otherwise).
+ */
 export async function presignPut(
 	key: string,
 	contentType: string,
+	contentLength?: number,
 ): Promise<string> {
 	// Resolves from the recording session's infra stamp: the owner's own R2 for
 	// self-hosted sessions, platform R2 otherwise.
@@ -104,10 +153,12 @@ export async function presignPut(
 		Bucket: r2.bucket,
 		Key: key,
 		ContentType: contentType,
+		...(contentLength !== undefined ? { ContentLength: contentLength } : {}),
 	});
 
 	return getSignedUrl(r2.client, command, {
 		expiresIn: PUT_URL_TTL_SECONDS,
+		signableHeaders: new Set(["content-type", "content-length"]),
 	});
 }
 

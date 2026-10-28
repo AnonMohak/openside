@@ -57,12 +57,11 @@ export async function getUsageController(
 			message: "Usage retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to load usage:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to load usage: ${errorMessage}!`,
+			message: "Failed to load usage!",
 		});
 	}
 }
@@ -91,12 +90,11 @@ export async function getEntitlementsController(
 			message: "Entitlements retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to load entitlements:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to load entitlements: ${errorMessage}!`,
+			message: "Failed to load entitlements!",
 		});
 	}
 }
@@ -172,12 +170,11 @@ export async function usageHeartbeatController(
 			message: "Heartbeat recorded!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Heartbeat failed:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Heartbeat failed: ${errorMessage}!`,
+			message: "Heartbeat failed!",
 		});
 	}
 }

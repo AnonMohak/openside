@@ -119,12 +119,11 @@ export async function getDownloadUrlController(
 				: "Preparing download, try again shortly!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get download URL:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get download URL: ${errorMessage}!`,
+			message: "Failed to get download URL!",
 		});
 	}
 }
@@ -195,12 +194,11 @@ export async function getFinalOutputsBySpaceIdController(
 			return;
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get final outputs:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get final outputs: ${errorMessage}!`,
+			message: "Failed to get final outputs!",
 		});
 	}
 }

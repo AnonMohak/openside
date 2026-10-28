@@ -38,6 +38,7 @@ import { maybeFinalizeScreenSession } from "../services/screen-finalization-serv
 import {
 	type TrackType,
 	buildScreenSegmentKey,
+	checkSegmentUpload,
 	presignGet,
 	presignPut,
 } from "../services/storage-service";
@@ -126,12 +127,11 @@ export async function startScreenSessionController(
 			});
 			return;
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to start recording:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to start recording: ${errorMessage}!`,
+			message: "Failed to start recording!",
 		});
 	}
 }
@@ -200,12 +200,11 @@ export async function stopScreenSessionController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to stop recording:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to stop recording: ${errorMessage}!`,
+			message: "Failed to stop recording!",
 		});
 	}
 }
@@ -260,12 +259,11 @@ function screenSessionPauseController(paused: boolean) {
 					return;
 				}
 			}
-			const errorMessage =
-				error instanceof Error ? error.message : "Unknown error";
+			console.error("[API] Failed to … recording:", error);
 			res.status(500).json({
 				success: false,
 				data: null,
-				message: `Failed to ${paused ? "pause" : "resume"} recording: ${errorMessage}!`,
+				message: `Failed to ${paused ? "pause" : "resume"} recording!`,
 			});
 		}
 	};
@@ -371,12 +369,11 @@ export async function renameScreenSessionController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to rename recording:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to rename recording: ${errorMessage}!`,
+			message: "Failed to rename recording!",
 		});
 	}
 }
@@ -421,12 +418,11 @@ export async function deleteScreenSessionController(
 			return;
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to delete recording:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to delete recording: ${errorMessage}!`,
+			message: "Failed to delete recording!",
 		});
 	}
 }
@@ -521,12 +517,11 @@ export async function createScreenRecordingController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to create recording:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to create recording: ${errorMessage}!`,
+			message: "Failed to create recording!",
 		});
 	}
 }
@@ -549,8 +544,6 @@ export async function presignScreenSegmentController(
 			participantRecordingId,
 			trackType,
 			sequenceNumber,
-			contentType,
-			ext,
 		} = req.body;
 
 		if (!participantRecordingId || typeof participantRecordingId !== "string") {
@@ -568,6 +561,14 @@ export async function presignScreenSegmentController(
 				data: null,
 				message: "Valid track type is required!",
 			});
+			return;
+		}
+
+		const upload = checkSegmentUpload(req.body);
+		if (!upload.ok) {
+			res
+				.status(400)
+				.json({ success: false, data: null, message: upload.message });
 			return;
 		}
 
@@ -619,14 +620,13 @@ export async function presignScreenSegmentController(
 			participantRecordingId,
 			trackType,
 			sequenceNumber,
-			ext: typeof ext === "string" ? ext : undefined,
+			ext: upload.ext,
 		});
 
 		const uploadUrl = await presignPut(
 			assetKey,
-			typeof contentType === "string"
-				? contentType
-				: "application/octet-stream",
+			upload.contentType,
+			upload.sizeBytes,
 		);
 
 		res.status(200).json({
@@ -635,12 +635,11 @@ export async function presignScreenSegmentController(
 			message: "Upload URL issued successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to presign upload:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to presign upload: ${errorMessage}!`,
+			message: "Failed to presign upload!",
 		});
 	}
 }
@@ -812,12 +811,11 @@ export async function createScreenSegmentController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to create segment:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to create segment: ${errorMessage}!`,
+			message: "Failed to create segment!",
 		});
 	}
 }
@@ -851,12 +849,11 @@ export async function listScreenRecordingsController(
 			message: "Screen recordings retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to list recordings:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to list recordings: ${errorMessage}!`,
+			message: "Failed to list recordings!",
 		});
 	}
 }
@@ -929,12 +926,11 @@ export async function getScreenOutputUrlController(
 			message: "Download URL issued successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get URL:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get URL: ${errorMessage}!`,
+			message: "Failed to get URL!",
 		});
 	}
 }
@@ -998,12 +994,11 @@ export async function shareScreenSessionController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to create share link:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to create share link: ${errorMessage}!`,
+			message: "Failed to create share link!",
 		});
 	}
 }
@@ -1060,12 +1055,11 @@ export async function unshareScreenSessionController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to revoke share link:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to revoke share link: ${errorMessage}!`,
+			message: "Failed to revoke share link!",
 		});
 	}
 }
@@ -1102,12 +1096,11 @@ export async function getSharedRecordingController(
 			message: "Recording retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to load recording:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to load recording: ${errorMessage}!`,
+			message: "Failed to load recording!",
 		});
 	}
 }
@@ -1137,12 +1130,11 @@ export async function recordSharedViewController(
 			message: "View recorded!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to record view:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to record view: ${errorMessage}!`,
+			message: "Failed to record view!",
 		});
 	}
 }
@@ -1194,12 +1186,11 @@ export async function getSharedOutputUrlController(
 			message: "URL issued successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get URL:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get URL: ${errorMessage}!`,
+			message: "Failed to get URL!",
 		});
 	}
 }
@@ -1248,12 +1239,11 @@ export async function getSharedFinalOutputUrlController(
 			message: "URL issued successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get URL:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get URL: ${errorMessage}!`,
+			message: "Failed to get URL!",
 		});
 	}
 }
@@ -1318,12 +1308,11 @@ export async function getSharedFinalOutputDownloadController(
 				: "Preparing download, try again shortly!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to get download URL:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to get download URL: ${errorMessage}!`,
+			message: "Failed to get download URL!",
 		});
 	}
 }
@@ -1361,12 +1350,11 @@ export async function listSharedCommentsController(
 			message: "Comments retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to load comments:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to load comments: ${errorMessage}!`,
+			message: "Failed to load comments!",
 		});
 	}
 }
@@ -1452,12 +1440,11 @@ export async function createSharedCommentController(
 			});
 			return;
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to post comment:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to post comment: ${errorMessage}!`,
+			message: "Failed to post comment!",
 		});
 	}
 }
@@ -1503,12 +1490,11 @@ export async function listScreenCommentsController(
 			message: "Comments retrieved successfully!",
 		});
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to load comments:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to load comments: ${errorMessage}!`,
+			message: "Failed to load comments!",
 		});
 	}
 }
@@ -1582,12 +1568,11 @@ export async function createScreenCommentController(
 			});
 			return;
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to post comment:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to post comment: ${errorMessage}!`,
+			message: "Failed to post comment!",
 		});
 	}
 }
@@ -1659,12 +1644,11 @@ export async function updateCommentController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to update comment:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to update comment: ${errorMessage}!`,
+			message: "Failed to update comment!",
 		});
 	}
 }
@@ -1720,12 +1704,11 @@ export async function deleteScreenCommentController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to delete comment:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to delete comment: ${errorMessage}!`,
+			message: "Failed to delete comment!",
 		});
 	}
 }
@@ -1805,12 +1788,11 @@ export async function markScreenRecordingCompleteController(
 				return;
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : "Unknown error";
+		console.error("[API] Failed to mark recording complete:", error);
 		res.status(500).json({
 			success: false,
 			data: null,
-			message: `Failed to mark recording complete: ${errorMessage}!`,
+			message: "Failed to mark recording complete!",
 		});
 	}
 }

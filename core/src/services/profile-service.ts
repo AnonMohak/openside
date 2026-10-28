@@ -20,6 +20,8 @@ import {
 } from "../lib/recording-constants.ts";
 import { deleteObjects, presignGet, presignPut } from "./storage-service.ts";
 
+export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
 	"image/png": "png",
 	"image/jpeg": "jpg",
@@ -124,14 +126,24 @@ function buildAvatarKey(userId: string, ext: string): string {
 export async function presignAvatarUpload(
 	userId: string,
 	contentType: string,
+	sizeBytes: unknown,
 ): Promise<{ url: string; key: string }> {
 	const ext = AVATAR_CONTENT_TYPES[contentType];
 	if (!ext) {
 		throw new Error("UNSUPPORTED_AVATAR_TYPE");
 	}
+	if (
+		typeof sizeBytes !== "number" ||
+		!Number.isInteger(sizeBytes) ||
+		sizeBytes <= 0 ||
+		sizeBytes > MAX_AVATAR_BYTES
+	) {
+		throw new Error("AVATAR_TOO_LARGE");
+	}
 
 	const key = buildAvatarKey(userId, ext);
-	const url = await presignPut(key, contentType);
+	// The size is signed into the URL, so a bigger upload is refused by R2.
+	const url = await presignPut(key, contentType, sizeBytes);
 	return { url, key };
 }
 
