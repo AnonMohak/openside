@@ -10,6 +10,7 @@ import {
 } from "@/components/landing/LandingAuthCTA";
 import { useOpenAuth } from "@/components/landing/MarketingLayout";
 import { featureDemos } from "@/components/landing/FeatureDemos";
+import HowItWorksDiagram from "@/components/landing/HowItWorksDiagram";
 import UseCasesShowcase from "@/components/landing/UseCasesShowcase";
 import {
   faqs as defaultFaqs,
@@ -298,6 +299,23 @@ export const PrivacySection = ({ moreLink }: { moreLink?: boolean }) => (
         subtitle="Run Openside on your own infrastructure, with your own keys."
         points={selfHostPoints}
       />
+    </motion.div>
+  </Section>
+);
+
+export const HowItWorksSection = () => (
+  <Section id="how-it-works">
+    <SectionHeading
+      eyebrow="How it works"
+      title="Recorded on each device, not over the internet."
+      description="Most tools record the call stream, so quality depends on everyone's connection. Openside records each person locally, so it doesn't."
+    />
+    <motion.div
+      className="mt-10 overflow-x-auto"
+      {...inView}
+      variants={riseVariants}
+    >
+      <HowItWorksDiagram />
     </motion.div>
   </Section>
 );
