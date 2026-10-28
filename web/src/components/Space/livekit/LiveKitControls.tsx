@@ -692,21 +692,8 @@ const LiveKitControls = ({
   const previousOutputVolumeBeforeDeafenRef = useRef(outputVolume);
   const { sendReaction } = useLiveKitReactions();
   const recording = useRecordingContext();
+  // The start chime plays from the recording manager when the countdown ends.
   const recordingStateForSound = recording.recordingState;
-  const previousRecordingStateRef = useRef(recordingStateForSound);
-  // Chime when a recording actually begins - i.e. right after the synced
-  // countdown, which every participant runs - but not when someone joins a
-  // recording that's already going (idle -> recording).
-  useEffect(() => {
-    const previous = previousRecordingStateRef.current;
-    previousRecordingStateRef.current = recordingStateForSound;
-    if (
-      recordingStateForSound === "recording" &&
-      (previous === "countdown" || previous === "starting")
-    ) {
-      playCallSound("recordingStart");
-    }
-  }, [recordingStateForSound]);
 
   // Recording failures surface as toasts - never as inline UI in the bar.
   // Each fires once, on the transition into the failed state.

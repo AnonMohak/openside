@@ -27,6 +27,7 @@ import { useSocket } from "@/context/socket";
 import { useClockSync } from "@/context/clockSync";
 import api from "@/lib/axiosInstance";
 import { toast } from "@/lib/toast";
+import { callSoundLengthMs, playCallSound } from "@/lib/callSounds";
 import { getMaxBufferedSequence } from "@/lib/recordingDb";
 import {
   type BlackVideoSource,
@@ -62,6 +63,11 @@ export type RecordingState =
 
 /** Synchronized 3-2-1 lead-in before everyone's recorder actually starts. */
 const COUNTDOWN_MS = 3000;
+
+/** The start chime plays when the countdown ends; capture waits this long so
+ *  no one's mic picks it up. Fixed (not 0 with sounds off) so every client
+ *  starts at the same instant; the margin covers speaker/Bluetooth latency. */
+const START_CHIME_MS = callSoundLengthMs("recordingStart") + 300;
 
 /** Uploader routing key per local track. */
 type UploadTrack = "combined" | "screen" | "pcm";
@@ -1001,36 +1007,52 @@ export default function useRecordingManager(
         void handleRecordingStoppedRef.current(previous);
       }
 
-      setSessionId(data.sessionId);
-      setSpaceRecordingSessionId(data.spaceRecordingSessionId);
+      // The countdown ends at the broadcast instant and the chime plays then;
+      // capture starts once it's over, so no one's mic records it. Every
+      // client shifts by the same amount, so the take stays in sync.
+      const chimeAt = data.startedAt;
+      const take = { ...data, startedAt: data.startedAt + START_CHIME_MS };
+
+      setSessionId(take.sessionId);
+      setSpaceRecordingSessionId(take.spaceRecordingSessionId);
       setCombinedRecordingId(null);
       setScreenRecordingId(null);
-      startDataRef.current = data;
-      sessionStartedAtRef.current = data.startedAt;
-      activeSessionRef.current = data.sessionId;
+      startDataRef.current = take;
+      sessionStartedAtRef.current = take.startedAt;
+      activeSessionRef.current = take.sessionId;
 
-      const countdownMs = data.countdownMs ?? COUNTDOWN_MS;
+      const countdownMs = take.countdownMs ?? COUNTDOWN_MS;
       clearCountdown();
       setError(null);
 
       const serverNow = getServerTimeRef.current();
       const delayMs =
-        data.startedAt > serverNow
-          ? Math.min(countdownMs, data.startedAt - serverNow)
+        take.startedAt > serverNow
+          ? Math.min(countdownMs + START_CHIME_MS, take.startedAt - serverNow)
           : 0;
 
       if (delayMs <= 0) {
-        void beginRecording(data);
+        void beginRecording(take);
         return;
       }
 
       isCountingDownRef.current = true;
       setRecordingState("countdown");
-      setCountdownValue(Math.max(1, Math.ceil(delayMs / 1000)));
+
+      // Joined mid-chime: no countdown or chime left, just wait out the rest.
+      const countdownLeftMs = Math.min(countdownMs, chimeAt - serverNow);
+      if (countdownLeftMs <= 0) {
+        countdownTimeoutRef.current = setTimeout(() => {
+          void beginRecording(take);
+        }, delayMs);
+        return;
+      }
+
+      setCountdownValue(Math.max(1, Math.ceil(countdownLeftMs / 1000)));
 
       // Visual tick: 3 → 2 → 1, adjusted for late socket replays.
       countdownIntervalRef.current = setInterval(() => {
-        const remainingMs = data.startedAt - getServerTimeRef.current();
+        const remainingMs = chimeAt - getServerTimeRef.current();
         if (remainingMs <= 0) {
           if (countdownIntervalRef.current) {
             clearInterval(countdownIntervalRef.current);
@@ -1041,10 +1063,16 @@ export default function useRecordingManager(
         setCountdownValue(Math.max(1, Math.ceil(remainingMs / 1000)));
       }, 250);
 
-      // When the lead-in elapses, everyone's recorder starts together.
+      // At zero: clear the countdown, chime, and start everyone's recorder
+      // together once the chime is over.
       countdownTimeoutRef.current = setTimeout(() => {
-        void beginRecording(data);
-      }, delayMs);
+        setCountdownValue(null);
+        playCallSound("recordingStart");
+        countdownTimeoutRef.current = setTimeout(
+          () => void beginRecording(take),
+          Math.max(0, take.startedAt - getServerTimeRef.current()),
+        );
+      }, countdownLeftMs);
     },
     [beginRecording, clearCountdown],
   );
