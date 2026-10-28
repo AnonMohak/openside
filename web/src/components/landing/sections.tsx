@@ -146,39 +146,6 @@ export const Section = ({
   </section>
 );
 
-// A grid of icon + title + description cards.
-export const IconCardGrid = ({
-  items,
-  columns = "sm:grid-cols-2 lg:grid-cols-3",
-}: {
-  items: { icon: ElementType; title: string; description: string }[];
-  columns?: string;
-}) => (
-  <motion.div
-    className={`mt-10 grid grid-cols-1 gap-6 ${columns}`}
-    {...inView}
-    variants={containerVariants}
-  >
-    {items.map(({ icon: Icon, title, description }) => (
-      <motion.article
-        key={title}
-        variants={riseVariants}
-        className="rounded-2xl border border-border bg-foreground/[0.03] p-6"
-      >
-        <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
-          <Icon className="size-5" />
-        </div>
-        <h3 className="font-bricolage mt-5 text-base font-semibold tracking-tight text-foreground">
-          {title}
-        </h3>
-        <p className="mt-2 text-sm leading-6 text-foreground/65">
-          {description}
-        </p>
-      </motion.article>
-    ))}
-  </motion.div>
-);
-
 export const FeaturesGrid = () => (
   <motion.div
     className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2"
