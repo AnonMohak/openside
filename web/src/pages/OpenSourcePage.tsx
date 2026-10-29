@@ -62,39 +62,10 @@ const hostingOptions = [
   },
 ];
 
-const stack = [
-  {
-    path: "web/",
-    name: "Web app",
-    description:
-      "React 19 and Vite, served from a Cloudflare Worker. Meeting rooms, the screen recorder, the dashboard, and share pages.",
-  },
-  {
-    path: "core/ · api",
-    name: "API",
-    description:
-      "Express and Socket.IO. Auth, spaces, recording sessions, LiveKit tokens, comments, search, and self-host keys.",
-  },
-  {
-    path: "core/ · finalize",
-    name: "Finalize worker",
-    description:
-      "Stitches uploaded chunks into each recording's master file with ffmpeg, away from the API.",
-  },
-  {
-    path: "core/ · general",
-    name: "General worker",
-    description:
-      "Handles on-demand transcodes, so exports never hold up a finalize.",
-  },
-];
-
-const services = ["PostgreSQL", "Redis + BullMQ", "LiveKit", "Cloudflare R2"];
-
 const alternativePoints = [
-  "Remote podcasts and interviews with a separate local track for every guest",
-  "Quick screen recordings with a camera bubble, shared with one link",
-  "Comments on shared recordings, and links you can switch off",
+  "Remote podcasts with a local track per guest",
+  "Screen recordings with a camera bubble",
+  "Comments and links you can switch off",
   "Downloads as MP4, WebM, MP3, or WAV",
   "Free self-hosting on your own LiveKit and R2",
 ];
@@ -289,56 +260,6 @@ const HostingSection = () => (
   </Block>
 );
 
-const StackSection = () => (
-  <Block
-    id="architecture"
-    eyebrow="Architecture"
-    title="What's inside the repo."
-    description="Two apps: a frontend and a backend. The backend builds once and runs as an API plus media workers."
-  >
-    <motion.ul
-      className="mt-10 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-foreground/[0.03]"
-      {...inView}
-      variants={containerVariants}
-    >
-      {stack.map(({ path, name, description }) => (
-        <motion.li
-          key={name}
-          variants={riseVariants}
-          className="grid grid-cols-1 gap-2 p-5 sm:grid-cols-[11rem_1fr] sm:gap-6 sm:p-6"
-        >
-          <code className="self-start justify-self-start rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground/70">
-            {path}
-          </code>
-          <div>
-            <h3 className="font-bricolage text-base font-semibold tracking-tight text-foreground">
-              {name}
-            </h3>
-            <p className="mt-1 text-sm leading-6 text-foreground/65">
-              {description}
-            </p>
-          </div>
-        </motion.li>
-      ))}
-    </motion.ul>
-    <motion.div
-      className="mt-4 flex flex-wrap items-center gap-2 text-sm"
-      {...inView}
-      variants={riseVariants}
-    >
-      <span className="text-foreground/55">Runs on</span>
-      {services.map((service) => (
-        <span
-          key={service}
-          className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground/70"
-        >
-          {service}
-        </span>
-      ))}
-    </motion.div>
-  </Block>
-);
-
 const AlternativeSection = () => (
   <section className="border-b border-border px-4 py-16 sm:px-6 sm:py-20">
     <motion.div
@@ -436,7 +357,6 @@ const OpenSourcePage = () => (
   >
     <RepoSection />
     <HostingSection />
-    <StackSection />
     <AlternativeSection />
     <ContributeSection />
   </MarketingLayout>
