@@ -18,7 +18,6 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Timer,
   UploadCloud,
   UserPlus,
   UserRound,
@@ -58,80 +57,74 @@ const chapters: Chapter[] = [
   {
     id: "quality",
     label: "Recording quality",
-    title: "Studio quality, captured on each device.",
+    title: "Studio quality on every device.",
     summary:
-      "Every participant is recorded in their own browser at the quality their camera and mic can deliver, separately from the live call.",
+      "Each participant is recorded in their own browser at full quality, separately from the live call.",
     features: [
       {
         icon: Video,
         title: "Up to 4K video",
         description:
-          "Pick the resolution and frame rate before you record. Video is captured locally, so the call's bandwidth never limits it.",
+          "Pick resolution and frame rate before recording. Capture is local, so call bandwidth never limits it.",
         tags: ["720p", "1080p", "4K", "24 fps", "30 fps"],
       },
       {
         icon: AudioLines,
         title: "Up to 48kHz audio",
         description:
-          "Each mic is recorded on its own device and can be exported as uncompressed WAV, ready for your editor.",
+          "Each mic is recorded on its own device and exports as uncompressed WAV for your editor.",
         tags: ["44.1kHz", "48kHz"],
       },
       {
         icon: SlidersHorizontal,
-        title: "Noise suppression, echo cancellation, auto gain",
+        title: "Audio cleanup controls",
         description:
-          "Switch each one on when a room needs it, or leave them off for the cleanest raw signal.",
+          "Toggle noise suppression, echo cancellation, and auto gain, or leave them off for raw signal.",
       },
       {
         icon: Headphones,
         title: "Audio-only mode",
         description:
-          "Record podcasts and voiceovers without turning on a camera.",
+          "Record podcasts and voiceovers with the camera off, keeping the same local audio quality.",
       },
       {
         icon: UploadCloud,
         title: "Crash-safe, chunked uploads",
         description:
-          "Recordings upload in small chunks while you record, with live upload progress for every participant. If a connection drops, the rest uploads when it's back, and stuck takes are recovered automatically.",
-      },
-      {
-        icon: Timer,
-        title: "Countdown and start chime",
-        description:
-          "Everyone sees a countdown before the take begins. Recording starts after the chime, so it never ends up on anyone's mic.",
+          "Chunks upload while you record with live progress, resume after drops, and stuck takes recover automatically.",
       },
     ],
   },
   {
     id: "call",
     label: "In the call",
-    title: "A recording studio in a browser tab.",
+    title: "A studio in a browser tab.",
     summary:
-      "Guests join from a link, and hosts get everything they need to run the session without switching tools.",
+      "Guests join from a link, and hosts get everything needed to run the session in one place.",
     features: [
       {
         icon: UserPlus,
-        title: "Join with a link and a name",
+        title: "Join with a link",
         description:
-          "No downloads and no account for guests. They can preview their camera and mic before they join.",
+          "Guests need no download or account, and can preview their camera and mic before joining.",
       },
       {
         icon: Image,
-        title: "Background blur and virtual backgrounds",
+        title: "Backgrounds and blur",
         description:
-          "Blur the room behind you, pick a preset, or upload your own image.",
+          "Blur the room behind you, pick a preset background, or upload an image of your own.",
       },
       {
         icon: MonitorUp,
         title: "Screen sharing",
         description:
-          "Share your screen during the call to walk through slides, docs, or a live demo.",
+          "Share your screen during the call to walk everyone through slides, docs, or a live demo.",
       },
       {
         icon: MessageCircle,
         title: "Chat and reactions",
         description:
-          "Send messages and emoji reactions without leaving the recording screen.",
+          "Send messages and emoji reactions to everyone in the call without leaving the recording screen.",
       },
       {
         icon: ShieldCheck,
@@ -141,9 +134,9 @@ const chapters: Chapter[] = [
       },
       {
         icon: CalendarDays,
-        title: "Scheduling with calendar invites",
+        title: "Scheduled sessions",
         description:
-          "Plan a session ahead of time and every invitee gets an email with a calendar invite attached.",
+          "Plan a session ahead of time, and every invitee gets an email with a calendar invite.",
       },
     ],
   },
@@ -156,75 +149,75 @@ const chapters: Chapter[] = [
     features: [
       {
         icon: AppWindow,
-        title: "Record exactly what you need",
+        title: "Choose what to record",
         description:
-          "Capture your whole screen, a single window, or the current tab, or record just your camera.",
+          "Capture your whole screen, a single window, the current tab, or only your camera.",
         tags: ["Full screen", "Window", "Current tab", "Camera only"],
       },
       {
         icon: UserRound,
         title: "Camera bubble",
         description:
-          "Show your camera as a circle or a square and drag it anywhere. It's composited into the video in a single encode.",
+          "Show your camera as a circle or square, drag it anywhere, and it's composited in one encode.",
         tags: ["Circle", "Square"],
       },
       {
         icon: Pause,
         title: "Pause, resume, or restart",
         description:
-          "Pause mid-take and pick up where you left off, or throw the take away and start again.",
+          "Pause mid-take and pick up where you left off, or discard the take and start again.",
       },
       {
         icon: Link2,
-        title: "Ready to share when you stop",
+        title: "Instant share links",
         description:
-          "The take uploads and renders as soon as you stop, then it's one link away from your team.",
+          "The take uploads and renders as soon as you stop, then it's one link from your team.",
       },
     ],
   },
   {
     id: "library",
     label: "After the call",
-    title: "Every take, organized.",
+    title: "Every take, organized in one place.",
     summary:
       "Meetings and screen recordings land in one library, with the context your team needs around them.",
     features: [
       {
         icon: FolderOpen,
-        title: "Projects",
+        title: "Projects for every call",
         description:
-          "Each meeting and screen take lives in its own project, with its recordings, tracks, and a description.",
+          "Each meeting and screen take gets its own project with recordings, tracks, and a description.",
       },
       {
         icon: Search,
-        title: "Search from the command menu",
+        title: "Command menu search",
         description:
-          "Jump to any project from the command menu, backed by server-side search.",
+          "Jump to any project from the command menu, backed by server-side search across your library.",
       },
       {
         icon: MessagesSquare,
         title: "Threaded comments",
         description:
-          "Comment on any recording, reply in threads, and edit what you wrote.",
+          "Comment on any recording, reply in threads, and edit what you wrote whenever you need to.",
       },
       {
         icon: CalendarDays,
         title: "Calendar view",
         description:
-          "See scheduled sessions next to past recordings and screen takes, all on one calendar.",
+          "See scheduled sessions next to past recordings and screen takes, all on a single calendar.",
       },
     ],
   },
   {
     id: "sharing",
     label: "Sharing & export",
-    title: "Your files, in the format you need.",
+    title: "Your files in any format.",
     summary:
       "Download everything for your editor, or share a link and let people watch in the browser.",
     features: [
       {
         icon: Layers,
-        title: "Mixed recording and separate tracks",
+        title: "Mixed and separate tracks",
         description:
           "Get a mixed version for quick review, plus separate audio and video for every participant.",
       },
@@ -232,21 +225,20 @@ const chapters: Chapter[] = [
         icon: Download,
         title: "Export in any format",
         description:
-          "Download video and audio in the format your workflow expects.",
+          "Download video and audio in the format your editing workflow expects, from compressed to lossless.",
         tags: ["MP4", "WebM", "MP3", "WAV"],
       },
       {
         icon: Link2,
         title: "Share links you control",
         description:
-          "Create a link for any recording, then disable or replace it whenever you want.",
+          "Create a link for any recording, then disable or replace it whenever you want to.",
       },
       {
         icon: CloudUpload,
         title: "Cloud backup",
         description:
           "Keep a server-side mixed copy of the call as a safety net alongside the local tracks.",
-        tags: ["Pro"],
       },
     ],
   },
@@ -257,28 +249,6 @@ const inView = {
   whileInView: "show",
   viewport: { once: true, margin: "-100px" },
 } as const;
-
-const ChapterNav = () => (
-  <nav
-    aria-label="Feature categories"
-    className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-md"
-  >
-    <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 py-3 sm:px-6 lg:px-0">
-      {chapters.map(({ id, label }, index) => (
-        <a
-          key={id}
-          href={`#${id}`}
-          className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground/65 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
-        >
-          <span className="text-xs tabular-nums text-foreground/35">
-            {String(index + 1).padStart(2, "0")}
-          </span>
-          {label}
-        </a>
-      ))}
-    </div>
-  </nav>
-);
 
 const Stats = () => (
   <motion.dl
@@ -380,7 +350,6 @@ const FeaturesPage = () => (
       />
     }
   >
-    <ChapterNav />
     <Stats />
     {chapters.map((chapter, index) => (
       <ChapterSection key={chapter.id} chapter={chapter} index={index} />
