@@ -540,11 +540,7 @@ export async function presignScreenSegmentController(
 			return;
 		}
 
-		const {
-			participantRecordingId,
-			trackType,
-			sequenceNumber,
-		} = req.body;
+		const { participantRecordingId, trackType, sequenceNumber } = req.body;
 
 		if (!participantRecordingId || typeof participantRecordingId !== "string") {
 			res.status(400).json({
