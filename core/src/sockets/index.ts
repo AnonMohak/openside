@@ -23,7 +23,7 @@ import {
 	buildRecordingStartedPayload,
 	setRecordingEventPublisher,
 } from "../lib/recording-events.ts";
-import { getSessionIdByShareToken } from "../services/recording-service";
+import { getSessionIdByShareToken } from "../services/recording-service.ts";
 
 type RecordingCommentEvent = {
 	id: string;
