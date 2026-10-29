@@ -1,7 +1,6 @@
 import { useState, type ElementType, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 
 import {
@@ -99,12 +98,10 @@ export const SectionHeading = ({
   eyebrow,
   title,
   description,
-  moreLink,
 }: {
   eyebrow: string;
   title: string;
   description?: string;
-  moreLink?: { to: string; label: string };
 }) => (
   <motion.div
     className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
@@ -122,15 +119,6 @@ export const SectionHeading = ({
         </p>
       )}
     </div>
-    {moreLink && (
-      <Link
-        to={moreLink.to}
-        className="group flex shrink-0 items-center gap-1.5 text-sm font-medium text-(--landing-brand-text)"
-      >
-        {moreLink.label}
-        <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-      </Link>
-    )}
   </motion.div>
 );
 
@@ -178,25 +166,23 @@ export const FeaturesGrid = () => (
   </motion.div>
 );
 
-export const FeaturesSection = ({ moreLink }: { moreLink?: boolean }) => (
+export const FeaturesSection = () => (
   <Section id="features">
     <SectionHeading
       eyebrow="Features"
       title="Record, download, and share in one place."
       description="From capture to sharing, Openside handles the whole workflow so you can focus on the recording itself."
-      moreLink={moreLink ? { to: "/features", label: "All features" } : undefined}
     />
     <FeaturesGrid />
   </Section>
 );
 
-export const UseCasesSection = ({ moreLink }: { moreLink?: boolean }) => (
+export const UseCasesSection = () => (
   <Section id="use-cases">
     <SectionHeading
       eyebrow="Use cases"
       title="Built for how you actually work."
       description="From solo creators to compliance-sensitive teams, here is who records with Openside."
-      moreLink={moreLink ? { to: "/use-cases", label: "All use cases" } : undefined}
     />
     <motion.div {...inView} variants={riseVariants}>
       <UseCasesShowcase items={useCases} />
@@ -241,15 +227,12 @@ const PointsCard = ({
   </motion.div>
 );
 
-export const PrivacySection = ({ moreLink }: { moreLink?: boolean }) => (
+export const PrivacySection = () => (
   <Section id="privacy">
     <SectionHeading
       eyebrow="Privacy"
       title="Your recordings stay yours."
       description="Two things matter here: keeping your recordings safe, and letting you run the whole thing yourself. Here is how each works."
-      moreLink={
-        moreLink ? { to: "/open-source", label: "Open source & self-hosting" } : undefined
-      }
     />
     <motion.div
       className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-2"
@@ -274,7 +257,7 @@ export const HowItWorksSection = () => (
   <Section id="how-it-works">
     <SectionHeading
       eyebrow="How it works"
-      title="Recorded on each device, not over the internet."
+      title="Recorded locally, not over the internet."
       description="Most tools record the call stream, so quality depends on everyone's connection. Openside records each person locally, so it doesn't."
     />
     <motion.div
@@ -361,13 +344,12 @@ export const PricingCards = () => {
   );
 };
 
-export const PricingSection = ({ moreLink }: { moreLink?: boolean }) => (
+export const PricingSection = () => (
   <Section id="pricing">
     <SectionHeading
       eyebrow="Pricing"
       title="Simple pricing that scales with you."
       description="Self-host it for free, or let us handle the infrastructure. No hidden fees, cancel anytime."
-      moreLink={moreLink ? { to: "/pricing", label: "Compare plans" } : undefined}
     />
     <PricingCards />
   </Section>

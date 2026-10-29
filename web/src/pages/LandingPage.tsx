@@ -93,15 +93,15 @@ const LandingPage = () => {
         </motion.section>
       }
     >
-      <FeaturesSection moreLink />
+      <FeaturesSection />
       <SectionDivider />
-      <UseCasesSection moreLink />
+      <UseCasesSection />
       <SectionDivider />
-      <PrivacySection moreLink />
+      <PrivacySection />
       <SectionDivider />
       <HowItWorksSection />
       <SectionDivider />
-      <PricingSection moreLink />
+      <PricingSection />
       <SectionDivider />
       <FaqSection />
     </MarketingLayout>
