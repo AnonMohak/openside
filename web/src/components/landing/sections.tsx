@@ -160,7 +160,7 @@ export const FeaturesGrid = () => (
           variants={riseVariants}
           className="flex flex-col rounded-2xl border border-border bg-foreground/[0.03] p-6"
         >
-          <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
             <Icon className="size-5" />
           </div>
           <h3 className="font-bricolage mt-5 text-lg font-semibold tracking-tight text-foreground">
