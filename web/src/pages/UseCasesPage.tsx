@@ -161,42 +161,6 @@ const inView = {
   viewport: { once: true, margin: "-100px" },
 } as const;
 
-const UseCaseIndex = () => (
-  <motion.nav
-    aria-label="Use cases"
-    className="border-b border-border px-4 py-10 sm:px-6"
-    {...inView}
-    variants={containerVariants}
-  >
-    <div className="mx-auto max-w-5xl">
-      <motion.p
-        variants={riseVariants}
-        className="text-sm font-medium text-foreground/60"
-      >
-        Jump to a workflow
-      </motion.p>
-      <motion.ul
-        variants={riseVariants}
-        className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4"
-      >
-        {useCases.map(({ icon: Icon, title }) => (
-          <li key={title}>
-            <a
-              href={`#${slug(title)}`}
-              className="flex items-center gap-3 rounded-xl border border-border bg-foreground/[0.03] px-3 py-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-(--landing-chip) text-foreground">
-                <Icon className="size-4" />
-              </span>
-              {title}
-            </a>
-          </li>
-        ))}
-      </motion.ul>
-    </div>
-  </motion.nav>
-);
-
 const UseCaseStory = ({
   useCase,
   index,
@@ -297,7 +261,6 @@ const UseCasesPage = () => (
       />
     }
   >
-    <UseCaseIndex />
     {useCases.map((useCase, index) => (
       <UseCaseStory key={useCase.title} useCase={useCase} index={index} />
     ))}

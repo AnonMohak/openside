@@ -38,7 +38,7 @@ const LandingPage = () => {
 
   return (
     <MarketingLayout
-      heroClassName="flex min-h-screen flex-col items-center justify-start"
+      heroClassName="flex min-h-(--hero-art-height) flex-col items-center justify-start"
       heroArt="full"
       hero={
         <motion.section

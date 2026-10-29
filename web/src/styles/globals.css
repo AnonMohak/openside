@@ -98,6 +98,38 @@
   --selection-text: var(--background);
 }
 
+/* Height of the home hero band: the screen, or the hero copy plus the
+   screenshot box below it (4:3 on phones, 16:9 from sm up) if that's taller.
+   The inner pages draw the hero artwork at this same height so it sits exactly
+   where it does on the home page, just cut off below their shorter band. */
+.landing {
+  --hero-art-height: max(100vh, calc((100vw - 2rem) * 4 / 3 + 41rem));
+}
+
+@media (min-width: 24rem) {
+  .landing {
+    --hero-art-height: max(100vh, calc((100vw - 2rem) * 4 / 3 + 34.25rem));
+  }
+}
+
+@media (min-width: 30rem) {
+  .landing {
+    --hero-art-height: max(100vh, calc((100vw - 2rem) * 4 / 3 + 31.5rem));
+  }
+}
+
+@media (min-width: 40rem) {
+  .landing {
+    --hero-art-height: max(100vh, calc(min(100vw - 3rem, 64rem) * 9 / 16 + 38rem));
+  }
+}
+
+@media (min-width: 64rem) {
+  .landing {
+    --hero-art-height: max(100vh, calc(min(100vw - 3rem, 64rem) * 9 / 16 + 33rem));
+  }
+}
+
 .dark .landing {
   --background: #0c0c0d;
   --foreground: #f2f2f3;

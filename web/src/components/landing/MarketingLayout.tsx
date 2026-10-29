@@ -112,7 +112,7 @@ const MarketingHeader = ({ onOpenAuth }: { onOpenAuth: OpenAuth }) => {
               key={to}
               to={to}
               aria-current={pathname === to ? "page" : undefined}
-              className={`rounded-lg px-3 py-2 transition-colors hover:bg-white/10 hover:text-white ${
+              className={`rounded-full px-3 py-2 transition-colors hover:bg-white/10 hover:text-white ${
                 pathname === to ? "bg-white/10 text-white" : ""
               }`}
             >
@@ -309,8 +309,8 @@ const MarketingLayout = ({
   hero: ReactNode;
   heroClassName?: string;
   /**
-   * "full" shows the whole scene (the full-height home hero). "sky" stretches
-   * the artwork past a short band so only open sky sits behind the text.
+   * "full" shows the whole scene (the full-height home hero). "sky" draws the
+   * same scene at the same size, cut off below a short band.
    */
   heroArt?: "full" | "sky";
   children: ReactNode;
@@ -341,11 +341,16 @@ const MarketingLayout = ({
 
         <main>
           <div
-            className={`relative overflow-hidden bg-background px-4 pt-24 sm:px-6 sm:pt-28 ${heroClassName}`}
+            className={`relative overflow-hidden bg-background px-4 pt-24 sm:px-6 sm:pt-28 ${
+              heroArt === "sky" ? "min-h-[31rem] sm:min-h-[34rem]" : ""
+            } ${heroClassName}`}
           >
+            {/* The sky band has a fixed minimum height so it doesn't change
+                between pages, and draws the artwork at the home hero's height
+                so the image doesn't shift when switching from the home page. */}
             <div
-              className={`absolute inset-x-0 top-0 z-0 bg-[url('/img/landing/hero-bg.webp')] bg-cover ${
-                heroArt === "full" ? "bottom-0 bg-bottom" : "h-[220%] bg-top"
+              className={`absolute inset-x-0 top-0 z-0 bg-[url('/img/landing/hero-bg.webp')] bg-cover bg-bottom ${
+                heroArt === "full" ? "bottom-0" : "h-(--hero-art-height)"
               }`}
             />
             {hero}

@@ -76,6 +76,7 @@ const contributeLinks = [
     title: "Report an issue",
     description: "Found a bug or want a feature? Open an issue on GitHub.",
     href: `${REPO_URL}/issues`,
+    cta: "Open an issue",
   },
   {
     icon: GitPullRequest,
@@ -83,6 +84,7 @@ const contributeLinks = [
     description:
       "Include screenshots and the reasoning behind the change so it's easy to review.",
     href: `${REPO_URL}/pulls`,
+    cta: "View pull requests",
   },
   {
     icon: ShieldAlert,
@@ -90,6 +92,7 @@ const contributeLinks = [
     description:
       "Please report security problems privately through a GitHub advisory, not a public issue.",
     href: `${REPO_URL}/security/advisories/new`,
+    cta: "Open an advisory",
   },
 ];
 
@@ -318,27 +321,28 @@ const ContributeSection = () => (
       {...inView}
       variants={containerVariants}
     >
-      {contributeLinks.map(({ icon: Icon, title, description, href }) => (
+      {contributeLinks.map(({ icon: Icon, title, description, href, cta }) => (
         <motion.a
           key={title}
           variants={riseVariants}
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="group flex flex-col rounded-2xl border border-border bg-foreground/[0.03] p-6 transition-colors hover:bg-foreground/[0.06]"
+          className="group flex flex-col rounded-2xl border border-border bg-foreground/[0.03] p-6 transition-colors hover:border-foreground/20 hover:bg-foreground/[0.06]"
         >
-          <div className="flex items-center justify-between">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-(--landing-chip) text-foreground">
-              <Icon className="size-5" />
-            </span>
-            <ArrowUpRight className="size-4 text-foreground/40 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-          </div>
-          <h3 className="font-bricolage mt-5 text-base font-semibold tracking-tight text-foreground">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-(--landing-brand-tint)/45 text-(--landing-brand-text)">
+            <Icon className="size-5" />
+          </span>
+          <h3 className="font-bricolage mt-5 text-lg font-semibold tracking-tight text-foreground">
             {title}
           </h3>
-          <p className="mt-1.5 text-sm leading-6 text-foreground/65">
+          <p className="mt-2 flex-1 text-sm leading-6 text-foreground/65">
             {description}
           </p>
+          <span className="mt-6 flex items-center justify-between border-t border-border pt-4 text-sm font-medium text-foreground/80 transition-colors group-hover:text-foreground">
+            {cta}
+            <ArrowUpRight className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+          </span>
         </motion.a>
       ))}
     </motion.div>

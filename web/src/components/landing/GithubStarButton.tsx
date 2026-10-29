@@ -11,8 +11,26 @@ const formatStars = (count: number) => {
   return String(count);
 };
 
+// Fetched once per page load and shared, since every marketing page mounts its
+// own header and would otherwise refetch and replay the count-up on navigation.
+let starsRequest: Promise<number | null> | null = null;
+let cachedStars: number | null = null;
+
+const fetchStars = () => {
+  starsRequest ??= fetch(`https://api.github.com/repos/${REPO}`)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (data && typeof data.stargazers_count === "number") {
+        cachedStars = data.stargazers_count;
+      }
+      return cachedStars;
+    })
+    .catch(() => null);
+  return starsRequest;
+};
+
 const GithubStarButton = () => {
-  const [stars, setStars] = useState<number | null>(null);
+  const [stars, setStars] = useState<number | null>(cachedStars);
   // Counts up (1, 2, 3, …) while the fetch is in flight so the button never
   // shows a dead placeholder - it snaps to the real value once it arrives.
   const [tick, setTick] = useState(0);
@@ -20,16 +38,10 @@ const GithubStarButton = () => {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`https://api.github.com/repos/${REPO}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!cancelled && data && typeof data.stargazers_count === "number") {
-          setStars(data.stargazers_count);
-        }
-      })
-      .catch(() => {
-        // Non-critical - just hide the count if the API call fails.
-      });
+    // Non-critical - the count just keeps ticking if the API call fails.
+    fetchStars().then((count) => {
+      if (!cancelled && count !== null) setStars(count);
+    });
 
     return () => {
       cancelled = true;
