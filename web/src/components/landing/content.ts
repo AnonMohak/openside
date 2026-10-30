@@ -5,11 +5,11 @@ import {
   Bug,
   Code2,
   EyeOff,
-  GraduationCap,
   Headphones,
   KeyRound,
   Layers,
   Lock,
+  MessageSquareQuote,
   MessagesSquare,
   Mic,
   Monitor,
@@ -65,6 +65,13 @@ export const useCases = [
     image: "/img/landing/usecase-interviews.jpg",
   },
   {
+    icon: MessageSquareQuote,
+    title: "Testimonials",
+    description:
+      "Record high-quality testimonials from your users. They join from a link, and every take is captured locally in full quality.",
+    image: "/img/landing/usecase-testimonials.jpg",
+  },
+  {
     icon: Presentation,
     title: "Product demos & tutorials",
     description:
@@ -98,13 +105,6 @@ export const useCases = [
     description:
       "Just need audio? Record clean, uncompressed WAV or MP3 without touching video.",
     image: "/img/landing/usecase-voiceover.jpg",
-  },
-  {
-    icon: GraduationCap,
-    title: "Courses & webinars",
-    description:
-      "Record lessons and cohort calls with the same screen recorder and multi-track setup you'd use for meetings.",
-    image: "/img/landing/usecase-courses.jpg",
   },
 ];
 

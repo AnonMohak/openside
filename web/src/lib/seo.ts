@@ -23,7 +23,7 @@ export const SEO_PAGES: Record<string, SeoMeta> = {
   "/use-cases": {
     title: "Use cases: Podcasts, interviews, demos, and meetings | Openside",
     description:
-      "See how creators and teams use Openside for remote podcasts, video interviews, product demos, client calls, bug reports, team meetings, and courses.",
+      "See how creators and teams use Openside for remote podcasts, video interviews, product demos, client calls, bug reports, team meetings, and testimonials.",
   },
   "/open-source": {
     title: "Open-source recording studio you can self-host | Openside",

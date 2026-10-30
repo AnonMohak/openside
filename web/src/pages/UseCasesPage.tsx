@@ -130,20 +130,20 @@ const useCaseDetails: Record<
       "WAV export",
     ],
   },
-  "Courses & webinars": {
+  Testimonials: {
     challenge:
-      "Lessons mix live discussion with slides and demos, usually across several tools.",
-    body: "Record cohort calls with the same multi-track setup you use for meetings, and use the screen recorder for slides and walkthroughs between sessions.",
+      "A happy customer on a choppy video call gives you a testimonial you can't actually use.",
+    body: "Send your customer a link and they join from their browser, with nothing to install. Openside records them on their own device in full quality, so the clip is sharp enough for your site, ads, or socials.",
     setup: [
-      { label: "Mode", value: "Space + screen recorder" },
-      { label: "Video", value: "1080p" },
-      { label: "Share", value: "A link per lesson" },
+      { label: "Mode", value: "Space recording" },
+      { label: "Video", value: "1080p or 4K" },
+      { label: "Export", value: "MP4" },
     ],
     features: [
-      "Screen sharing",
+      "No-install guest links",
+      "Local recording",
       "Separate tracks",
       "Share links",
-      "Projects",
     ],
   },
 };
