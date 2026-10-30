@@ -19,9 +19,9 @@ import {
 	isActiveParticipant,
 	isHostOrCoHost,
 	markRecordingComplete,
-	updateSpaceRecordingSession,
 	startRecordingSession,
 	stopRecordingSession,
+	updateSpaceRecordingSession,
 } from "../services/recording-service";
 import {
 	type TrackType,

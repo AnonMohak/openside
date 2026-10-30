@@ -10,11 +10,11 @@ import {
 	sendSpaceInviteController,
 	updateSpaceController,
 } from "../controllers/space-controller";
+import { sensitiveLimiter } from "../lib/rate-limit";
 import {
 	authMiddleware,
 	optionalAuthMiddleware,
 } from "../middlewares/auth-middleware";
-import { sensitiveLimiter } from "../lib/rate-limit";
 
 const router = express.Router();
 

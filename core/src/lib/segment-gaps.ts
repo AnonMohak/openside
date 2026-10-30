@@ -18,12 +18,13 @@
  * zero-segment track as FAILED, give that in-flight chunk a short window to
  * actually arrive and re-check straight from the DB.
  */
-export async function waitForLateSegments<
-	T extends { sequenceNumber: number },
->(
+export async function waitForLateSegments<T extends { sequenceNumber: number }>(
 	participantRecordingId: string,
 	fetchSegments: () => Promise<T[]>,
-	{ attempts = 4, delayMs = 1500 }: { attempts?: number; delayMs?: number } = {},
+	{
+		attempts = 4,
+		delayMs = 1500,
+	}: { attempts?: number; delayMs?: number } = {},
 ): Promise<T[]> {
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		if (attempt > 0) {

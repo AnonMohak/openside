@@ -6,11 +6,11 @@ import {
 	stopParticipantTrackController,
 	updateRoleController,
 } from "../controllers/participant-controller";
+import { sensitiveLimiter } from "../lib/rate-limit";
 import {
 	authMiddleware,
 	optionalAuthMiddleware,
 } from "../middlewares/auth-middleware";
-import { sensitiveLimiter } from "../lib/rate-limit";
 
 const router = express.Router();
 
